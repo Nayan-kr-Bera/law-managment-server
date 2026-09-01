@@ -55,13 +55,12 @@ export async function sendReminderEmail(job: ReminderEmailJob): Promise<boolean>
   }
 
   const subject = isHearingReminder
-    ? `[Hearing Reminder] ${caseNo ? `Case ${caseNo}: ` : ""}${
-        daysRemaining === 0
-          ? "TODAY"
-          : daysRemaining === 1
-          ? "Tomorrow"
-          : `${daysRemaining} Days Away`
-      }`
+    ? `[Hearing Reminder] ${caseNo ? `Case ${caseNo}: ` : ""}${daysRemaining === 0
+      ? "TODAY"
+      : daysRemaining === 1
+        ? "Tomorrow"
+        : `${daysRemaining} Days Away`
+    }`
     : `[Reminder] ${caseNo ? `Case ${caseNo}: ` : ""}${reminderText.slice(0, 50)}`;
 
   const daysBadge =
@@ -69,8 +68,8 @@ export async function sendReminderEmail(job: ReminderEmailJob): Promise<boolean>
       ? daysRemaining === 0
         ? '<span style="background:#dc2626; color:#fff; padding:4px 10px; border-radius:12px; font-weight:bold; font-size:12px;">HEARING TODAY</span>'
         : daysRemaining === 1
-        ? '<span style="background:#ea580c; color:#fff; padding:4px 10px; border-radius:12px; font-weight:bold; font-size:12px;">HEARING TOMORROW</span>'
-        : `<span style="background:#2563eb; color:#fff; padding:4px 10px; border-radius:12px; font-weight:bold; font-size:12px;">${daysRemaining} DAYS REMAINING</span>`
+          ? '<span style="background:#ea580c; color:#fff; padding:4px 10px; border-radius:12px; font-weight:bold; font-size:12px;">HEARING TOMORROW</span>'
+          : `<span style="background:#2563eb; color:#fff; padding:4px 10px; border-radius:12px; font-weight:bold; font-size:12px;">${daysRemaining} DAYS REMAINING</span>`
       : "";
 
   const googleCalButtonHtml = googleCalendarUrl
@@ -94,9 +93,8 @@ export async function sendReminderEmail(job: ReminderEmailJob): Promise<boolean>
   <table width="100%" max-width="600px" style="background: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb; margin: 0 auto; padding: 24px;">
     <tr>
       <td style="background: #5b2d8e; color: #fff; padding: 16px 24px; border-radius: 6px 6px 0 0; text-align: center;">
-        <h2 style="margin: 0; font-size: 20px;">Law Practice System — ${
-          isHearingReminder ? "Case Hearing Reminder" : "Reminder Notification"
-        }</h2>
+        <h2 style="margin: 0; font-size: 20px;">Law Practice System — ${isHearingReminder ? "Case Hearing Reminder" : "Reminder Notification"
+    }</h2>
       </td>
     </tr>
     <tr>

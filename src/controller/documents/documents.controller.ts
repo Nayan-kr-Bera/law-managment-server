@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, count, eq, isNull, sql } from "drizzle-orm";
 import { Request, Response, NextFunction } from "express";
 
 import db from "../../db/index.js";
@@ -367,7 +367,7 @@ const caseDocumentController = {
     try {
       const tenantId = req.user?.tenantId;
       const { caseId } = req.params;
-      const { folderId } = req.query;
+      const { folderId, includeAll } = req.query;
 
       if (!tenantId) {
         return next(
@@ -379,21 +379,23 @@ const caseDocumentController = {
         return next(CustomErrorHandler.badRequest("Case ID is required"));
       }
 
-      const docWhereFilters = [
-        eq(caseDocuments.tenantId, tenantId),
-        eq(caseDocuments.caseId, caseId),
-      ];
-
-      // Filter by folderId only if explicitly requested
-      if (folderId) {
-        docWhereFilters.push(eq(caseDocuments.folderId, folderId as string));
-      }
-
-      // GET DOCUMENTS
-      const documents = await db
-        .select()
+      // TOTAL DOCUMENT COUNT FOR THE CASE
+      const totalDocsResult = await db
+        .select({ total: count() })
         .from(caseDocuments)
-        .where(and(...docWhereFilters));
+        .where(
+          and(
+            eq(caseDocuments.tenantId, tenantId),
+            eq(caseDocuments.caseId, caseId),
+          ),
+        );
+
+      const totalDocumentCount = Number(totalDocsResult[0]?.total || 0);
+
+      // FOLDER CONDITION
+      const folderCondition = folderId
+        ? eq(documentFolders.parentId, folderId as string)
+        : isNull(documentFolders.parentId);
 
       // GET FOLDERS
       const folders = await db
@@ -403,14 +405,38 @@ const caseDocumentController = {
           and(
             eq(documentFolders.tenantId, tenantId),
             eq(documentFolders.caseId, caseId),
+            folderCondition,
           ),
         );
+
+      // DOCUMENT CONDITION
+      const documentCondition = includeAll === "true"
+        ? undefined
+        : folderId
+          ? eq(caseDocuments.folderId, folderId as string)
+          : isNull(caseDocuments.folderId);
+
+      const docWhereFilters = [
+        eq(caseDocuments.tenantId, tenantId),
+        eq(caseDocuments.caseId, caseId),
+      ];
+
+      if (documentCondition) {
+        docWhereFilters.push(documentCondition);
+      }
+
+      // GET DOCUMENTS
+      const documents = await db
+        .select()
+        .from(caseDocuments)
+        .where(and(...docWhereFilters));
 
       // RESPONSE
       return res.status(200).send(
         ResponseHandler(200, "Case documents fetched successfully", {
           caseId,
           folderId: folderId || null,
+          totalDocumentCount,
           folders,
           documents,
         }),

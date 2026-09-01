@@ -1,15 +1,14 @@
-import { Request, Response, NextFunction } from "express";
-import { eq, and, asc, desc, isNull, SQL } from "drizzle-orm";
+import { and, eq, SQL } from "drizzle-orm";
+import { NextFunction, Request, Response } from "express";
 import db from "../../db/index.js";
-import supportTickets from "../../db/schema/support/supportTickets.js";
-import supportTicketMessages from "../../db/schema/support/supportTicketMessages.js";
-import cases from "../../db/schema/caseMangment/cases.js";
 import clients from "../../db/schema/clients/clients.js";
+import supportTicketMessages from "../../db/schema/support/supportTicketMessages.js";
+import supportTickets from "../../db/schema/support/supportTickets.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import ResponseHandler from "../../utils/responseHandler.js";
 
 const supportTicketController = {
-  // GET TICKETS FOR CLIENT PORTAL (Office & Client Scope)
+  // GET TICKETS FOR CLIENT PORTAL
   async getClientTickets(req: Request, res: Response, next: NextFunction) {
     try {
       const clientUserId = req.clientUser?.clientUserId;
@@ -19,30 +18,10 @@ const supportTicketController = {
         return next(CustomErrorHandler.unAuthorized("Client user context missing"));
       }
 
-      const { caseId, category, status } = req.query;
-
-      let conditions: SQL[] = [
-        clientId
+      let ticketRecords = await db.query.supportTickets.findMany({
+        where: clientId
           ? eq(supportTickets.clientId, clientId)
           : eq(supportTickets.clientUserId, clientUserId!),
-      ];
-
-      if (status) {
-        conditions.push(eq(supportTickets.status, status as string));
-      }
-      if (category) {
-        conditions.push(eq(supportTickets.category, category as string));
-      }
-      if (caseId) {
-        if (caseId === "general") {
-          conditions.push(isNull(supportTickets.caseId));
-        } else {
-          conditions.push(eq(supportTickets.caseId, caseId as string));
-        }
-      }
-
-      let ticketRecords = await db.query.supportTickets.findMany({
-        where: and(...conditions),
         with: {
           messages: {
             orderBy: (msgs, { asc }) => [asc(msgs.createdAt)],
@@ -52,12 +31,6 @@ const supportTicketController = {
               id: true,
               caseNumber: true,
               title: true,
-            },
-          },
-          office: {
-            columns: {
-              id: true,
-              name: true,
             },
           },
         },
@@ -72,12 +45,8 @@ const supportTicketController = {
         category: t.category,
         priority: t.priority,
         status: t.status,
-        isGeneral: !t.caseId,
         caseId: t.caseId || undefined,
         caseNumber: t.case?.caseNumber || undefined,
-        caseTitle: t.case?.title || undefined,
-        officeId: t.officeId || undefined,
-        officeName: t.office?.name || undefined,
         createdAt: t.createdAt ? new Date(t.createdAt).toLocaleString() : "",
         updatedAt: t.updatedAt ? new Date(t.updatedAt).toLocaleString() : "",
         messages: (t.messages || []).map((m) => ({
@@ -98,7 +67,7 @@ const supportTicketController = {
     }
   },
 
-  // GET TICKETS FOR ADVOCATE PORTAL (Office-based & Case/General Filtering)
+  // GET TICKETS FOR ADVOCATE PORTAL
   async getAdvocateTickets(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -107,13 +76,9 @@ const supportTicketController = {
         return next(CustomErrorHandler.unAuthorized("Tenant ID missing"));
       }
 
-      const { status, category, caseId, officeId } = req.query;
+      const { status, category, caseId } = req.query;
 
       let conditions: SQL[] = [eq(supportTickets.tenantId, tenantId)];
-      
-      if (officeId) {
-        conditions.push(eq(supportTickets.officeId, officeId as string));
-      }
       if (status) {
         conditions.push(eq(supportTickets.status, status as string));
       }
@@ -121,11 +86,7 @@ const supportTicketController = {
         conditions.push(eq(supportTickets.category, category as string));
       }
       if (caseId) {
-        if (caseId === "general") {
-          conditions.push(isNull(supportTickets.caseId));
-        } else {
-          conditions.push(eq(supportTickets.caseId, caseId as string));
-        }
+        conditions.push(eq(supportTickets.caseId, caseId as string));
       }
 
       const ticketRecords = await db.query.supportTickets.findMany({
@@ -150,12 +111,6 @@ const supportTicketController = {
               email: true,
             },
           },
-          office: {
-            columns: {
-              id: true,
-              name: true,
-            },
-          },
         },
         orderBy: (t, { desc }) => [desc(t.updatedAt)],
       });
@@ -167,12 +122,9 @@ const supportTicketController = {
         category: t.category,
         priority: t.priority,
         status: t.status,
-        isGeneral: !t.caseId,
         caseId: t.caseId || undefined,
         caseNumber: t.case?.caseNumber || undefined,
         caseTitle: t.case?.title || undefined,
-        officeId: t.officeId || undefined,
-        officeName: t.office?.name || undefined,
         clientName: t.client
           ? `${t.client.firstName || ""} ${t.client.lastName || ""}`.trim() || t.client.companyName || "Client"
           : "Client User",
@@ -210,7 +162,6 @@ const supportTicketController = {
           },
           case: true,
           client: true,
-          office: true,
         },
       });
 
@@ -221,7 +172,6 @@ const supportTicketController = {
       return res.status(200).json(
         ResponseHandler(200, "Support ticket fetched successfully", {
           ...ticketRecord,
-          isGeneral: !ticketRecord.caseId,
           messages: (ticketRecord.messages || []).map((m) => ({
             id: m.id,
             senderName: m.senderName,
@@ -237,43 +187,28 @@ const supportTicketController = {
     }
   },
 
-  // CREATE TICKET (Client or Advocate) - Office & Case/General Aware
+  // CREATE TICKET (Client or Advocate)
   async createTicket(req: Request, res: Response, next: NextFunction) {
     try {
-      const { subject, category, priority, caseId, message, officeId: bodyOfficeId } = req.body;
+      const { subject, category, priority, caseId, message } = req.body;
 
       if (!subject || !message) {
         return next(CustomErrorHandler.badRequest("Subject and initial message are required"));
       }
 
       let tenantId: string | null = req.user?.tenantId || null;
-      let officeId: string | null = bodyOfficeId || null;
+      let officeId: string | null = null;
       let clientId = req.clientUser?.clientId || null;
       let clientUserId = req.clientUser?.clientUserId || null;
 
-      // Auto-retrieve officeId & tenantId from Client Profile
-      if (clientId) {
+      if (!tenantId && clientId) {
         const clientRecord = await db.query.clients.findFirst({
           where: eq(clients.id, clientId),
           columns: { tenantId: true, officeId: true },
         });
         if (clientRecord) {
-          tenantId = tenantId || clientRecord.tenantId;
-          officeId = officeId || clientRecord.officeId;
-        }
-      }
-
-      // If linked to a case, auto-derive office & tenant if not set
-      let targetCaseId: string | null = null;
-      if (caseId && caseId !== "general") {
-        const caseRecord = await db.query.cases.findFirst({
-          where: eq(cases.id, caseId),
-          columns: { id: true, officeId: true, tenantId: true },
-        });
-        if (caseRecord) {
-          targetCaseId = caseRecord.id;
-          officeId = officeId || caseRecord.officeId;
-          tenantId = tenantId || caseRecord.tenantId;
+          tenantId = clientRecord.tenantId;
+          officeId = clientRecord.officeId;
         }
       }
 
@@ -296,10 +231,10 @@ const supportTicketController = {
           officeId,
           clientId,
           clientUserId,
-          caseId: targetCaseId, // null = General Support, string = Case-Specific Support
+          caseId: caseId || null,
           ticketNumber: generatedTicketNo,
           subject,
-          category: category || (targetCaseId ? "case_inquiry" : "general"),
+          category: category || "general",
           priority: priority || "medium",
           status: "open",
         })

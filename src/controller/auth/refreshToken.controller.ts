@@ -21,7 +21,7 @@ const refreshController = {
       }
 
       const { refresh_token } = parsed.data;
-      
+
       // console.log("refresh_token", refresh_token);
 
       const tokenDoc = await db.query.refreshTokens.findFirst({
@@ -60,11 +60,6 @@ const refreshController = {
         tenantId: scope.tenantId!,
         scopeId: scope.id,
         email: user.email,
-
-        // Reuse existing values from the refresh token
-        roleIds: decoded.roleIds,
-        permissions: decoded.permissions,
-        isSuperAdmin: decoded.isSuperAdmin,
       };
 
       const access_token = JwtService.sign(payload);
