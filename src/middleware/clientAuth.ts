@@ -1,7 +1,8 @@
 import { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import db from "../db/index.js";
-import clientUsers from "../db/schema/clients/clientUsers.js";
+import clients from "../db/schema/clients/clients.js";
+import clientProfiles from "../db/schema/clients/clientProfiles.js";
 import { eq } from "drizzle-orm";
 import JwtService from "../utils/jwtServices.js";
 import { AppError } from "./errorHandler.js";
@@ -20,31 +21,63 @@ const clientAuth = async (
     }
 
     const token = authHeader.split(" ")[1];
-    const decoded = JwtService.verify(token) as unknown as IClientJwtPayload;
+    const decoded = JwtService.verifyClient(token);
 
     if (!decoded || (!decoded.clientUserId && !decoded.clientId)) {
       throw new AppError("Invalid client token payload", 401);
     }
 
-    if (decoded.clientUserId) {
-      const existingClientUser = await db.query.clientUsers.findFirst({
-        where: eq(clientUsers.id, decoded.clientUserId),
-        with: {
-          client: true,
-        },
+    // Reject pre-auth tokens on protected routes
+    if (decoded.requiresProfileSelection) {
+      throw new AppError(
+        "Profile selection required. Please call /auth/select-profile first.",
+        403,
+      );
+    }
+
+    // Verify the client record still exists
+    const targetClientId = decoded.clientId || decoded.clientUserId;
+    if (targetClientId) {
+      const existingClient = await db.query.clients.findFirst({
+        where: eq(clients.id, targetClientId),
       });
 
-      if (!existingClientUser) {
+      if (!existingClient) {
         throw new AppError("Client account not found", 401);
+      }
+    }
+
+    // Verify the selected profile is still active
+    if (decoded.profileId) {
+      const profile = await db.query.clientProfiles.findFirst({
+        where: eq(clientProfiles.id, decoded.profileId),
+      });
+
+      if (!profile) {
+        throw new AppError("Client firm profile not found", 401);
+      }
+
+      if (profile.status !== "active") {
+        throw new AppError(
+          "Your access to this law firm has been deactivated. Please contact the firm.",
+          403,
+        );
+      }
+
+      // Ensure profile belongs to the identity in the token
+      if (profile.identityId !== decoded.clientId) {
+        throw new AppError("Token profile mismatch", 401);
       }
     }
 
     req.clientUser = decoded;
 
-    const tenantHeader = req.headers["x-tenant-id"];
-    const officeHeader = req.headers["x-office-id"];
-    if (typeof tenantHeader === "string") req.tenantId = tenantHeader;
-    if (typeof officeHeader === "string") req.officeId = officeHeader;
+    // Forward tenant/office from token or request headers (sent by client portal)
+    const headerTenantId = req.headers["x-tenant-id"] as string | undefined;
+    const headerOfficeId = req.headers["x-office-id"] as string | undefined;
+
+    req.tenantId = headerTenantId || decoded.tenantId;
+    req.officeId = headerOfficeId || decoded.officeId;
 
     next();
   } catch (err) {

@@ -1,18 +1,29 @@
 import { pgTable, uuid, varchar, text, timestamp } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
-import offices from "../offices.js";
-import tenants from "../tenants.js";
 import users from "../users.js";
 import caseClients from "../caseMangment/caseClients.js";
 import invoices from "../finance/invoices.js";
 import clientLedger from "./clientLedger.js";
+import clientProfiles from "./clientProfiles.js";
+import { clientUserStatusEnum } from "../enum.js";
 
+/**
+ * clients — the GLOBAL identity record for a client.
+ *
+ * This table stores WHO the person is (name, email, phone).
+ * It is NOT scoped to a tenant or office.
+ *
+ * For per-tenant-office membership, see: client_profiles table.
+ *
+ * One client identity can exist across multiple law firms (tenants)
+ * and offices. When a second law firm adds the same email, only a
+ * new client_profiles row is created — this row is reused.
+ */
 const clients = pgTable("clients", {
   id: uuid("id").defaultRandom().primaryKey(),
 
-  tenantId: uuid("tenant_id").references(() => tenants.id),
-
-  officeId: uuid("office_id").references(() => offices.id),
+  // NOTE: tenantId and officeId have been moved to client_profiles.
+  // Each law firm's relationship with this client identity lives there.
 
   companyName: varchar("company_name", { length: 255 }),
 
@@ -20,7 +31,7 @@ const clients = pgTable("clients", {
 
   lastName: varchar("last_name", { length: 255 }),
 
-  email: varchar("email", { length: 255 }),
+  email: varchar("email", { length: 255 }).unique(),
 
   phone: varchar("phone", { length: 20 }),
 
@@ -34,6 +45,14 @@ const clients = pgTable("clients", {
 
   notes: text("notes"),
 
+  passwordHash: varchar("password_hash", { length: 255 }),
+
+  status: clientUserStatusEnum("status")
+    .notNull()
+    .default("active"),
+
+  lastLoginAt: timestamp("last_login_at"),
+
   createdBy: uuid("created_by"),
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -42,20 +61,14 @@ const clients = pgTable("clients", {
 export default clients;
 
 export const clientRelation = relations(clients, ({ one, many }) => ({
-  tenant: one(tenants, {
-    fields: [clients.tenantId],
-    references: [tenants.id],
-  }),
-
-  office: one(offices, {
-    fields: [clients.officeId],
-    references: [offices.id],
-  }),
-
   creator: one(users, {
     fields: [clients.createdBy],
     references: [users.id],
   }),
+
+  /** All per-tenant-office profiles for this identity */
+  profiles: many(clientProfiles),
+
   cases: many(caseClients),
   invoices: many(invoices),
   ledgerEntries: many(clientLedger),

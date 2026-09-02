@@ -17,7 +17,7 @@ export { userPermissionRelations } from "./rolePermission/userPermission.js";
 
 // Clients
 export { clientRelation } from "./clients/clients.js";
-export { clientUserRelation } from "./clients/clientUsers.js";
+export { clientProfileRelation } from "./clients/clientProfiles.js";
 export { clientConsentRelation } from "./clients/clientConsents.js";
 export { clientLedgerRelation } from "./clients/clientLedger.js";
 // Advocates

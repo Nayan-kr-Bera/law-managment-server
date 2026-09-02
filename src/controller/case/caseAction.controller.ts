@@ -1,6 +1,6 @@
+import { and, eq, inArray, or } from "drizzle-orm";
 import { NextFunction, Request, Response } from "express";
-import ResponseHandler from "../../utils/responseHandler.js";
-import CustomErrorHandler from "../../utils/customErrorHandler.js";
+import db from "../../db/index.js";
 import {
   caseClients,
   caseDecisions,
@@ -9,13 +9,13 @@ import {
   caseStatusHistory,
   caseTags,
   caseTimelines,
-  clients,
+  clientProfiles,
   companies,
   empanelments,
-  tags,
+  tags
 } from "../../db/schema/index.js";
-import db from "../../db/index.js";
-import { and, eq, inArray, or } from "drizzle-orm";
+import CustomErrorHandler from "../../utils/customErrorHandler.js";
+import ResponseHandler from "../../utils/responseHandler.js";
 const DISPOSAL_NATURES = [
   "judgment",
   "dismissed",
@@ -30,8 +30,20 @@ const caseActionController = {
     try {
       const { caseId, linkedCaseId, notes } = req.body;
 
-      const tenantId = req.user.tenantId;
-      const userId = req.user.userId;
+      const tenantId = req.user?.tenantId;
+      const userId = req.user?.userId;
+
+      if (!tenantId) {
+        return next(
+          CustomErrorHandler.badRequest("Tenant ID is required"),
+        );
+      }
+
+      if (!userId) {
+        return next(
+          CustomErrorHandler.badRequest("User ID is required"),
+        );
+      }
 
       if (!caseId || !linkedCaseId) {
         return next(
@@ -105,7 +117,12 @@ const caseActionController = {
       const { id } = req.params;
       const { notes } = req.body;
 
-      const tenantId = req.user.tenantId;
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return next(
+          CustomErrorHandler.badRequest("Tenant ID is required"),
+        );
+      }
 
       if (!id) {
         return next(CustomErrorHandler.badRequest("case link id is required"));
@@ -141,16 +158,25 @@ const caseActionController = {
     try {
       const { caseId } = req.params;
 
-      const tenantId = req.user.tenantId;
+      const tenantId = req.user?.tenantId;
       const officeId = req.officeId;
+
+      if (!tenantId) {
+        return next(
+          CustomErrorHandler.badRequest("Tenant ID is required"),
+        );
+      }
+
+      if (!officeId) {
+        return next(
+          CustomErrorHandler.badRequest("Office ID is required"),
+        );
+      }
 
       if (!caseId) {
         return next(CustomErrorHandler.badRequest("Case id is required"));
       }
 
-      if (!officeId) {
-        return next(CustomErrorHandler.badRequest("Office id is required"));
-      }
 
       // Check current case belongs to tenant + office
       const currentCase = await db.query.cases.findFirst({
@@ -255,7 +281,12 @@ const caseActionController = {
   async removeCaseLink(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
-      const tenantId = req.user.tenantId;
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return next(
+          CustomErrorHandler.badRequest("Tenant ID is required"),
+        );
+      }
 
       if (!id) {
         return next(CustomErrorHandler.badRequest("case link id is required"));
@@ -292,8 +323,20 @@ const caseActionController = {
         judgmentSummary,
       } = req.body;
 
-      const tenantId = req.user.tenantId;
-      const userId = req.user.userId;
+      const tenantId = req.user?.tenantId;
+      const userId = req.user?.userId;
+
+      if (!tenantId) {
+        return next(
+          CustomErrorHandler.badRequest("Tenant ID is required"),
+        );
+      }
+
+      if (!userId) {
+        return next(
+          CustomErrorHandler.badRequest("User ID is required"),
+        );
+      }
 
       if (!Array.isArray(caseIds) || caseIds.length === 0) {
         return next(
@@ -446,8 +489,20 @@ const caseActionController = {
       const { caseId } = req.params;
       const { companyId } = req.body;
 
-      const tenantId = req.user.tenantId;
-      const userId = req.user.userId;
+      const tenantId = req.user?.tenantId;
+      const userId = req.user?.userId;
+
+      if (!tenantId) {
+        return next(
+          CustomErrorHandler.badRequest("Tenant ID is required"),
+        );
+      }
+
+      if (!userId) {
+        return next(
+          CustomErrorHandler.badRequest("User ID is required"),
+        );
+      }
 
       if (!caseId) {
         return next(CustomErrorHandler.badRequest("Case id is required"));
@@ -534,9 +589,20 @@ const caseActionController = {
     try {
       const { caseId } = req.params;
 
-      const tenantId = req.user.tenantId;
-      const userId = req.user.userId;
+      const tenantId = req.user?.tenantId;
+      const userId = req.user?.userId;
 
+      if (!tenantId) {
+        return next(
+          CustomErrorHandler.badRequest("Tenant ID is required"),
+        );
+      }
+
+      if (!userId) {
+        return next(
+          CustomErrorHandler.badRequest("User ID is required"),
+        );
+      }
       if (!caseId) {
         return next(CustomErrorHandler.badRequest("Case id is required"));
       }
@@ -581,9 +647,20 @@ const caseActionController = {
       const { caseId } = req.params;
       const { empanelmentId } = req.body;
 
-      const tenantId = req.user.tenantId;
-      const userId = req.user.userId;
+      const tenantId = req.user?.tenantId;
+      const userId = req.user?.userId;
 
+      if (!tenantId) {
+        return next(
+          CustomErrorHandler.badRequest("Tenant ID is required"),
+        );
+      }
+
+      if (!userId) {
+        return next(
+          CustomErrorHandler.badRequest("User ID is required"),
+        );
+      }
       if (!caseId) {
         return next(CustomErrorHandler.badRequest("Case id is required"));
       }
@@ -671,8 +748,20 @@ const caseActionController = {
     try {
       const { caseId } = req.params;
 
-      const tenantId = req.user.tenantId;
-      const userId = req.user.userId;
+      const tenantId = req.user?.tenantId;
+      const userId = req.user?.userId;
+
+      if (!tenantId) {
+        return next(
+          CustomErrorHandler.badRequest("Tenant ID is required"),
+        );
+      }
+
+      if (!userId) {
+        return next(
+          CustomErrorHandler.badRequest("User ID is required"),
+        );
+      }
 
       if (!caseId) {
         return next(CustomErrorHandler.badRequest("Case id is required"));
@@ -722,8 +811,13 @@ const caseActionController = {
       const { caseId } = req.params;
       const { tagId } = req.body;
 
-      const tenantId = req.user.tenantId;
+      const tenantId = req.user?.tenantId;
 
+      if (!tenantId) {
+        return next(
+          CustomErrorHandler.badRequest("Tenant ID is required"),
+        );
+      }
       if (!caseId || !tagId) {
         return next(
           CustomErrorHandler.badRequest("caseId and tagId are required"),
@@ -776,8 +870,13 @@ const caseActionController = {
   async removeCaseTag(req: Request, res: Response, next: NextFunction) {
     try {
       const { caseId, tagId } = req.params;
-      const tenantId = req.user.tenantId;
+      const tenantId = req.user?.tenantId;
 
+      if (!tenantId) {
+        return next(
+          CustomErrorHandler.badRequest("Tenant ID is required"),
+        );
+      }
       if (!caseId || !tagId) {
         return next(
           CustomErrorHandler.badRequest("caseId and tagId are required"),
@@ -822,7 +921,12 @@ const caseActionController = {
       const { caseId } = req.params;
       const { clientId, role } = req.body;
 
-      const tenantId = req.user.tenantId;
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return next(
+          CustomErrorHandler.badRequest("Tenant ID is required"),
+        );
+      }
 
       if (!caseId || !clientId) {
         return next(
@@ -838,11 +942,12 @@ const caseActionController = {
         return next(CustomErrorHandler.notFound("Case not found"));
       }
 
-      const client = await db.query.clients.findFirst({
-        where: and(eq(clients.id, clientId), eq(clients.tenantId, tenantId)),
+      // Verify client identity exists and belongs to this tenant
+      const clientProfile = await db.query.clientProfiles.findFirst({
+        where: and(eq(clientProfiles.identityId, clientId), eq(clientProfiles.tenantId, tenantId)),
       });
 
-      if (!client) {
+      if (!clientProfile) {
         return next(CustomErrorHandler.notFound("Client not found"));
       }
 
@@ -884,8 +989,12 @@ const caseActionController = {
     try {
       const { caseId, clientId } = req.params;
 
-      const tenantId = req.user.tenantId;
-
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return next(
+          CustomErrorHandler.badRequest("Tenant ID is required"),
+        );
+      }
       if (!caseId || !clientId) {
         return next(
           CustomErrorHandler.badRequest("caseId and clientId are required"),
@@ -934,8 +1043,20 @@ const caseActionController = {
     try {
       const { id } = req.params;
 
-      const tenantId = req.user.tenantId;
-      const userId = req.user.userId;
+      const tenantId = req.user?.tenantId;
+      const userId = req.user?.userId;
+
+      if (!tenantId) {
+        return next(
+          CustomErrorHandler.badRequest("Tenant ID is required"),
+        );
+      }
+
+      if (!userId) {
+        return next(
+          CustomErrorHandler.badRequest("User ID is required"),
+        );
+      }
 
       if (!id) {
         return next(CustomErrorHandler.badRequest("Case id is required"));

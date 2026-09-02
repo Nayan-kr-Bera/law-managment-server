@@ -20,24 +20,28 @@ const subscriptionLimitMiddleware = {
   async checkUserLimit(req: Request, res: Response, next: NextFunction) {
     try {
       if (req.user?.isSuperAdmin) {
+        console.log("[checkUserLimit] Super admin bypass granted");
         return next();
       }
 
       const tenantId = req.user?.tenantId;
 
       if (!tenantId) {
+        console.warn("[checkUserLimit] Tenant ID is missing");
         return next(
           CustomErrorHandler.badRequest("Tenant information is missing"),
         );
       }
 
       if (!req.subscription) {
+        console.warn("[checkUserLimit] 403 Forbidden: req.subscription is missing");
         return next(
           CustomErrorHandler.forbidden("Active subscription required"),
         );
       }
 
       if (req.subscription.planCode === "internal") {
+        console.log("[checkUserLimit] Internal plan: user limit skipped");
         return next();
       }
 
@@ -51,7 +55,17 @@ const subscriptionLimitMiddleware = {
 
       const currentUsers = Number(result[0]?.count ?? 0);
 
+      console.log("[checkUserLimit] User limit check:", {
+        currentUsers,
+        maxUsers: req.subscription.maxUsers,
+        planName: req.subscription.planName,
+      });
+
       if (currentUsers >= req.subscription.maxUsers) {
+        console.warn("[checkUserLimit] 403 Forbidden: User limit reached!", {
+          currentUsers,
+          maxAllowed: req.subscription.maxUsers,
+        });
         return next(
           CustomErrorHandler.forbidden(
             `User limit reached. Your ${req.subscription.planName} plan allows maximum ${req.subscription.maxUsers} users.`,
@@ -59,6 +73,7 @@ const subscriptionLimitMiddleware = {
         );
       }
 
+      console.log("[checkUserLimit] User limit check passed");
       return next();
     } catch (error) {
       console.error("User subscription limit error:", error);

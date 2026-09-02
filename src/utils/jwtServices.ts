@@ -1,5 +1,5 @@
 import jwt, { SignOptions } from "jsonwebtoken";
-import type { IUserJwtPayload } from "../@types/payload.types.js";
+import type { IUserJwtPayload, IClientJwtPayload } from "../@types/payload.types.js";
 import { config } from "../config/index.js";
 
 class JwtService {
@@ -12,11 +12,25 @@ class JwtService {
     return jwt.sign(payload, secret, options);
   }
 
-  static verify(
+  static verify<T = IUserJwtPayload>(
+    token: string,
+    secret: string = config.ACCESS_SECRET ?? "",
+  ): T {
+    return jwt.verify(token, secret) as T;
+  }
+
+  static verifyUser(
     token: string,
     secret: string = config.ACCESS_SECRET ?? "",
   ): IUserJwtPayload {
     return jwt.verify(token, secret) as IUserJwtPayload;
+  }
+
+  static verifyClient(
+    token: string,
+    secret: string = config.ACCESS_SECRET ?? "",
+  ): IClientJwtPayload {
+    return jwt.verify(token, secret) as IClientJwtPayload;
   }
 }
 

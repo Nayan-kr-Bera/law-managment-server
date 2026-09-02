@@ -197,19 +197,14 @@ const supportTicketController = {
       }
 
       let tenantId: string | null = req.user?.tenantId || null;
-      let officeId: string | null = null;
+      let officeId: string | null = req.officeId || null;
       let clientId = req.clientUser?.clientId || null;
       let clientUserId = req.clientUser?.clientUserId || null;
 
-      if (!tenantId && clientId) {
-        const clientRecord = await db.query.clients.findFirst({
-          where: eq(clients.id, clientId),
-          columns: { tenantId: true, officeId: true },
-        });
-        if (clientRecord) {
-          tenantId = clientRecord.tenantId;
-          officeId = clientRecord.officeId;
-        }
+      // If request is from client portal, get tenantId/officeId from their JWT profile
+      if (!tenantId && req.clientUser?.tenantId) {
+        tenantId = req.clientUser.tenantId;
+        officeId = req.clientUser.officeId ?? null;
       }
 
       let senderName = "Client User";

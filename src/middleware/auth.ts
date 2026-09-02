@@ -1,8 +1,16 @@
 import { NextFunction, Request, Response } from "express";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import jwt from "jsonwebtoken";
 import db from "../db/index.js";
 import users from "../db/schema/users.js";
+import {
+  userScopes,
+  userRoles,
+  roles,
+  rolePermissions,
+  userPermissions,
+  permissions,
+} from "../db/schema/index.js";
 
 import JwtService from "../utils/jwtServices.js";
 import { AppError } from "./errorHandler.js";
@@ -36,6 +44,68 @@ const auth = async (
     // Check email verification
     if (!existingUser.isEmailVerified) {
       throw new AppError("Email not verified", 403);
+    }
+
+    // If token payload is missing permissions or isSuperAdmin, load them from DB
+    if (!decoded.permissions || decoded.isSuperAdmin === undefined) {
+      const scope = decoded.scopeId
+        ? await db.query.userScopes.findFirst({
+            where: eq(userScopes.id, decoded.scopeId),
+          })
+        : await db.query.userScopes.findFirst({
+            where: eq(userScopes.userId, decoded.userId),
+          });
+
+      if (scope) {
+        const userRoleData = await db
+          .select({
+            roleId: userRoles.roleId,
+            slug: roles.slug,
+          })
+          .from(userRoles)
+          .innerJoin(roles, eq(userRoles.roleId, roles.id))
+          .where(eq(userRoles.scopeId, scope.id));
+
+        const roleIds = userRoleData.map((r) => r.roleId);
+        const isSuperAdmin = userRoleData.some((r) => r.slug === "super_admin");
+
+        const rolePermissionData =
+          roleIds.length > 0
+            ? await db
+                .select({
+                  code: permissions.code,
+                })
+                .from(rolePermissions)
+                .innerJoin(
+                  permissions,
+                  eq(rolePermissions.permissionId, permissions.id),
+                )
+                .where(inArray(rolePermissions.roleId, roleIds))
+            : [];
+
+        const userPermissionData = await db
+          .select({
+            code: permissions.code,
+          })
+          .from(userPermissions)
+          .innerJoin(
+            permissions,
+            eq(userPermissions.permissionId, permissions.id),
+          )
+          .where(eq(userPermissions.scopeId, scope.id));
+
+        const permissionCodes = [
+          ...new Set([
+            ...rolePermissionData.map((p) => p.code),
+            ...userPermissionData.map((p) => p.code),
+          ]),
+        ];
+
+        decoded.permissions = permissionCodes;
+        decoded.isSuperAdmin = isSuperAdmin;
+        decoded.tenantId = decoded.tenantId || scope.tenantId!;
+        decoded.scopeId = decoded.scopeId || scope.id;
+      }
     }
 
     req.user = decoded;

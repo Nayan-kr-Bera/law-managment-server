@@ -9,7 +9,6 @@ import { relations } from "drizzle-orm";
 import tenants from "../tenants.js";
 import offices from "../offices.js";
 import clients from "../clients/clients.js";
-import clientUsers from "../clients/clientUsers.js";
 import cases from "../caseMangment/cases.js";
 import supportTicketMessages from "./supportTicketMessages.js";
 
@@ -22,7 +21,7 @@ const supportTickets = pgTable("support_tickets", {
 
   clientId: uuid("client_id").references(() => clients.id),
 
-  clientUserId: uuid("client_user_id").references(() => clientUsers.id),
+  clientUserId: uuid("client_user_id").references(() => clients.id),
 
   caseId: uuid("case_id").references(() => cases.id),
 
@@ -61,9 +60,9 @@ export const supportTicketRelations = relations(
       references: [clients.id],
     }),
 
-    clientUser: one(clientUsers, {
+    clientUser: one(clients, {
       fields: [supportTickets.clientUserId],
-      references: [clientUsers.id],
+      references: [clients.id],
     }),
 
     case: one(cases, {

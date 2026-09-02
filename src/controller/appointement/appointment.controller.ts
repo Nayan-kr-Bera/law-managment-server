@@ -21,7 +21,7 @@ type AppointmentMode = (typeof VALID_APPOINTMENT_MODES)[number];
 const appointmentController = {
   async createAppointment(req: Request, res: Response, next: NextFunction) {
     try {
-      const tenantId = req.user.tenantId;
+      const tenantId = req.user?.tenantId;
 
       if (!tenantId) {
         return next(
@@ -81,7 +81,7 @@ const appointmentController = {
 
       if (clientId) {
         clientData = await db.query.clients.findFirst({
-          where: and(eq(clients.id, clientId), eq(clients.tenantId, tenantId)),
+          where: eq(clients.id, clientId),
           columns: {
             id: true,
             firstName: true,
@@ -210,7 +210,7 @@ const appointmentController = {
   },
   async getAppointments(req: Request, res: Response, next: NextFunction) {
     try {
-      const tenantId = req.user.tenantId;
+      const tenantId = req.user?.tenantId;
 
       if (!tenantId) {
         return next(
@@ -353,7 +353,7 @@ const appointmentController = {
   },
   async getAppointmentById(req: Request, res: Response, next: NextFunction) {
     try {
-      const tenantId = req.user.tenantId;
+      const tenantId = req.user?.tenantId;
 
       const { id } = req.params;
 
@@ -391,7 +391,7 @@ const appointmentController = {
   },
   async updateAppointment(req: Request, res: Response, next: NextFunction) {
     try {
-      const tenantId = req.user.tenantId;
+      const tenantId = req.user?.tenantId;
       const { id } = req.params;
 
       if (!tenantId) {
@@ -454,10 +454,7 @@ const appointmentController = {
 
       if (finalClientId) {
         clientData = await db.query.clients.findFirst({
-          where: and(
-            eq(clients.id, finalClientId),
-            eq(clients.tenantId, tenantId),
-          ),
+          where: eq(clients.id, finalClientId),
           columns: {
             id: true,
             firstName: true,
@@ -602,9 +599,8 @@ const appointmentController = {
             ? location?.trim() || null
             : existingAppointment.location;
 
-        const clientName = `${clientData.firstName ?? ""} ${
-          clientData.lastName ?? ""
-        }`.trim();
+        const clientName = `${clientData.firstName ?? ""} ${clientData.lastName ?? ""
+          }`.trim();
 
         await appointmentEmailService({
           clientName,
@@ -636,7 +632,7 @@ const appointmentController = {
   },
   async deleteAppointment(req: Request, res: Response, next: NextFunction) {
     try {
-      const tenantId = req.user.tenantId;
+      const tenantId = req.user?.tenantId;
 
       const { id } = req.params;
 
@@ -674,7 +670,7 @@ const appointmentController = {
     next: NextFunction,
   ) {
     try {
-      const tenantId = req.user.tenantId;
+      const tenantId = req.user?.tenantId;
       const { id } = req.params;
       const { status } = req.body;
 
@@ -726,10 +722,7 @@ const appointmentController = {
       // Send cancellation email to client
       if (status === "cancelled" && existingAppointment.clientId) {
         const client = await db.query.clients.findFirst({
-          where: and(
-            eq(clients.id, existingAppointment.clientId),
-            eq(clients.tenantId, tenantId),
-          ),
+          where: eq(clients.id, existingAppointment.clientId),
           columns: {
             firstName: true,
             lastName: true,
@@ -739,9 +732,8 @@ const appointmentController = {
 
         if (client?.email) {
           await appointmentCancellationEmailService({
-            clientName: `${client.firstName ?? ""} ${
-              client.lastName ?? ""
-            }`.trim(),
+            clientName: `${client.firstName ?? ""} ${client.lastName ?? ""
+              }`.trim(),
 
             clientEmail: client.email,
 

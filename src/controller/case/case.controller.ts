@@ -232,42 +232,40 @@ const caseController = {
         return next(CustomErrorHandler.notFound("Case record not found"));
       }
 
-      const rawCase = caseRecord as any;
-
-      const getClientName = (client: any) => {
+      const getClientName = (client?: { firstName?: string | null; lastName?: string | null; companyName?: string | null } | null) => {
         if (!client) return "";
         const name = `${client.firstName ?? ""} ${client.lastName ?? ""}`.trim();
         return name || client.companyName || "";
       };
 
       const formattedCase = {
-        ...rawCase,
-        caseNo: rawCase.caseNumber || rawCase.id,
-        cnrNo: rawCase.cnrNumber || undefined,
-        referenceNo: rawCase.referenceNumber || undefined,
-        fileNo: rawCase.fileNumber || undefined,
-        firNo: rawCase.firNumber || undefined,
-        court: rawCase.court?.name || undefined,
-        courtNo: rawCase.courtNumber || undefined,
-        judge: rawCase.judgeName || undefined,
-        type: rawCase.caseType?.name || undefined,
-        policeStation: rawCase.policeStation?.name || undefined,
-        underSection: rawCase.underSection
-          ? `${rawCase.underSection.actName || ""} ${rawCase.underSection.section || ""}`.trim()
+        ...caseRecord,
+        caseNo: caseRecord.caseNumber || caseRecord.id,
+        cnrNo: caseRecord.cnrNumber || undefined,
+        referenceNo: caseRecord.referenceNumber || undefined,
+        fileNo: caseRecord.fileNumber || undefined,
+        firNo: caseRecord.firNumber || undefined,
+        court: caseRecord.court?.name || undefined,
+        courtNo: caseRecord.courtNumber || undefined,
+        judge: caseRecord.judgeName || undefined,
+        type: caseRecord.caseType?.name || undefined,
+        policeStation: caseRecord.policeStation?.name || undefined,
+        underSection: caseRecord.underSection
+          ? `${caseRecord.underSection.actName || ""} ${caseRecord.underSection.section || ""}`.trim()
           : undefined,
-        company: rawCase.company?.name || undefined,
-        empanelment: rawCase.empanelment?.name || undefined,
+        company: caseRecord.company?.name || undefined,
+        empanelment: caseRecord.empanelment?.name || undefined,
         clients:
-          rawCase.clients
-            ?.map((cc: any) => getClientName(cc.client))
+          caseRecord.clients
+            ?.map((cc) => getClientName(cc.client))
             .filter(Boolean) || [],
         advocates:
-          rawCase.advocates
-            ?.map((ca: any) => ca.advocate?.user?.name)
+          caseRecord.advocates
+            ?.map((ca) => ca.advocate?.user?.name)
             .filter(Boolean) || [],
         clientDetails:
-          rawCase.clients
-            ?.map((cc: any) => ({
+          caseRecord.clients
+            ?.map((cc) => ({
               clientId: cc.clientId,
               role: cc.role,
               name: getClientName(cc.client),
@@ -277,16 +275,16 @@ const caseController = {
               email: cc.client?.email,
               phone: cc.client?.phone,
             }))
-            .filter((c: any) => Boolean(c.clientId)) || [],
+            .filter((c) => Boolean(c.clientId)) || [],
         advocateDetails:
-          rawCase.advocates
-            ?.map((ca: any) => ({
+          caseRecord.advocates
+            ?.map((ca) => ({
               advocateId: ca.advocateId,
               isPrimary: ca.isPrimary,
               name: ca.advocate?.user?.name,
               email: ca.advocate?.user?.email,
             }))
-            .filter((a: any) => Boolean(a.advocateId)) || [],
+            .filter((a) => Boolean(a.advocateId)) || [],
       };
 
       return res.status(200).json({
@@ -876,9 +874,9 @@ const caseController = {
 
       const searchCondition = searchString
         ? or(
-            ilike(cases.caseNumber, `%${searchString}%`),
-            ilike(cases.title, `%${searchString}%`),
-          )
+          ilike(cases.caseNumber, `%${searchString}%`),
+          ilike(cases.title, `%${searchString}%`),
+        )
         : undefined;
 
       // 3. Define shared WHERE clause

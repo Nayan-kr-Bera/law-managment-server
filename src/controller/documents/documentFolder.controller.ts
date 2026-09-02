@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { Request, Response, NextFunction } from "express";
 
 import db from "../../db/index.js";
@@ -168,7 +168,7 @@ const documentFolderController = {
 
       if (parentId === "root") {
         conditions.push(
-          eq(documentFolders.parentId, null as any),
+          isNull(documentFolders.parentId),
         );
       } else if (parentId) {
         conditions.push(

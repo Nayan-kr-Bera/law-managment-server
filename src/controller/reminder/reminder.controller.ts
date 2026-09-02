@@ -71,13 +71,23 @@ const reminderController = {
    */
   async createReminder(req: Request, res: Response, next: NextFunction) {
     try {
-      const tenantId = req.user.tenantId;
+
       const officeId = req.officeId;
-      const userId = req.user.userId;
+      const tenantId = req.user?.tenantId;
+      const userId = req.user?.userId;
 
       if (!tenantId) {
-        return next(CustomErrorHandler.badRequest("Tenant context is missing"));
+        return next(
+          CustomErrorHandler.badRequest("Tenant ID is required"),
+        );
       }
+
+      if (!userId) {
+        return next(
+          CustomErrorHandler.badRequest("User ID is required"),
+        );
+      }
+
 
       if (!officeId) {
         return next(CustomErrorHandler.badRequest("Office context is missing"));
@@ -112,12 +122,7 @@ const reminderController = {
         const [clientData] = await db
           .select({ email: clients.email })
           .from(clients)
-          .where(
-            and(
-              eq(clients.id, finalClientId),
-              eq(clients.tenantId, tenantId),
-            ),
-          )
+          .where(eq(clients.id, finalClientId))
           .limit(1);
 
         if (clientData?.email) {
@@ -151,12 +156,7 @@ const reminderController = {
             })
             .from(caseClients)
             .innerJoin(clients, eq(caseClients.clientId, clients.id))
-            .where(
-              and(
-                eq(caseClients.caseId, caseId),
-                eq(clients.tenantId, tenantId),
-              ),
-            )
+            .where(eq(caseClients.caseId, caseId))
             .limit(1);
 
           if (caseClientData) {
@@ -208,7 +208,7 @@ const reminderController = {
    */
   async getReminders(req: Request, res: Response, next: NextFunction) {
     try {
-      const tenantId = req.user.tenantId;
+      const tenantId = req.user?.tenantId;
       const officeId = req.officeId;
 
       if (!tenantId) {
@@ -275,10 +275,7 @@ const reminderController = {
         .from(customReminders)
         .leftJoin(
           clients,
-          and(
-            eq(customReminders.clientId, clients.id),
-            eq(clients.tenantId, tenantId),
-          ),
+          eq(customReminders.clientId, clients.id),
         )
         .leftJoin(
           cases,
@@ -341,7 +338,7 @@ const reminderController = {
   async updateReminder(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
-      const tenantId = req.user.tenantId;
+      const tenantId = req.user?.tenantId;
       const officeId = req.officeId;
 
       if (!tenantId || !officeId) {
@@ -384,12 +381,7 @@ const reminderController = {
         const [clientData] = await db
           .select({ email: clients.email })
           .from(clients)
-          .where(
-            and(
-              eq(clients.id, clientId),
-              eq(clients.tenantId, tenantId),
-            ),
-          )
+          .where(eq(clients.id, clientId))
           .limit(1);
 
         if (clientData?.email) {
@@ -463,7 +455,7 @@ const reminderController = {
   async deleteReminder(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
-      const tenantId = req.user.tenantId;
+      const tenantId = req.user?.tenantId;
       const officeId = req.officeId;
 
       if (!tenantId || !officeId) {

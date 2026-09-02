@@ -1,5 +1,5 @@
 import bcrypt from "bcrypt";
-import { and, desc, eq, ilike, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNotNull, or, sql, SQL } from "drizzle-orm";
 import { NextFunction, Request, Response } from "express";
 import db from "../../db/index.js";
 import {
@@ -7,8 +7,8 @@ import {
   cases,
   caseTypes,
   clientLedger,
+  clientProfiles,
   clients,
-  clientUsers,
   invoices,
   payments,
 } from "../../db/schema/index.js";
@@ -18,16 +18,20 @@ import clientEmailService from "../../services/clientEmail.service.js";
 const clientController = {
   async getClients(req: Request, res: Response, next: NextFunction) {
     try {
-      const { tenantId } = req.user;
-
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return next(CustomErrorHandler.unAuthorized());
+      }
       const page = Number(req.query.page ?? 1);
       const limit = Number(req.query.limit ?? 10);
       const search = String(req.query.search ?? "").trim();
 
-      const filters = [eq(clients.tenantId, tenantId)];
+      // Scope to this tenant's profiles — join identity through client_profiles
+      const profileFilters = [eq(clientProfiles.tenantId, tenantId)];
+      const identityFilters: SQL[] = [];
 
       if (search) {
-        filters.push(
+        identityFilters.push(
           or(
             ilike(clients.firstName, `%${search}%`),
             ilike(clients.lastName, `%${search}%`),
@@ -38,19 +42,24 @@ const clientController = {
         );
       }
 
+      const allFilters = identityFilters.length > 0
+        ? and(...profileFilters, ...identityFilters)
+        : and(...profileFilters);
+
       const [{ total }] = await db
-        .select({
-          total: sql<number>`count(*)`,
-        })
-        .from(clients)
-        .where(and(...filters));
+        .select({ total: sql<number>`count(distinct ${clients.id})` })
+        .from(clientProfiles)
+        .innerJoin(clients, eq(clientProfiles.identityId, clients.id))
+        .where(allFilters);
 
       const data = await db
         .select({
           id: clients.id,
-          tenantId: clients.tenantId,
-          officeId: clients.officeId,
-          companyName: clients.companyName,
+          profileId: clientProfiles.id,
+          tenantId: clientProfiles.tenantId,
+          officeId: clientProfiles.officeId,
+          // Firm-specific company name overrides identity's global one
+          companyName: sql<string>`COALESCE(${clientProfiles.companyName}, ${clients.companyName})`,
           firstName: clients.firstName,
           lastName: clients.lastName,
           email: clients.email,
@@ -59,16 +68,17 @@ const clientController = {
           city: clients.city,
           state: clients.state,
           country: clients.country,
-          notes: clients.notes,
+          notes: sql<string>`COALESCE(${clientProfiles.notes}, ${clients.notes})`,
+          profileStatus: clientProfiles.status,
           createdBy: clients.createdBy,
           createdAt: clients.createdAt,
-
-          caseCount: sql<number>`count(${caseClients.caseId})`,
+          caseCount: sql<number>`count(distinct ${caseClients.caseId})`,
         })
-        .from(clients)
+        .from(clientProfiles)
+        .innerJoin(clients, eq(clientProfiles.identityId, clients.id))
         .leftJoin(caseClients, eq(caseClients.clientId, clients.id))
-        .where(and(...filters))
-        .groupBy(clients.id)
+        .where(allFilters)
+        .groupBy(clients.id, clientProfiles.id)
         .orderBy(desc(clients.createdAt))
         .limit(limit)
         .offset((page - 1) * limit);
@@ -94,14 +104,37 @@ const clientController = {
   async getClient(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
-      const { tenantId } = req.user;
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return next(CustomErrorHandler.unAuthorized());
+      }
+      // Find client identity that has a profile in this tenant
+      const result = await db
+        .select({
+          id: clients.id,
+          profileId: clientProfiles.id,
+          tenantId: clientProfiles.tenantId,
+          officeId: clientProfiles.officeId,
+          companyName: sql<string>`COALESCE(${clientProfiles.companyName}, ${clients.companyName})`,
+          firstName: clients.firstName,
+          lastName: clients.lastName,
+          email: clients.email,
+          phone: clients.phone,
+          address: clients.address,
+          city: clients.city,
+          state: clients.state,
+          country: clients.country,
+          notes: sql<string>`COALESCE(${clientProfiles.notes}, ${clients.notes})`,
+          profileStatus: clientProfiles.status,
+          createdBy: clients.createdBy,
+          createdAt: clients.createdAt,
+        })
+        .from(clientProfiles)
+        .innerJoin(clients, eq(clientProfiles.identityId, clients.id))
+        .where(and(eq(clients.id, id), eq(clientProfiles.tenantId, tenantId)))
+        .limit(1);
 
-      const client = await db.query.clients.findFirst({
-        where: (table, { and, eq }) =>
-          and(eq(table.id, id), eq(table.tenantId, tenantId)),
-      });
-
-      if (!client) {
+      if (!result[0]) {
         return res.status(404).json({
           success: false,
           message: "Client not found",
@@ -110,7 +143,7 @@ const clientController = {
 
       return res.status(200).json({
         success: true,
-        data: client,
+        data: result[0],
       });
     } catch (error) {
       next(error);
@@ -133,73 +166,108 @@ const clientController = {
         password,
       } = req.body;
 
-      const { userId, tenantId } = req.user;
-      const exitingclient = await db.query.clients.findFirst({
-        where: and(eq(clients.tenantId, tenantId), eq(clients.email, email)),
-      });
-      if (exitingclient) {
-        return res.status(400).json({
-          success: false,
-          message: "Client with this email already exists",
-        });
-      }
-      const exitingemailemail = await db.query.clients.findFirst({
-        where: eq(clients.email, email),
-      });
-      if (exitingemailemail) {
-        return res.status(400).json({
-          success: false,
-          message: "Client with this email already exists",
-        });
+      const { userId, tenantId } = req.user!;
+      if (!userId || !tenantId) {
+        return next(CustomErrorHandler.badRequest("User ID or Tenant ID is missing"));
       }
 
-      const exitingclientPhone = await db.query.clients.findFirst({
-        where: eq(clients.phone, phone),
-      });
-      if (exitingclientPhone) {
-        return res.status(400).json({
-          success: false,
-          message: "Client with this phone number already exists",
-        });
-      }
       await db.transaction(async (tx) => {
-        const [client] = await tx
-          .insert(clients)
+        /**
+         * UPSERT IDENTITY LOGIC:
+         *
+         * Check if a client identity already exists with this email.
+         * - If YES → reuse the existing identity, skip INSERT into clients.
+         *            Only create a new client_profiles row for this tenant.
+         * - If NO  → create the identity & credentials in clients,
+         *            then create the client_profiles row.
+         *
+         * This allows the same person (email) to be a client at multiple law firms.
+         */
+        let identity = await tx.query.clients.findFirst({
+          where: eq(clients.email, email),
+        });
+
+        let isNewIdentity = false;
+
+        if (!identity) {
+          // New identity — create client with portal credentials
+          const passwordHash = password ? await bcrypt.hash(password, 10) : null;
+          const [newClient] = await tx
+            .insert(clients)
+            .values({
+              companyName,
+              firstName,
+              lastName,
+              email,
+              phone,
+              address,
+              city,
+              state,
+              country,
+              notes,
+              passwordHash,
+              status: "active",
+              createdBy: userId,
+            })
+            .returning();
+
+          identity = newClient;
+          isNewIdentity = true;
+        }
+
+        // Check if this firm already has a profile for this client
+        const existingProfile = await tx.query.clientProfiles.findFirst({
+          where: and(
+            eq(clientProfiles.identityId, identity.id),
+            eq(clientProfiles.tenantId, tenantId),
+            officeId ? eq(clientProfiles.officeId, officeId) : sql`${clientProfiles.officeId} IS NULL`,
+          ),
+        });
+
+        if (existingProfile) {
+          return res.status(400).json({
+            success: false,
+            message: isNewIdentity
+              ? "Client created but profile already exists for this office."
+              : "This client is already registered with your firm's office.",
+          });
+        }
+
+        // Create the per-tenant-office profile
+        const [profile] = await tx
+          .insert(clientProfiles)
           .values({
+            identityId: identity.id,
             tenantId,
-            officeId,
-            companyName,
-            firstName,
-            lastName,
-            email,
-            phone,
-            address,
-            city,
-            state,
-            country,
-            notes,
+            officeId: officeId ?? null,
+            companyName: companyName ?? null,
+            notes: notes ?? null,
+            status: "active",
             createdBy: userId,
           })
           .returning();
 
-        const passwordHash = await bcrypt.hash(password, 10);
-
-        await tx.insert(clientUsers).values({
-          clientId: client.id,
-          email,
-          passwordHash,
-        });
-        if (email) {
+        // Send welcome email only for brand-new identities
+        if (isNewIdentity && email) {
           await clientEmailService({
-            clientName: `${firstName} ${lastName}`.trim(),
+            clientName: `${firstName} ${lastName ?? ""}`.trim(),
             clientEmail: email,
             password,
           });
         }
+
         return res.status(201).json({
           success: true,
-          message: "Client created successfully.",
-          data: client,
+          message: isNewIdentity
+            ? "Client created and added to your firm successfully."
+            : "Existing client added to your firm successfully. They can log in with their existing password.",
+          data: {
+            ...identity,
+            profileId: profile.id,
+            tenantId: profile.tenantId,
+            officeId: profile.officeId,
+            isNewIdentity,
+          },
         });
       });
     } catch (err) {
@@ -454,7 +522,7 @@ const clientController = {
   },
   async updateClient(req: Request, res: Response, next: NextFunction) {
     try {
-      const { id } = req.params;
+      const { id } = req.params; // id = clients.id (identity)
 
       const {
         officeId,
@@ -470,70 +538,62 @@ const clientController = {
         notes,
       } = req.body;
 
-      const { tenantId } = req.user;
+      const { tenantId } = req.user!;
 
-      const client = await db.query.clients.findFirst({
-        where: and(eq(clients.id, id), eq(clients.tenantId, tenantId)),
+      // Verify this client has a profile in this tenant
+      const profile = await db.query.clientProfiles.findFirst({
+        where: and(
+          eq(clientProfiles.identityId, id),
+          eq(clientProfiles.tenantId, tenantId),
+        ),
       });
 
-      if (!client) {
+      if (!profile) {
         return res.status(404).json({
           success: false,
-          message: "Client not found.",
+          message: "Client not found in your firm.",
         });
       }
 
-      const emailExists = await db.query.clients.findFirst({
-        where: and(eq(clients.email, email), sql`${clients.id} <> ${id}`),
-      });
-
-      if (emailExists) {
-        return res.status(400).json({
-          success: false,
-          message: "Client with this email already exists.",
-        });
-      }
-
-      const phoneExists = await db.query.clients.findFirst({
-        where: and(eq(clients.phone, phone), sql`${clients.id} <> ${id}`),
-      });
-
-      if (phoneExists) {
-        return res.status(400).json({
-          success: false,
-          message: "Client with this phone number already exists.",
-        });
-      }
-
+      // Update global identity fields (shared across all firms)
       const [updatedClient] = await db
         .update(clients)
         .set({
-          officeId,
-          companyName,
           firstName,
           lastName,
-          email,
           phone,
           address,
           city,
           state,
           country,
-          notes,
+          // Do NOT update email here — email is the unique identity key
+          // Do NOT update companyName/notes on identity — use profile overrides below
         })
-        .where(and(eq(clients.id, id), eq(clients.tenantId, tenantId)))
+        .where(eq(clients.id, id))
         .returning();
 
+      // Update firm-specific profile fields
       await db
-        .update(clientUsers)
+        .update(clientProfiles)
         .set({
-          email,
+          officeId: officeId ?? profile.officeId,
+          companyName: companyName ?? null,
+          notes: notes ?? null,
+          updatedAt: new Date(),
         })
-        .where(eq(clientUsers.clientId, id));
+        .where(eq(clientProfiles.id, profile.id));
 
       return res.status(200).json({
         success: true,
         message: "Client updated successfully.",
-        data: updatedClient,
+        data: {
+          ...updatedClient,
+          profileId: profile.id,
+          tenantId: profile.tenantId,
+          officeId: officeId ?? profile.officeId,
+          companyName: companyName ?? updatedClient.companyName,
+          notes: notes ?? updatedClient.notes,
+        },
       });
     } catch (error) {
       next(error);
@@ -541,31 +601,43 @@ const clientController = {
   },
   async deleteClient(req: Request, res: Response, next: NextFunction) {
     try {
-      const { id } = req.params;
-      const { tenantId } = req.user;
+      const { id } = req.params; // id = clients.id (identity)
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return next(CustomErrorHandler.unAuthorized());
+      }
 
-      const client = await db.query.clients.findFirst({
-        where: and(eq(clients.id, id), eq(clients.tenantId, tenantId)),
+
+      /**
+       * IMPORTANT: We only delete the client_profiles row for THIS tenant.
+       * We do NOT delete the global identity (clients)
+       * because the same client may belong to other law firms.
+       *
+       * Deleting the profile effectively removes the client from this firm
+       * without affecting their other firm memberships.
+       */
+      const profile = await db.query.clientProfiles.findFirst({
+        where: and(
+          eq(clientProfiles.identityId, id),
+          eq(clientProfiles.tenantId, tenantId),
+        ),
       });
 
-      if (!client) {
+      if (!profile) {
         return res.status(404).json({
           success: false,
-          message: "Client not found.",
+          message: "Client not found in your firm.",
         });
       }
 
-      await db.transaction(async (tx) => {
-        await tx.delete(caseClients).where(eq(caseClients.clientId, id));
-
-        await tx.delete(clientUsers).where(eq(clientUsers.clientId, id));
-
-        await tx.delete(clients).where(eq(clients.id, id));
-      });
+      // Only delete the profile row — preserve the global identity
+      await db
+        .delete(clientProfiles)
+        .where(eq(clientProfiles.id, profile.id));
 
       return res.status(200).json({
         success: true,
-        message: "Client deleted successfully.",
+        message: "Client removed from your firm successfully.",
       });
     } catch (error) {
       next(error);
@@ -928,8 +1000,10 @@ const clientController = {
   async getClientFeeLedger(req: Request, res: Response, next: NextFunction) {
     try {
       const { clientId } = req.params;
-      const tenantId = req.user.tenantId;
-
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return next(CustomErrorHandler.unAuthorized());
+      }
       const page = Math.max(Number(req.query.page) || 1, 1);
       const limit = Math.max(Number(req.query.limit) || 10, 1);
       const search = String(req.query.search || "")
@@ -943,12 +1017,12 @@ const clientController = {
         });
       }
 
-      // Verify client
-      const client = await db.query.clients.findFirst({
-        where: and(eq(clients.id, clientId), eq(clients.tenantId, tenantId)),
+      // Verify client belongs to this tenant via client_profiles
+      const profile = await db.query.clientProfiles.findFirst({
+        where: and(eq(clientProfiles.identityId, clientId), eq(clientProfiles.tenantId, tenantId)),
       });
 
-      if (!client) {
+      if (!profile) {
         return res.status(404).json({
           success: false,
           message: "Client not found",
@@ -972,20 +1046,20 @@ const clientController = {
       // Search
       const filteredLedger = search
         ? ledger.filter((entry) => {
-            const searchText = [
-              entry.description,
-              entry.case?.caseNumber,
-              entry.case?.firstParty,
-              entry.case?.oppositeParty,
-              entry.invoice?.invoiceNo,
-              entry.payment?.paymentMethod,
-            ]
-              .filter(Boolean)
-              .join(" ")
-              .toLowerCase();
+          const searchText = [
+            entry.description,
+            entry.case?.caseNumber,
+            entry.case?.firstParty,
+            entry.case?.oppositeParty,
+            entry.invoice?.invoiceNo,
+            entry.payment?.paymentMethod,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
 
-            return searchText.includes(search);
-          })
+          return searchText.includes(search);
+        })
         : ledger;
 
       // Running balance
@@ -1037,31 +1111,36 @@ const clientController = {
   },
   async getclienForFrom(req: Request, res: Response, next: NextFunction) {
     try {
-      const tenantId = req.user.tenantId;
+      const tenantId = req.user?.tenantId;
       const search = String(req.query.search ?? "").trim();
-
-      const clientsData = await db.query.clients.findMany({
-        where: (clients, { and, eq, or, ilike }) =>
+      if (!tenantId) {
+        return next(CustomErrorHandler.unAuthorized());
+      }
+      // Scope client list to this tenant via client_profiles join
+      const clientsData = await db
+        .select({
+          id: clients.id,
+          firstName: clients.firstName,
+          lastName: clients.lastName,
+          companyName: sql<string>`COALESCE(${clientProfiles.companyName}, ${clients.companyName})`,
+        })
+        .from(clientProfiles)
+        .innerJoin(clients, eq(clientProfiles.identityId, clients.id))
+        .where(
           and(
-            eq(clients.tenantId, tenantId),
+            eq(clientProfiles.tenantId, tenantId),
             search
               ? or(
-                  ilike(clients.firstName, `%${search}%`),
-                  ilike(clients.lastName, `%${search}%`),
-                  ilike(clients.email, `%${search}%`),
-                  ilike(clients.phone, `%${search}%`),
-                  ilike(clients.companyName, `%${search}%`),
-                )
+                ilike(clients.firstName, `%${search}%`),
+                ilike(clients.lastName, `%${search}%`),
+                ilike(clients.email, `%${search}%`),
+                ilike(clients.phone, `%${search}%`),
+                ilike(clients.companyName, `%${search}%`),
+              )
               : undefined,
           ),
-        columns: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          companyName: true,
-        },
-        orderBy: (clients, { asc }) => [asc(clients.firstName)],
-      });
+        )
+        .orderBy(clients.firstName);
 
       const data = clientsData.map((client) => ({
         id: client.id,

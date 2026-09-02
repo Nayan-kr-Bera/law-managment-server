@@ -8,6 +8,7 @@ import {
   tenants,
   clients,
   cases,
+  caseClients,
 } from "../../db/schema/index.js";
 
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
@@ -33,29 +34,39 @@ const caseDocumentController = {
       let officeId = req.officeId || req.body.officeId || null;
       const { caseId, folderId, isConfidential, isPrivate } = req.body;
 
-      // If client user context, resolve tenantId & officeId from client profile
-      if (!tenantId && req.clientUser?.clientId) {
-        const clientRecord = await db.query.clients.findFirst({
-          where: eq(clients.id, req.clientUser.clientId),
-          columns: { tenantId: true, officeId: true },
+      // If client user context, verify client belongs to the case
+      if (req.clientUser && caseId) {
+        const clientAccess = await db.query.caseClients.findFirst({
+          where: and(
+            eq(caseClients.caseId, caseId),
+            eq(caseClients.clientId, req.clientUser.clientId)
+          ),
         });
-
-        if (clientRecord) {
-          tenantId = clientRecord.tenantId;
-          officeId = officeId || clientRecord.officeId;
+        if (!clientAccess) {
+          return next(
+            CustomErrorHandler.unAuthorized(
+              "Access denied: You are not assigned to this case"
+            )
+          );
         }
       }
 
-      // Fallback: derive tenantId & officeId from target Case record if provided
-      if (!tenantId && caseId) {
+      // Derive tenantId & officeId directly from target Case record if provided
+      if (caseId) {
         const caseRecord = await db.query.cases.findFirst({
           where: eq(cases.id, caseId),
           columns: { tenantId: true, officeId: true },
         });
         if (caseRecord) {
           tenantId = caseRecord.tenantId;
-          officeId = officeId || caseRecord.officeId;
+          officeId = caseRecord.officeId;
         }
+      }
+
+      // If client user context and still no tenantId, resolve from JWT token payload
+      if (!tenantId && req.clientUser?.tenantId) {
+        tenantId = req.clientUser.tenantId;
+        officeId = officeId || req.clientUser.officeId || null;
       }
 
       if (!tenantId) {

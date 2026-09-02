@@ -3,7 +3,7 @@ import type { IUserJwtPayload, IClientJwtPayload, ISubscriptionContext } from ".
 declare global {
   namespace Express {
     interface Request {
-      user?: IUserJwtPayload;
+      user: IUserJwtPayload;
       clientUser?: IClientJwtPayload;
       tenantId?: string;
       officeId?: string;

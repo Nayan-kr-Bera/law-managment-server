@@ -18,6 +18,7 @@ const subscriptionMiddleware = async (
     // ============================================================
 
     if (req.user?.isSuperAdmin) {
+      console.log("[subscriptionMiddleware] Super admin bypass granted");
       return next();
     }
 
@@ -28,10 +29,13 @@ const subscriptionMiddleware = async (
     const tenantId = req.user?.tenantId;
 
     if (!tenantId) {
+      console.warn("[subscriptionMiddleware] 401 Unauthorized: req.user.tenantId is missing");
       return next(
         CustomErrorHandler.unAuthorized("Tenant information is missing"),
       );
     }
+
+    console.log("[subscriptionMiddleware] Checking subscription for tenantId:", tenantId);
 
     // ============================================================
     // FIND ACTIVE SUBSCRIPTION
@@ -52,6 +56,7 @@ const subscriptionMiddleware = async (
     // ============================================================
 
     if (!subscription) {
+      console.warn("[subscriptionMiddleware] 403 Forbidden: No active/trial subscription found for tenantId:", tenantId);
       return res.status(403).send(
         ResponseHandler(
           403,
@@ -59,6 +64,13 @@ const subscriptionMiddleware = async (
         ),
       );
     }
+
+    console.log("[subscriptionMiddleware] Subscription found:", {
+      planName: subscription.plan?.name,
+      planCode: subscription.plan?.code,
+      status: subscription.status,
+      nextBillingDate: subscription.nextBillingDate,
+    });
 
     // ============================================================
     // INTERNAL PLAN
@@ -80,6 +92,7 @@ const subscriptionMiddleware = async (
       const nextBillingDate = new Date(subscription.nextBillingDate);
 
       if (nextBillingDate < today) {
+        console.warn("[subscriptionMiddleware] 403 Forbidden: Subscription expired on", nextBillingDate);
         return res.status(403).send(
           ResponseHandler(
             403,
