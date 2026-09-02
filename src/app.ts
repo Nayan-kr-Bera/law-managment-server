@@ -37,6 +37,7 @@ import {
   undersectionRoutes,
   userRoutes,
   supportTicketRoutes,
+  invoicesRoutes,
 } from "./routes/index.js";
 
 const app = express();
@@ -106,6 +107,7 @@ app.use("/api/documentFolder",documentsFolderRoutes);
 app.use("/api/reminders", reminderRoutes);
 app.use("/api/client-portal", clientPortalRoutes);
 app.use("/api/support-tickets", supportTicketRoutes);
+app.use("/api/invoices", invoicesRoutes);
 /* ---------- 404 ---------- */
 app.use(notFound);
 
