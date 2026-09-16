@@ -5,13 +5,17 @@ import { consumeFromQueue, REMINDER_EMAIL_QUEUE } from "../lib/rabbitmq.js";
 import db from "../db/index.js";
 import { notificationLogs, notificationQueue } from "../db/schema/index.js";
 
+const port = Number(process.env.SMTP_PORT) || 2525;
+const isSecure = port === 465 || process.env.SMTP_SRC === "true";
+
 const transporter = nodemailer.createTransport({
-  host: config.SMTP_HOST,
-  port: Number(config.SMTP_PORT),
-  secure: config.SMTP_SRC === "true",
+  host: process.env.SMTP_HOST || "mail.smtp2go.com",
+  port,
+  secure: isSecure,
+  ...(isSecure ? {} : { requireTLS: true }),
   auth: {
-    user: config.SMTP_MAIL,
-    pass: config.SMTP_PASS,
+    user: process.env.SMTP_USER || process.env.SMTP_MAIL,
+    pass: process.env.SMTP_PASSWORD || process.env.SMTP_PASS,
   },
 });
 
