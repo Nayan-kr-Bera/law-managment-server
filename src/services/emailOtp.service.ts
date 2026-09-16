@@ -20,12 +20,17 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-async function verifySMTP() {
+export async function verifySMTP() {
+  const host = process.env.SMTP_HOST || "mail.smtp2go.com";
+  const user = process.env.SMTP_USER || process.env.SMTP_MAIL;
+  console.log(`📧 [SMTP] Checking connection -> Host: ${host}, Port: ${port}, Secure: ${isSecure}, User: ${user || "(not set)"}`);
   try {
     await transporter.verify();
-    console.log('SMTP connection verified ✅');
-  } catch (e) {
-    console.error('SMTP verify failed ❌', e);
+    console.log("✅ [SMTP] Connection verified! Server is ready to send emails.");
+    return true;
+  } catch (e: any) {
+    console.error("❌ [SMTP] Connection verification failed:", e?.message || e);
+    return false;
   }
 }
 verifySMTP();
@@ -282,10 +287,11 @@ const emailOtpService = async ({ id, email }: { id: string; email: string }) => 
     }
 
     try {
+      console.log(`📨 [SMTP] Sending OTP verification email to: ${email}...`);
       const info = await transporter.sendMail(sentEmail);
-      console.log('Email sent: ', info.response);
-    } catch (emailError) {
-      console.error('Failed to send email:', emailError);
+      console.log(`✅ [SMTP] OTP email sent successfully to ${email}. Response: ${info.response}`);
+    } catch (emailError: any) {
+      console.error(`❌ [SMTP] Failed to send email to ${email}:`, emailError?.message || emailError);
       return { success: false, message: 'SMTP failed to send email.' };
     }
     return { success: true, message: 'OTP sent successfully' };

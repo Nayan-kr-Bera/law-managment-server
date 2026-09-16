@@ -353,16 +353,16 @@ const clientEmailService = async ({
 `,
     };
 
+    console.log(`📨 [SMTP] Sending client welcome email to: ${clientEmail}...`);
     const info = await transporter.sendMail(mail);
-
-    console.log("Client welcome email sent:", info.response);
+    console.log(`✅ [SMTP] Client welcome email sent to ${clientEmail}. Response:`, info.response);
 
     return {
       success: true,
       message: "Client welcome email sent successfully",
     };
-  } catch (error) {
-    console.error("Client welcome email error:", error);
+  } catch (error: any) {
+    console.error(`❌ [SMTP] Client welcome email error for ${clientEmail}:`, error?.message || error);
 
     return {
       success: false,

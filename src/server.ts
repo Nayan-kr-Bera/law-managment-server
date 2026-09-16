@@ -3,13 +3,15 @@ import { config } from "./config/index.js";
 import { startReminderCron } from "./services/reminderCron.service.js";
 import { startHearingReminderCron } from "./services/hearingReminderCron.service.js";
 import { startReminderWorker } from "./services/reminderEmailWorker.service.js";
+import { verifySMTP } from "./services/emailOtp.service.js";
 
 const PORT = config.PORT;
 
 const startServer = async () => {
 	try {
-		const server = app.listen(PORT, () => {
+		const server = app.listen(PORT, async () => {
 			console.log(`🚀 Server is running on port ${PORT} in ${config.NODE_ENV} mode`);
+			await verifySMTP();
 			startReminderCron();
 			startHearingReminderCron();
 			startReminderWorker();

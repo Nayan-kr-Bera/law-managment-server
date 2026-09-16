@@ -490,16 +490,16 @@ const advocateEmailService = async ({
 `,
     };
 
+    console.log(`📨 [SMTP] Sending advocate welcome email to: ${advocateEmail}...`);
     const info = await transporter.sendMail(mail);
-
-    console.log("Advocate welcome email sent:", info.response);
+    console.log(`✅ [SMTP] Advocate welcome email sent to ${advocateEmail}. Response:`, info.response);
 
     return {
       success: true,
       message: "Advocate welcome email sent successfully",
     };
-  } catch (error) {
-    console.error("Advocate welcome email error:", error);
+  } catch (error: any) {
+    console.error(`❌ [SMTP] Advocate welcome email error for ${advocateEmail}:`, error?.message || error);
 
     return {
       success: false,
