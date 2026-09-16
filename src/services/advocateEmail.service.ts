@@ -498,8 +498,8 @@ const advocateEmailService = async ({
       success: true,
       message: "Advocate welcome email sent successfully",
     };
-  } catch (error: any) {
-    console.error(`❌ [SMTP] Advocate welcome email error for ${advocateEmail}:`, error?.message || error);
+  } catch (error: unknown) {
+    console.error(`❌ [SMTP] Advocate welcome email error for ${advocateEmail}:`, error instanceof Error ? error.message : error);
 
     return {
       success: false,

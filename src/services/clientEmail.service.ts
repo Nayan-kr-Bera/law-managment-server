@@ -361,8 +361,8 @@ const clientEmailService = async ({
       success: true,
       message: "Client welcome email sent successfully",
     };
-  } catch (error: any) {
-    console.error(`❌ [SMTP] Client welcome email error for ${clientEmail}:`, error?.message || error);
+  } catch (error: unknown) {
+    console.error(`❌ [SMTP] Client welcome email error for ${clientEmail}:`, error instanceof Error ? error.message : error);
 
     return {
       success: false,

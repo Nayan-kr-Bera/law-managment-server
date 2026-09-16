@@ -28,8 +28,8 @@ export async function verifySMTP() {
     await transporter.verify();
     console.log("✅ [SMTP] Connection verified! Server is ready to send emails.");
     return true;
-  } catch (e: any) {
-    console.error("❌ [SMTP] Connection verification failed:", e?.message || e);
+  } catch (e: unknown) {
+    console.error("❌ [SMTP] Connection verification failed:", e instanceof Error ? e.message : e);
     return false;
   }
 }
@@ -290,8 +290,8 @@ const emailOtpService = async ({ id, email }: { id: string; email: string }) => 
       console.log(`📨 [SMTP] Sending OTP verification email to: ${email}...`);
       const info = await transporter.sendMail(sentEmail);
       console.log(`✅ [SMTP] OTP email sent successfully to ${email}. Response: ${info.response}`);
-    } catch (emailError: any) {
-      console.error(`❌ [SMTP] Failed to send email to ${email}:`, emailError?.message || emailError);
+    } catch (emailError: unknown) {
+      console.error(`❌ [SMTP] Failed to send email to ${email}:`, emailError instanceof Error ? emailError.message : emailError);
       return { success: false, message: 'SMTP failed to send email.' };
     }
     return { success: true, message: 'OTP sent successfully' };
