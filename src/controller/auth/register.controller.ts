@@ -36,18 +36,32 @@ const registerController = {
 
       const { name, email, password, phone } = parsed.data;
 
-      // 2. CHECK EXISTING USER
+      // 2. CHECK EXISTING USER (EMAIL & PHONE)
 
-      const exist = await db.query.user.findFirst({
+      const existEmail = await db.query.user.findFirst({
         where: eq(users.email, email),
       });
 
-      if (exist) {
+      if (existEmail) {
         return next(
           CustomErrorHandler.alreadyExist(
             "This email address has already been used",
           ),
         );
+      }
+
+      if (phone) {
+        const existPhone = await db.query.user.findFirst({
+          where: eq(users.phone, phone),
+        });
+
+        if (existPhone) {
+          return next(
+            CustomErrorHandler.alreadyExist(
+              "This phone number has already been used",
+            ),
+          );
+        }
       }
 
       // 3. HASH PASSWORD
@@ -244,8 +258,36 @@ const registerController = {
           },
         }),
       );
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("USER REGISTRATION ERROR:", error);
+
+      const errObj = error as {
+        code?: string;
+        constraint?: string;
+        detail?: string;
+        cause?: { code?: string; constraint_name?: string; detail?: string };
+      };
+
+      const pgCode = errObj?.code || errObj?.cause?.code;
+      const constraint = errObj?.constraint || errObj?.cause?.constraint_name;
+      const detail = errObj?.detail || errObj?.cause?.detail || "";
+
+      if (pgCode === "23505") {
+        if (constraint === "users_phone_unique" || detail.includes("phone")) {
+          return next(
+            CustomErrorHandler.alreadyExist(
+              "This phone number has already been used",
+            ),
+          );
+        }
+        if (constraint === "users_email_unique" || detail.includes("email")) {
+          return next(
+            CustomErrorHandler.alreadyExist(
+              "This email address has already been used",
+            ),
+          );
+        }
+      }
 
       return next(error);
     }

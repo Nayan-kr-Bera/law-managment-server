@@ -14,7 +14,13 @@ export const errorHandler = (
   res: Response,
   next: NextFunction
 ) => {
-  console.error(err);
+  const errWithStatus = err as { status?: number; message?: string };
+  if (typeof errWithStatus?.status === "number") {
+    return res.status(errWithStatus.status).json({
+      success: false,
+      message: errWithStatus.message || "An error occurred",
+    });
+  }
 
   if (err instanceof AppError) {
     return res.status(err.status).json({
