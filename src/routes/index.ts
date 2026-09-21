@@ -32,3 +32,5 @@ export { default as reminderRoutes } from "./reminder.route.js";
 export { default as clientPortalRoutes } from "./clientPortal.route.js";
 export { default as supportTicketRoutes } from "./supportTicket.route.js";
 export { default as invoicesRoutes } from "./invoices.route.js";
+export { default as contactUsRoutes } from "./contactUs.route.js";
+

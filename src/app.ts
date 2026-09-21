@@ -38,6 +38,7 @@ import {
   userRoutes,
   supportTicketRoutes,
   invoicesRoutes,
+  contactUsRoutes,
 } from "./routes/index.js";
 
 const app = express();
@@ -108,6 +109,8 @@ app.use("/api/reminders", reminderRoutes);
 app.use("/api/client-portal", clientPortalRoutes);
 app.use("/api/support-tickets", supportTicketRoutes);
 app.use("/api/invoices", invoicesRoutes);
+app.use("/api/contact-us", contactUsRoutes);
+
 /* ---------- 404 ---------- */
 app.use(notFound);
 
