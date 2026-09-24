@@ -3,6 +3,7 @@ import express, { Request, Response } from "express";
 import { config } from "./config/index.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { notFound } from "./middleware/notFound.js";
+import autoAuditMiddleware from "./middleware/auditMiddleware.js";
 import {
   advocateRoutes,
   appointmentRoutes,
@@ -40,6 +41,7 @@ import {
   invoicesRoutes,
   contactUsRoutes,
   aiDraftRoutes,
+  auditLogRoutes,
 } from "./routes/index.js";
 
 const app = express();
@@ -73,6 +75,9 @@ app.get("/", (req: Request, res: Response) => {
     message: "Server is running",
   });
 });
+
+/* ---------- Global Audit Middleware ---------- */
+app.use("/api", autoAuditMiddleware);
 
 /* ---------- Routes ---------- */
 
@@ -112,6 +117,7 @@ app.use("/api/support-tickets", supportTicketRoutes);
 app.use("/api/invoices", invoicesRoutes);
 app.use("/api/contact-us", contactUsRoutes);
 app.use("/api/ai", aiDraftRoutes);
+app.use("/api/audit-logs", auditLogRoutes);
 
 /* ---------- 404 ---------- */
 app.use(notFound);

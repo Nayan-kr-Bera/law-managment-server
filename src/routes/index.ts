@@ -34,4 +34,5 @@ export { default as supportTicketRoutes } from "./supportTicket.route.js";
 export { default as invoicesRoutes } from "./invoices.route.js";
 export { default as contactUsRoutes } from "./contactUs.route.js";
 export { default as aiDraftRoutes } from "./aiDraft.route.js";
+export { default as auditLogRoutes } from "./auditLog.route.js";
 
