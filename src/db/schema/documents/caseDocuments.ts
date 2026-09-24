@@ -5,6 +5,7 @@ import {
   integer,
   boolean,
   timestamp,
+  text,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -59,6 +60,30 @@ const caseDocuments = pgTable("case_documents", {
   isConfidential: boolean("is_confidential").default(false).notNull(),
 
   isPrivate: boolean("is_private").default(false).notNull(),
+
+  pageCount: integer("page_count").default(1),
+
+  ocrStatus: varchar("ocr_status", {
+    length: 30,
+  }).default("none").notNull(),
+
+  ocrText: text("ocr_text"),
+
+  ocrLanguage: varchar("ocr_language", {
+    length: 50,
+  }).default("eng+hin"),
+
+  ocrProcessedAt: timestamp("ocr_processed_at"),
+
+  ocrPagesProcessed: integer("ocr_pages_processed"),
+
+  ocrWarning: varchar("ocr_warning", {
+    length: 500,
+  }),
+
+  ocrError: varchar("ocr_error", {
+    length: 500,
+  }),
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

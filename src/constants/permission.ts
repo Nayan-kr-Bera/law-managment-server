@@ -68,6 +68,7 @@ export const PERMISSIONS = [
   { code: "document.delete", description: "Delete documents" },
   { code: "document.download", description: "Download documents" },
   { code: "document.share", description: "Share documents" },
+  { code: "document.ocr", description: "Extract OCR and Search Scanned Documents" },
   { code: "ai_drafter.use", description: "Use AI drafter" },
 
   // Tasks

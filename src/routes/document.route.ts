@@ -4,6 +4,7 @@ import officeGuard from "../middleware/officeGuard.js";
 import subscriptionMiddleware from "../middleware/subscriptionMiddleware.js";
 import { upload } from "../middleware/upload.js";
 import subscriptionLimitMiddleware from "../middleware/subscriptionLimitMiddleware.js";
+import { permissionGuard } from "../middleware/permission.js";
 import caseDocumentController from "../controller/documents/documents.controller.js";
 
 const router = Router();
@@ -30,6 +31,33 @@ router.get(
   auth,
   officeGuard,
   caseDocumentController.getCaseDocuments,
+);
+
+// OCR quota & usage info (Permission required)
+router.get(
+  "/ocr/quota",
+  auth,
+  officeGuard,
+  permissionGuard("document.ocr"),
+  caseDocumentController.getOcrQuota,
+);
+
+// OCR search across indexed document text in PostgreSQL (Permission required)
+router.get(
+  "/ocr/search",
+  auth,
+  officeGuard,
+  permissionGuard("document.ocr"),
+  caseDocumentController.searchOcr,
+);
+
+// Trigger on-demand OCR text extraction & indexing (Permission required)
+router.post(
+  "/:id/ocr",
+  auth,
+  officeGuard,
+  permissionGuard("document.ocr"),
+  caseDocumentController.triggerOcr,
 );
 
 // Delete document

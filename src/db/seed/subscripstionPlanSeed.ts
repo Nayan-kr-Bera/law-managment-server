@@ -24,23 +24,35 @@ const subscriptionPlansData = [
 
     maxStorageGb: 2,
 
+    monthlyOcrPages: 10,
+
+    monthlyAiDrafts: 4,
+
     features: [
+      "All Premium Features Unlocked for Trial",
       "Registered Advocate Account",
       "Chamber / Office Location",
       "Active Daily Cause List",
-      "Case Management",
-      "Client Management",
-      "Basic Document Management",
+      "Advanced Case Management",
+      "Client Management & Client Portal",
+      "Advanced Document Management",
+      "10 Pages Free OCR Brief Indexing & Search",
+      "4 Free AI Legal Court Drafts",
       "Tasks & Reminders",
+      "Billing & Invoices Preview",
+      "Multiple Offices Preview",
+      "Advanced User Management",
+      "Role & Permission Management",
+      "Advanced Notifications",
     ],
 
-    badge: "Free Trial",
+    badge: "Full Access Trial",
 
     isPopular: false,
 
     isActive: true,
 
-    isInternal: true,
+    isInternal: false,
   },
   // INTERNAL PLAN
 
@@ -65,6 +77,10 @@ const subscriptionPlansData = [
     maxOffices: 999999,
 
     maxStorageGb: 999999,
+
+    monthlyOcrPages: 999999,
+
+    monthlyAiDrafts: 999999,
 
     features: [],
 
@@ -102,6 +118,10 @@ const subscriptionPlansData = [
 
     maxStorageGb: 15,
 
+    monthlyOcrPages: 0,
+
+    monthlyAiDrafts: 3,
+
     features: [
       "Registered Advocate Account",
       "Chamber / Office Location",
@@ -110,6 +130,7 @@ const subscriptionPlansData = [
       "Client Management",
       "Basic Document Management",
       "Tasks & Reminders",
+      "3 AI Legal Drafts / month",
     ],
 
     badge: "For Solo Advocates",
@@ -146,6 +167,10 @@ const subscriptionPlansData = [
 
     maxStorageGb: 50,
 
+    monthlyOcrPages: 500,
+
+    monthlyAiDrafts: 15,
+
     features: [
       "Everything in Solo Practice",
       "Multiple Advocate Accounts",
@@ -153,6 +178,8 @@ const subscriptionPlansData = [
       "Advanced Case Management",
       "Client Portal",
       "Document Management",
+      "500 Pages/month OCR Brief Indexing & Search",
+      "15 AI Legal Drafts / month",
       "Tasks & Reminders",
       "Notifications",
     ],
@@ -190,6 +217,10 @@ const subscriptionPlansData = [
 
     maxStorageGb: 150,
 
+    monthlyOcrPages: 1500,
+
+    monthlyAiDrafts: 30,
+
     features: [
       "Everything in Professional",
       "Multiple Offices",
@@ -197,6 +228,8 @@ const subscriptionPlansData = [
       "Role & Permission Management",
       "Advanced Client Portal",
       "Advanced Document Management",
+      "1,500 Pages/month OCR Brief Indexing & Search",
+      "30 AI Legal Drafts / month",
       "Billing & Invoices",
       "Payment Tracking",
       "Advanced Notifications",
@@ -211,14 +244,24 @@ const subscriptionPlansData = [
     isInternal: false,
   },
 ];
+
 // SEED FUNCTION
 async function seedSubscriptionPlans() {
-  await db
-    .insert(subscriptionPlans)
-    .values(subscriptionPlansData)
-    .onConflictDoNothing();
+  for (const plan of subscriptionPlansData) {
+    await db
+      .insert(subscriptionPlans)
+      .values(plan)
+      .onConflictDoUpdate({
+        target: subscriptionPlans.code,
+        set: {
+          monthlyOcrPages: plan.monthlyOcrPages,
+          monthlyAiDrafts: plan.monthlyAiDrafts,
+          features: plan.features,
+        },
+      });
+  }
 
-  console.log("✅ Subscription plans seeded successfully");
+  console.log("✅ Subscription plans seeded and updated successfully");
 }
 
 export default seedSubscriptionPlans;

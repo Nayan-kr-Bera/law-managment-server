@@ -27,6 +27,10 @@ const aiDrafts = pgTable("ai_drafts", {
     length: 100,
   }).notNull(),
 
+  title: varchar("title", { length: 255 }),
+
+  language: varchar("language", { length: 50 }).notNull().default("English"),
+
   prompt: text("prompt").notNull(),
 
   generatedContent: text("generated_content").notNull(),

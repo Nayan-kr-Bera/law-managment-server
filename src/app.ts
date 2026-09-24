@@ -39,6 +39,7 @@ import {
   supportTicketRoutes,
   invoicesRoutes,
   contactUsRoutes,
+  aiDraftRoutes,
 } from "./routes/index.js";
 
 const app = express();
@@ -110,6 +111,7 @@ app.use("/api/client-portal", clientPortalRoutes);
 app.use("/api/support-tickets", supportTicketRoutes);
 app.use("/api/invoices", invoicesRoutes);
 app.use("/api/contact-us", contactUsRoutes);
+app.use("/api/ai", aiDraftRoutes);
 
 /* ---------- 404 ---------- */
 app.use(notFound);

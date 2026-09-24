@@ -45,6 +45,10 @@ const subscriptionPlans = pgTable("subscription_plans", {
 
   maxStorageGb: integer("max_storage_gb").notNull(),
 
+  monthlyOcrPages: integer("monthly_ocr_pages").notNull().default(0),
+
+  monthlyAiDrafts: integer("monthly_ai_drafts").notNull().default(0),
+
   features: jsonb("features").$type<string[]>().notNull().default([]),
   code: varchar("code", {
     length: 50,

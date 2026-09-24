@@ -2,6 +2,7 @@ import {
   boolean,
   decimal,
   date,
+  integer,
   pgTable,
   timestamp,
   uuid,
@@ -57,6 +58,25 @@ const tenantSubscriptions = pgTable(
     // AUTO RENEWAL
 
     autoRenew: boolean("auto_renew").notNull().default(true),
+
+    // OCR MONTHLY USAGE (Page based)
+
+    ocrPagesUsedThisMonth: integer("ocr_pages_used_this_month")
+      .notNull()
+      .default(0),
+
+    ocrCycleResetDate: date("ocr_cycle_reset_date"),
+
+    // AI DRAFTER USAGE & CREDITS
+    aiDraftsUsedThisMonth: integer("ai_drafts_used_this_month")
+      .notNull()
+      .default(0),
+
+    aiDraftAddonCredits: integer("ai_draft_addon_credits")
+      .notNull()
+      .default(0),
+
+    aiDraftCycleResetDate: date("ai_draft_cycle_reset_date"),
 
     // PENDING PLAN CHANGE
     //
