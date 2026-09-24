@@ -9,6 +9,10 @@ const router = Router();
 router.post("/", auth, caseActionController.addCaseLink);
 
 router.patch("/bulk-action", auth, caseActionController.bulkCaseAction);
+
+// Client notifications (email + portal)
+router.post("/preview-client-notifications", auth, caseActionController.previewClientNotifications);
+router.post("/notify-clients", auth, caseActionController.notifyClients);
 // Update link notes
 router.patch("/:id", auth, caseActionController.updateCaseLink);
 

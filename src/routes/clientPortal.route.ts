@@ -52,4 +52,8 @@ router.get("/support/tickets", clientAuth, supportTicketController.getClientTick
 router.post("/support/tickets", clientAuth, supportTicketController.createTicket);
 router.post("/support/tickets/:ticketId/reply", clientAuth, supportTicketController.replyTicket);
 
+router.get("/notifications", clientAuth, clientPortalController.getNotifications);
+router.patch("/notifications/mark-all-read", clientAuth, clientPortalController.markAllNotificationsRead);
+router.patch("/notifications/:id/read", clientAuth, clientPortalController.markNotificationRead);
+
 export default router;

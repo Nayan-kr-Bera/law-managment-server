@@ -10,12 +10,16 @@ import {
   caseTags,
   caseTimelines,
   clientProfiles,
+  clients,
   companies,
   empanelments,
-  tags
+  notificationLogs,
+  notificationQueue,
+  tags,
 } from "../../db/schema/index.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import ResponseHandler from "../../utils/responseHandler.js";
+import { sendClientCaseNotificationEmail } from "../../services/clientNotificationEmail.service.js";
 const DISPOSAL_NATURES = [
   "judgment",
   "dismissed",
@@ -1173,6 +1177,277 @@ const caseActionController = {
         .send(ResponseHandler(200, "Case updated successfully", updatedCase));
     } catch (error) {
       console.error(error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  async previewClientNotifications(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { caseIds } = req.body;
+      const tenantId = req.user?.tenantId;
+
+      if (!tenantId) {
+        return next(CustomErrorHandler.badRequest("Tenant ID is required"));
+      }
+
+      if (!Array.isArray(caseIds) || caseIds.length === 0) {
+        return next(CustomErrorHandler.badRequest("At least one case id is required"));
+      }
+
+      const uniqueCaseIds = [...new Set(caseIds)];
+
+      const tenantCases = await db.query.cases.findMany({
+        where: and(
+          eq(cases.tenantId, tenantId),
+          inArray(cases.id, uniqueCaseIds)
+        ),
+        with: {
+          court: true,
+        },
+      });
+
+      if (tenantCases.length === 0) {
+        return next(CustomErrorHandler.notFound("No valid cases found"));
+      }
+
+      // Query linked clients
+      const linkedClients = await db
+        .select({
+          caseId: caseClients.caseId,
+          clientId: clients.id,
+          firstName: clients.firstName,
+          lastName: clients.lastName,
+          companyName: clients.companyName,
+          email: clients.email,
+          phone: clients.phone,
+          role: caseClients.role,
+        })
+        .from(caseClients)
+        .innerJoin(clients, eq(caseClients.clientId, clients.id))
+        .where(inArray(caseClients.caseId, uniqueCaseIds));
+
+      // Group clients by case
+      const casesWithClients = tenantCases.map((c) => {
+        const matchingClients = linkedClients.filter((lc) => lc.caseId === c.id);
+        return {
+          id: c.id,
+          title: c.title,
+          caseNumber: c.caseNumber,
+          cnrNumber: c.cnrNumber,
+          court: c.court?.name || null,
+          courtNo: c.courtNumber || null,
+          firstParty: c.firstParty,
+          oppositeParty: c.oppositeParty,
+          nextHearingDate: c.nextHearingDate,
+          status: c.status,
+          clients: matchingClients.map((cl) => ({
+            id: cl.clientId,
+            name: cl.companyName || `${cl.firstName} ${cl.lastName || ""}`.trim(),
+            email: cl.email,
+            phone: cl.phone,
+            role: cl.role,
+          })),
+        };
+      });
+
+      const totalClientsWithEmail = linkedClients.filter((cl) => !!cl.email?.trim()).length;
+      const casesWithClientCount = casesWithClients.filter((c) => c.clients.length > 0).length;
+
+      return res.status(200).send(
+        ResponseHandler(200, "Client notification preview generated successfully", {
+          totalCases: tenantCases.length,
+          casesWithClientCount,
+          casesWithoutClientCount: tenantCases.length - casesWithClientCount,
+          totalClientsWithEmail,
+          cases: casesWithClients,
+        })
+      );
+    } catch (error) {
+      console.error("Preview client notifications error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  async notifyClients(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { caseIds, subject, message } = req.body;
+      const tenantId = req.user?.tenantId;
+      const userId = req.user?.userId;
+
+      if (!tenantId) {
+        return next(CustomErrorHandler.badRequest("Tenant ID is required"));
+      }
+
+      if (!userId) {
+        return next(CustomErrorHandler.badRequest("User ID is required"));
+      }
+
+      if (!Array.isArray(caseIds) || caseIds.length === 0) {
+        return next(CustomErrorHandler.badRequest("At least one case id is required"));
+      }
+
+      const uniqueCaseIds = [...new Set(caseIds)];
+
+      const tenantCases = await db.query.cases.findMany({
+        where: and(
+          eq(cases.tenantId, tenantId),
+          inArray(cases.id, uniqueCaseIds)
+        ),
+        with: {
+          court: true,
+        },
+      });
+
+      if (tenantCases.length === 0) {
+        return next(CustomErrorHandler.notFound("No valid cases found"));
+      }
+
+      const linkedClients = await db
+        .select({
+          caseId: caseClients.caseId,
+          clientId: clients.id,
+          firstName: clients.firstName,
+          lastName: clients.lastName,
+          companyName: clients.companyName,
+          email: clients.email,
+          phone: clients.phone,
+          role: caseClients.role,
+        })
+        .from(caseClients)
+        .innerJoin(clients, eq(caseClients.clientId, clients.id))
+        .where(inArray(caseClients.caseId, uniqueCaseIds));
+
+      const clientsWithEmail = linkedClients.filter(
+        (cl): cl is typeof cl & { email: string } => !!cl.email && cl.email.trim().length > 0
+      );
+
+      if (clientsWithEmail.length === 0) {
+        return next(
+          CustomErrorHandler.badRequest(
+            "None of the selected cases have attached clients with valid email addresses. Please link clients with emails before notifying."
+          )
+        );
+      }
+
+      const tenantCaseMap = new Map(tenantCases.map((c) => [c.id, c]));
+      const notifiedClientsList: Array<{
+        clientId: string;
+        clientName: string;
+        email: string;
+        caseId: string;
+        caseNumber?: string;
+        status: "sent" | "failed";
+      }> = [];
+
+      for (const clientItem of clientsWithEmail) {
+        const caseObj = tenantCaseMap.get(clientItem.caseId);
+        if (!caseObj) continue;
+
+        const clientDisplayName =
+          clientItem.companyName ||
+          `${clientItem.firstName} ${clientItem.lastName || ""}`.trim() ||
+          "Client";
+
+        // 1. Send Email Notification
+        const emailResult = await sendClientCaseNotificationEmail({
+          clientName: clientDisplayName,
+          clientEmail: clientItem.email,
+          caseTitle: caseObj.title,
+          caseNumber: caseObj.caseNumber || undefined,
+          cnrNumber: caseObj.cnrNumber || undefined,
+          court: caseObj.court?.name || undefined,
+          courtNo: caseObj.courtNumber || undefined,
+          firstParty: caseObj.firstParty || undefined,
+          oppositeParty: caseObj.oppositeParty || undefined,
+          nextHearingDate: caseObj.nextHearingDate,
+          subject,
+          customMessage: message,
+          firmName: "Law Practice System",
+        });
+
+        const notificationTitle =
+          subject?.trim() ||
+          `Case Notice: ${caseObj.caseNumber || caseObj.title || "Legal Matter"}`;
+
+        const notificationBody =
+          message?.trim() ||
+          `An update has been issued for your case: ${caseObj.caseNumber || caseObj.title} (${caseObj.firstParty || "Petitioner"} vs ${caseObj.oppositeParty || "Respondent"}).`;
+
+        // 2. Insert into notificationQueue for the client portal
+        const [queueItem] = await db
+          .insert(notificationQueue)
+          .values({
+            tenantId: caseObj.tenantId || tenantId,
+            officeId: caseObj.officeId || null,
+            caseId: caseObj.id,
+            clientId: clientItem.clientId,
+            channel: "portal",
+            recipient: clientItem.email,
+            payload: {
+              type: "case_notification",
+              title: notificationTitle,
+              message: notificationBody,
+              caseId: caseObj.id,
+              caseNumber: caseObj.caseNumber,
+              cnrNumber: caseObj.cnrNumber,
+              court: caseObj.court?.name || null,
+              courtNo: caseObj.courtNumber || null,
+              firstParty: caseObj.firstParty,
+              oppositeParty: caseObj.oppositeParty,
+              nextHearingDate: caseObj.nextHearingDate,
+              status: caseObj.status,
+              sentAt: new Date().toISOString(),
+            },
+            status: emailResult.success ? "sent" : "delivered",
+            sentAt: new Date(),
+          })
+          .returning();
+
+        // 3. Log to notificationLogs
+        if (queueItem) {
+          await db.insert(notificationLogs).values({
+            queueId: queueItem.id,
+            provider: "nodemailer",
+            response: emailResult.success
+              ? `Email sent to ${clientItem.email}`
+              : `Email failed: ${emailResult.error}`,
+            status: emailResult.success ? "success" : "failed",
+          });
+        }
+
+        // 4. Record event in caseTimelines
+        await db.insert(caseTimelines).values({
+          caseId: caseObj.id,
+          userId,
+          activityType: "client_notified",
+          title: "Client Notified",
+          description: `Notification dispatched to client ${clientDisplayName} (${clientItem.email}) via email and portal`,
+        });
+
+        notifiedClientsList.push({
+          clientId: clientItem.clientId,
+          clientName: clientDisplayName,
+          email: clientItem.email,
+          caseId: caseObj.id,
+          caseNumber: caseObj.caseNumber || undefined,
+          status: emailResult.success ? "sent" : "failed",
+        });
+      }
+
+      const casesWithNotifiedClients = new Set(
+        notifiedClientsList.map((n) => n.caseId)
+      );
+
+      return res.status(200).send(
+        ResponseHandler(200, "Client notifications sent successfully", {
+          totalCasesRequested: uniqueCaseIds.length,
+          casesNotifiedCount: casesWithNotifiedClients.size,
+          notifiedClientsCount: notifiedClientsList.length,
+          notifiedClients: notifiedClientsList,
+        })
+      );
+    } catch (error) {
+      console.error("Notify clients error:", error);
       return next(CustomErrorHandler.serverError());
     }
   },

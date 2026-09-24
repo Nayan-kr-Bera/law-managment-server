@@ -10,6 +10,7 @@ import caseDocuments from "../../db/schema/documents/caseDocuments.js";
 import invoices from "../../db/schema/finance/invoices.js";
 import supportTickets from "../../db/schema/support/supportTickets.js";
 import supportTicketMessages from "../../db/schema/support/supportTicketMessages.js";
+import notificationQueue from "../../db/schema/notifications/notificationQueue.js";
 import JwtService from "../../utils/jwtServices.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import ResponseHandler from "../../utils/responseHandler.js";
@@ -663,6 +664,85 @@ const clientPortalController = {
       );
     } catch (error) {
       console.error("Reply support ticket error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  // ─── CLIENT NOTIFICATIONS ──────────────────────────────────────────
+  async getNotifications(req: Request, res: Response, next: NextFunction) {
+    try {
+      const clientId = req.clientUser?.clientId;
+      if (!clientId) {
+        return next(CustomErrorHandler.unAuthorized("Client ID not found"));
+      }
+
+      const clientNotifs = await db
+        .select()
+        .from(notificationQueue)
+        .where(eq(notificationQueue.clientId, clientId))
+        .orderBy(desc(notificationQueue.sentAt))
+        .limit(50);
+
+      const unreadCount = clientNotifs.filter(
+        (n) => n.status !== "read"
+      ).length;
+
+      return res.status(200).json(
+        ResponseHandler(200, "Client notifications fetched successfully", {
+          notifications: clientNotifs,
+          unreadCount,
+        })
+      );
+    } catch (error) {
+      console.error("Get client notifications error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  async markNotificationRead(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const clientId = req.clientUser?.clientId;
+      if (!clientId) {
+        return next(CustomErrorHandler.unAuthorized("Client ID not found"));
+      }
+
+      await db
+        .update(notificationQueue)
+        .set({ status: "read" })
+        .where(
+          and(
+            eq(notificationQueue.id, id),
+            eq(notificationQueue.clientId, clientId)
+          )
+        );
+
+      return res.status(200).json(
+        ResponseHandler(200, "Notification marked as read")
+      );
+    } catch (error) {
+      console.error("Mark notification read error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  async markAllNotificationsRead(req: Request, res: Response, next: NextFunction) {
+    try {
+      const clientId = req.clientUser?.clientId;
+      if (!clientId) {
+        return next(CustomErrorHandler.unAuthorized("Client ID not found"));
+      }
+
+      await db
+        .update(notificationQueue)
+        .set({ status: "read" })
+        .where(eq(notificationQueue.clientId, clientId));
+
+      return res.status(200).json(
+        ResponseHandler(200, "All notifications marked as read")
+      );
+    } catch (error) {
+      console.error("Mark all notifications read error:", error);
       return next(CustomErrorHandler.serverError());
     }
   },
