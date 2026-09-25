@@ -18,6 +18,7 @@ export const PERMISSIONS = [
   { code: "user.update", description: "Update users" },
   { code: "user.delete", description: "Delete users" },
   { code: "user.assign_role", description: "Assign roles to users" },
+  { code: "user_permission.manage", description: "Manage user and advocate specific permissions" },
 
   // Advocates
   { code: "advocate.read", description: "View advocates" },

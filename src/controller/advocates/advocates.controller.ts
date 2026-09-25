@@ -14,6 +14,9 @@ import {
   offices,
   roles,
   userRoles,
+  permissions,
+  rolePermissions,
+  userPermissions,
 } from "../../db/schema/index.js";
 import {
   assignCasesSchema,
@@ -927,6 +930,299 @@ const advocatesController = {
           hasNextPage: page < totalPages,
           hasPreviousPage: page > 1,
         },
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async getAdvocatePermissions(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const tenantId = req.user?.tenantId;
+
+      if (!tenantId) {
+        return next(CustomErrorHandler.badRequest("Tenant ID is required."));
+      }
+
+      // Ensure 'user_permission.manage' exists in database
+      try {
+        const existingManagePerm = await db.query.permissions.findFirst({
+          where: eq(permissions.code, "user_permission.manage"),
+        });
+        if (!existingManagePerm) {
+          const [inserted] = await db
+            .insert(permissions)
+            .values({
+              code: "user_permission.manage",
+              description: "Manage user and advocate specific permissions",
+            })
+            .onConflictDoNothing()
+            .returning();
+
+          if (inserted) {
+            const tenantAdminRole = await db.query.roles.findFirst({
+              where: eq(roles.slug, "tenant_admin"),
+            });
+            if (tenantAdminRole) {
+              await db
+                .insert(rolePermissions)
+                .values({
+                  roleId: tenantAdminRole.id,
+                  permissionId: inserted.id,
+                })
+                .onConflictDoNothing();
+            }
+          }
+        }
+      } catch (e) {
+        // Safe ignore
+      }
+
+      // 1. Find advocate
+      const advocate = await db.query.advocates.findFirst({
+        where: eq(advocates.id, id),
+        with: {
+          user: true,
+        },
+      });
+
+      if (!advocate) {
+        return next(CustomErrorHandler.notFound("Advocate not found."));
+      }
+
+      // 2. Find advocate's scope for this tenant
+      const scope = await db.query.userScopes.findFirst({
+        where: and(
+          eq(userScopes.userId, advocate.userId),
+          eq(userScopes.tenantId, tenantId),
+        ),
+        with: {
+          roles: {
+            with: {
+              role: true,
+            },
+          },
+        },
+      });
+
+      if (!scope) {
+        return next(
+          CustomErrorHandler.forbidden(
+            "Advocate does not belong to this tenant.",
+          ),
+        );
+      }
+
+      // 3. Get direct user permissions assigned to this advocate's scope
+      const directPermissions = await db
+        .select({
+          id: permissions.id,
+          code: permissions.code,
+          description: permissions.description,
+        })
+        .from(userPermissions)
+        .innerJoin(
+          permissions,
+          eq(userPermissions.permissionId, permissions.id),
+        )
+        .where(eq(userPermissions.scopeId, scope.id));
+
+      // 4. Get role-based permissions inherited by this advocate
+      const roleIds = scope.roles.map((r) => r.roleId);
+      const rolePermissionsData =
+        roleIds.length > 0
+          ? await db
+              .select({
+                id: permissions.id,
+                code: permissions.code,
+                description: permissions.description,
+              })
+              .from(rolePermissions)
+              .innerJoin(
+                permissions,
+                eq(rolePermissions.permissionId, permissions.id),
+              )
+              .where(inArray(rolePermissions.roleId, roleIds))
+          : [];
+
+      // 5. Get all available system permissions
+      const allPermissions = await db
+        .select({
+          id: permissions.id,
+          code: permissions.code,
+          description: permissions.description,
+        })
+        .from(permissions);
+
+      const uniqueRolePermissions = Array.from(
+        new Set(rolePermissionsData.map((p) => p.code)),
+      );
+      const rolePermSet = new Set(uniqueRolePermissions);
+
+      // Only return permissions that are strictly direct user permissions (not in role)
+      const uniqueDirectPermissions = directPermissions
+        .map((p) => p.code)
+        .filter((code) => !rolePermSet.has(code));
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          advocate: {
+            id: advocate.id,
+            userId: advocate.userId,
+            name: advocate.user.name,
+            email: advocate.user.email,
+            role: scope.roles[0]?.role?.name ?? null,
+          },
+          directPermissions: uniqueDirectPermissions,
+          rolePermissions: uniqueRolePermissions,
+          allPermissions,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async updateAdvocatePermissions(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const { permissions: requestedPermissions } = req.body;
+      const tenantId = req.user?.tenantId;
+
+      if (!tenantId) {
+        return next(CustomErrorHandler.badRequest("Tenant ID is required."));
+      }
+
+      // Authorization check: Tenant Admin / Super Admin OR user with 'user_permission.manage' permission
+      const isSuperAdmin = req.user?.isSuperAdmin;
+      const userPermissionsList = req.user?.permissions || [];
+      let isAuthorized =
+        Boolean(isSuperAdmin) ||
+        userPermissionsList.includes("user_permission.manage");
+
+      if (!isAuthorized && req.user?.roleIds?.length) {
+        const tenantAdminRole = await db.query.roles.findFirst({
+          where: and(
+            eq(roles.slug, "tenant_admin"),
+            inArray(roles.id, req.user.roleIds),
+          ),
+        });
+        if (tenantAdminRole) {
+          isAuthorized = true;
+        }
+      }
+
+      if (!isAuthorized) {
+        return next(
+          CustomErrorHandler.forbidden(
+            "Only Tenant Admin or authorized users with 'user_permission.manage' permission can manage advocate permissions.",
+          ),
+        );
+      }
+
+      if (!Array.isArray(requestedPermissions)) {
+        return next(
+          CustomErrorHandler.badRequest("Permissions must be an array of permission codes."),
+        );
+      }
+
+      // 1. Find advocate
+      const advocate = await db.query.advocates.findFirst({
+        where: eq(advocates.id, id),
+        with: {
+          user: true,
+        },
+      });
+
+      if (!advocate) {
+        return next(CustomErrorHandler.notFound("Advocate not found."));
+      }
+
+      // 2. Find advocate's scope for this tenant
+      const scope = await db.query.userScopes.findFirst({
+        where: and(
+          eq(userScopes.userId, advocate.userId),
+          eq(userScopes.tenantId, tenantId),
+        ),
+      });
+
+      if (!scope) {
+        return next(
+          CustomErrorHandler.forbidden(
+            "Advocate does not belong to this tenant.",
+          ),
+        );
+      }
+
+      // 3. Get the advocate's role permissions so role permissions can never be stored as user permissions
+      const scopeRoles = await db
+        .select({
+          roleId: userRoles.roleId,
+        })
+        .from(userRoles)
+        .where(eq(userRoles.scopeId, scope.id));
+
+      const roleIds = scopeRoles.map((r) => r.roleId);
+      const rolePermissionsData =
+        roleIds.length > 0
+          ? await db
+              .select({
+                code: permissions.code,
+              })
+              .from(rolePermissions)
+              .innerJoin(
+                permissions,
+                eq(rolePermissions.permissionId, permissions.id),
+              )
+              .where(inArray(rolePermissions.roleId, roleIds))
+          : [];
+
+      const rolePermissionSet = new Set(rolePermissionsData.map((p) => p.code));
+
+      // Filter out role permissions: ONLY user-specific permissions (not granted by role) can be saved
+      const userSpecificCodes = requestedPermissions.filter(
+        (code: string) => !rolePermissionSet.has(code),
+      );
+
+      // Resolve valid permission codes
+      const validPermissionRecords =
+        userSpecificCodes.length > 0
+          ? await db
+              .select({
+                id: permissions.id,
+                code: permissions.code,
+              })
+              .from(permissions)
+              .where(inArray(permissions.code, userSpecificCodes))
+          : [];
+
+      const currentUserId = req.user?.userId || req.user?.id;
+
+      // 4. Update direct user_permissions in a transaction
+      await db.transaction(async (tx) => {
+        // Delete current direct permissions for this scope
+        await tx
+          .delete(userPermissions)
+          .where(eq(userPermissions.scopeId, scope.id));
+
+        // Insert new direct permissions
+        if (validPermissionRecords.length > 0) {
+          const insertData = validPermissionRecords.map((p) => ({
+            scopeId: scope.id,
+            permissionId: p.id,
+            grantedBy: currentUserId,
+          }));
+
+          await tx.insert(userPermissions).values(insertData);
+        }
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: "Advocate permissions updated successfully",
+        data: validPermissionRecords.map((p) => p.code),
       });
     } catch (error) {
       next(error);

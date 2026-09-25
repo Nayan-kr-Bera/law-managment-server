@@ -17,6 +17,8 @@ router.post(
   advocatesController.createAdvocate,
 );
 router.put("/reassign-cases", auth, advocatesController.reassignCases);
+router.get("/:id/permissions", auth, advocatesController.getAdvocatePermissions);
+router.put("/:id/permissions", auth, advocatesController.updateAdvocatePermissions);
 router.put("/:id", auth, advocatesController.updateAdvocate);
 router.delete("/:id", auth, advocatesController.deleteAdvocate);
 router.put("/:advocateId/cases", auth, advocatesController.assignCases);

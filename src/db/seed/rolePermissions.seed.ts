@@ -50,6 +50,7 @@ export default async function seedRolePermissions() {
     "user.update",
     "user.delete",
     "user.assign_role",
+    "user_permission.manage",
 
     // Advocates
     "advocate.read",
