@@ -64,7 +64,7 @@ export const aiDraftGuard = async (
           .update(tenantSubscriptions)
           .set({
             aiDraftsUsedThisMonth: 0,
-            aiDraftCycleResetDate: nextReset.toISOString().split("T")[0] as any,
+            aiDraftCycleResetDate: nextReset.toISOString().split("T")[0],
           })
           .where(eq(tenantSubscriptions.id, subscription.id));
 

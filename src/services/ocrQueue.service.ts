@@ -53,7 +53,7 @@ class OcrQueueService {
 
     try {
       await this.executeJob(job);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(`[ocrQueue] Uncaught error processing document ${job.documentId}:`, err);
     } finally {
       this.isProcessing = false;
@@ -122,7 +122,7 @@ class OcrQueueService {
           .update(tenantSubscriptions)
           .set({
             ocrPagesUsedThisMonth: 0,
-            ocrCycleResetDate: nextReset.toISOString().split("T")[0] as any,
+            ocrCycleResetDate: nextReset.toISOString().split("T")[0],
           })
           .where(eq(tenantSubscriptions.id, subscription.id));
       }
@@ -217,9 +217,9 @@ class OcrQueueService {
           warning: warningMessage || undefined,
         });
       }
-    } catch (ocrErr: any) {
+    } catch (ocrErr: unknown) {
       console.error(`[ocrQueue] OCR extraction error for document ${documentId}:`, ocrErr);
-      const errorMsg = ocrErr?.message || "Failed to process document OCR";
+      const errorMsg = ocrErr instanceof Error ? ocrErr.message : "Failed to process document OCR";
 
       await db
         .update(caseDocuments)

@@ -25,8 +25,10 @@ export const upload = multer({
       "application/vnd.ms-excel",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 
-      // Text
+      // Text & CSV
       "text/plain",
+      "text/csv",
+      "application/csv",
     ];
 
     if (allowedMimeTypes.includes(file.mimetype)) {

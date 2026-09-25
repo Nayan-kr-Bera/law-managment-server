@@ -51,12 +51,12 @@ class CustomFieldController {
         .insert(customFields)
         .values({
           tenantId,
-          officeId,
+          officeId: officeId || null,
           label,
           fieldKey,
           fieldType,
-          isRequired,
-          sortOrder,
+          isRequired: Boolean(isRequired),
+          sortOrder: Number(sortOrder) || 0,
           createdBy: userId,
         })
         .returning();
@@ -221,12 +221,12 @@ class CustomFieldController {
         await tx
           .update(customFields)
           .set({
-            officeId,
+            officeId: officeId || null,
             label,
             fieldKey,
             fieldType,
-            isRequired,
-            sortOrder,
+            isRequired: Boolean(isRequired),
+            sortOrder: Number(sortOrder) || 0,
           })
           .where(eq(customFields.id, id));
 
@@ -235,9 +235,9 @@ class CustomFieldController {
           .delete(customFieldOptions)
           .where(eq(customFieldOptions.fieldId, id));
 
-        // Insert new options only for Select/Radio
+        // Insert new options for option-based fields
         if (
-          (fieldType === "select" || fieldType === "radio") &&
+          ["select", "radio", "checkbox", "multiselect"].includes(fieldType) &&
           Array.isArray(options) &&
           options.length > 0
         ) {

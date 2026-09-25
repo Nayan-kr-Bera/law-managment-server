@@ -87,7 +87,7 @@ export const ocrService = {
     imageBuffer: Buffer | string,
     language: string = "eng+hin",
   ): Promise<string> {
-    let worker: any = null;
+    let worker: Awaited<ReturnType<typeof createWorker>> | null = null;
     try {
       const langList = language.includes("+") ? language.split("+") : language;
       worker = await createWorker(langList);
@@ -164,7 +164,11 @@ export const ocrService = {
             if (typeof parser.getScreenshot === "function") {
               const screenshot = await parser.getScreenshot();
               if (screenshot) {
-                imageToOcr = Buffer.from(screenshot as any);
+                imageToOcr = Buffer.isBuffer(screenshot)
+                  ? screenshot
+                  : "data" in screenshot && Buffer.isBuffer((screenshot as { data: Buffer }).data)
+                    ? (screenshot as { data: Buffer }).data
+                    : Buffer.from(screenshot as unknown as ArrayBuffer);
               }
             }
           } catch (shotError) {

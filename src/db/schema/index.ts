@@ -78,6 +78,7 @@ export { default as appointments } from "./task/appointments.js";
 export { default as reminders } from "./task/reminders.js";
 export { default as customReminders } from "./task/customReminders.js";
 export { default as taskComments } from "./task/taskComments.js";
+export { default as taskTimelines } from "./task/taskTimelines.js";
 // Finance
 
 export { default as invoices } from "./finance/invoices.js";

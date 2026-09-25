@@ -30,6 +30,7 @@ import tasks from "../task/tasks.js";
 import caseLinks from "./caseLinks.js";
 import caseTags from "./caseTags.js";
 import caseDecisions from "./caseDecision.js";
+import caseCustomFieldValues from "./caseCustomFieldValues.js";
 
 const cases = pgTable("cases", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -187,4 +188,5 @@ export const caseRelation = relations(cases, ({ one, many }) => ({
     relationName: "linkedCaseLinks",
   }),
   decisions: many(caseDecisions),
+  customFields: many(caseCustomFieldValues),
 }));

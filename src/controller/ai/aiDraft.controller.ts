@@ -24,7 +24,7 @@ const aiDraftController = {
     try {
       const tenantId = req.user?.tenantId;
       const userId = req.user?.userId;
-      const officeId = (req as any).officeId || null;
+      const officeId = req.officeId || null;
 
       if (!tenantId || !userId) {
         return next(CustomErrorHandler.unAuthorized("User authentication details missing"));
@@ -171,9 +171,10 @@ const aiDraftController = {
           createdAt: savedDraft?.createdAt,
         }),
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("[aiDraftController.generateDraft] Error:", err);
-      return next(CustomErrorHandler.serverError(err?.message || "Failed to generate draft"));
+      const message = err instanceof Error ? err.message : "Failed to generate draft";
+      return next(CustomErrorHandler.serverError(message));
     }
   },
 
@@ -266,7 +267,7 @@ const aiDraftController = {
           pack,
         }),
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("[aiDraftController.createCreditOrder] Error:", err);
       return next(CustomErrorHandler.serverError("Failed to initiate credit payment"));
     }
@@ -330,7 +331,7 @@ const aiDraftController = {
           invoiceNumber,
         }),
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("[aiDraftController.verifyCreditPayment] Error:", err);
       return next(CustomErrorHandler.serverError("Payment verification failed"));
     }

@@ -9,15 +9,17 @@ const router = Router();
 router.post("/", auth, officeGuard, taskController.createTask);
 
 // Get All Tasks
-router.get("/", auth, taskController.getTasks);
+router.get("/", auth, officeGuard, taskController.getTasks);
 
 router.get("/calendar", auth, officeGuard, taskController.getCalendarTasks);
+router.get("/timeline/chamber", auth, officeGuard, taskController.getChamberTaskTimeline);
+router.get("/:taskId/timeline", auth, officeGuard, taskController.getTaskTimeline);
 
 // Get Task By ID
-router.get("/:taskId", auth, taskController.getTaskById);
+router.get("/:taskId", auth, officeGuard, taskController.getTaskById);
 
 // Update Task
-router.put("/:taskId", auth, taskController.updateTask);
+router.put("/:taskId", auth, officeGuard, taskController.updateTask);
 router.patch(
   "/:taskId/status",
   auth,
@@ -26,5 +28,5 @@ router.patch(
 );
 
 // Delete Task
-router.delete("/:taskId", auth, taskController.deleteTask);
+router.delete("/:taskId", auth, officeGuard, taskController.deleteTask);
 export default router;

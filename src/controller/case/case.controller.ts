@@ -9,6 +9,7 @@ import {
   inArray,
   isNull,
   or,
+  SQL,
   sql,
 } from "drizzle-orm";
 import { NextFunction, Request, Response } from "express";
@@ -28,6 +29,7 @@ import {
 } from "../../db/schema/index.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import { getDateRange } from "../../utils/dateRange.js";
+import { endOfMonth, format, startOfMonth } from "date-fns";
 import ResponseHandler from "../../utils/responseHandler.js";
 import { createCaseSchema } from "../../validators/case.validator.js";
 
@@ -1307,27 +1309,49 @@ const caseController = {
       }
 
       const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 50);
+      const scope = String(req.query.scope || "").toLowerCase(); // "my", "all"
+      const search = String(req.query.search || "").trim();
 
       const advocate = await db.query.advocates.findFirst({
         where: eq(advocates.userId, userId),
-
         columns: {
           id: true,
         },
       });
 
-      if (!advocate) {
-        return res.status(200).json({
-          success: true,
-          data: [],
+      const findRecentCases = (whereClause: SQL | undefined) =>
+        db.query.cases.findMany({
+          where: whereClause,
+          with: {
+            court: true,
+            caseType: true,
+            clients: {
+              with: {
+                client: true,
+              },
+            },
+            advocates: {
+              with: {
+                advocate: {
+                  with: {
+                    user: true,
+                  },
+                },
+              },
+            },
+          },
+          orderBy: desc(cases.createdAt),
+          limit,
         });
-      }
 
-      const recentCases = await db.query.cases.findMany({
-        where: and(
+      let recentCases: Awaited<ReturnType<typeof findRecentCases>> = [];
+
+      // 1. If advocate exists and scope is not explicitly forced to "all", query assigned cases
+      if (advocate && scope !== "all") {
+        const assignedConditions: (SQL | undefined)[] = [
           eq(cases.tenantId, tenantId),
           eq(cases.officeId, officeId),
-
+          isNull(cases.deletedAt),
           exists(
             db
               .select()
@@ -1339,50 +1363,75 @@ const caseController = {
                 ),
               ),
           ),
-        ),
+        ];
 
-        with: {
-          court: true,
+        if (search) {
+          assignedConditions.push(
+            or(
+              ilike(cases.title, `%${search}%`),
+              ilike(cases.caseNumber, `%${search}%`),
+              ilike(cases.firstParty, `%${search}%`),
+              ilike(cases.oppositeParty, `%${search}%`),
+            ),
+          );
+        }
 
-          caseType: true,
+        recentCases = await findRecentCases(and(...assignedConditions));
+      }
 
-          clients: {
-            with: {
-              client: true,
-            },
-          },
+      // 2. Fallback to office cases if:
+      // - scope is "all"
+      // - or user is not in advocates table (e.g. Admin, Managing Partner, Owner)
+      // - or advocate has 0 assigned cases yet and scope was not restricted to "my_only"
+      if (recentCases.length === 0 && scope !== "my_only") {
+        const officeConditions: (SQL | undefined)[] = [
+          eq(cases.tenantId, tenantId),
+          eq(cases.officeId, officeId),
+          isNull(cases.deletedAt),
+        ];
 
-          advocates: true,
-        },
+        if (search) {
+          officeConditions.push(
+            or(
+              ilike(cases.title, `%${search}%`),
+              ilike(cases.caseNumber, `%${search}%`),
+              ilike(cases.firstParty, `%${search}%`),
+              ilike(cases.oppositeParty, `%${search}%`),
+            ),
+          );
+        }
 
-        orderBy: desc(cases.createdAt),
+        recentCases = await findRecentCases(and(...officeConditions));
+      }
 
-        limit,
+      const data = recentCases.map((item) => {
+        let clientName: string | null = null;
+        if (item.clients?.[0]?.client) {
+          const c = item.clients[0].client;
+          clientName = c.companyName || `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || null;
+        }
+        if (!clientName && item.firstParty) {
+          clientName = item.firstParty;
+        }
+
+        const assignedAdvocates = (item.advocates || [])
+          .map((ca) => ca.advocate?.user?.name)
+          .filter((name): name is string => Boolean(name));
+
+        return {
+          id: item.id,
+          caseNo: item.caseNumber || item.cnrNumber || item.referenceNumber || "-",
+          title: item.title,
+          client: clientName,
+          oppositeParty: item.oppositeParty ?? null,
+          court: item.court?.name ?? (item.courtNumber ? `Court No. ${item.courtNumber}` : null),
+          caseType: item.caseType?.name ?? null,
+          status: item.status,
+          nextHearing: item.nextHearingDate ?? null,
+          filedDate: item.filingDate ?? null,
+          assignedAdvocates,
+        };
       });
-
-      const data = recentCases.map((item) => ({
-        id: item.id,
-
-        caseNo: item.caseNumber,
-
-        title: item.title,
-
-        client: item.clients?.[0]?.client
-          ? `${item.clients[0].client.firstName ?? ""} ${item.clients[0].client.lastName ?? ""}`.trim()
-          : null,
-
-        oppositeParty: item.oppositeParty ?? null,
-
-        court: item.court?.name ?? null,
-
-        caseType: item.caseType?.name ?? null,
-
-        status: item.status,
-
-        nextHearing: item.nextHearingDate ?? null,
-
-        filedDate: item.filingDate ?? null,
-      }));
 
       return res.status(200).json({
         success: true,
@@ -1614,6 +1663,130 @@ const caseController = {
       });
     } catch (error) {
       console.error("getCasesPerCourtType error:", error);
+
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+  async getMonthlyCourtStats(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return next(CustomErrorHandler.unAuthorized());
+      }
+
+      const tenantId = req.user.tenantId;
+      if (!tenantId) {
+        return next(CustomErrorHandler.badRequest("Tenant context is missing"));
+      }
+
+      const today = new Date();
+      const startOfMonthStr = format(startOfMonth(today), "yyyy-MM-dd");
+      const endOfMonthStr = format(endOfMonth(today), "yyyy-MM-dd");
+      const monthLabel = format(today, "MMMM yyyy");
+
+      // Date condition: registrationDate, filingDate or createdAt in current month
+      const monthlyDateCondition = sql`(
+        (${cases.registrationDate} is not null and ${cases.registrationDate} >= ${startOfMonthStr}::date and ${cases.registrationDate} <= ${endOfMonthStr}::date)
+        or
+        (${cases.registrationDate} is null and ${cases.filingDate} is not null and ${cases.filingDate} >= ${startOfMonthStr}::date and ${cases.filingDate} <= ${endOfMonthStr}::date)
+        or
+        (${cases.registrationDate} is null and ${cases.filingDate} is null and ${cases.createdAt}::date >= ${startOfMonthStr}::date and ${cases.createdAt}::date <= ${endOfMonthStr}::date)
+      )`;
+
+      const monthlyWhere = and(
+        eq(cases.tenantId, tenantId),
+        monthlyDateCondition,
+      );
+
+      // 1. Total cases registered this month
+      const totalResult = await db
+        .select({
+          totalRegistered: sql<number>`count(distinct ${cases.id})`.as("total_registered"),
+        })
+        .from(cases)
+        .where(monthlyWhere);
+
+      const totalRegistered = Number(totalResult[0]?.totalRegistered ?? 0);
+
+      // 2. Cases registered this month by individual Court
+      const courtBreakdownRaw = await db
+        .select({
+          courtId: courts.id,
+          courtName: sql<string>`COALESCE(${courts.name}, 'District & Sessions Court')`.as("court_name"),
+          courtType: sql<string>`COALESCE(${courts.courtType}, 'district_court')`.as("court_type"),
+          state: courts.state,
+          registeredCount: sql<number>`count(distinct ${cases.id})`.as("registered_count"),
+        })
+        .from(cases)
+        .leftJoin(courts, eq(cases.courtId, courts.id))
+        .where(monthlyWhere)
+        .groupBy(courts.id, courts.name, courts.courtType, courts.state)
+        .orderBy(desc(sql`count(distinct ${cases.id})`));
+
+      // 3. Cases registered this month by Court Type / Tier
+      const courtTypeBreakdownRaw = await db
+        .select({
+          courtType: sql<string>`COALESCE(${courts.courtType}, 'district_court')`.as("court_type"),
+          count: sql<number>`count(distinct ${cases.id})`.as("count"),
+        })
+        .from(cases)
+        .leftJoin(courts, eq(cases.courtId, courts.id))
+        .where(monthlyWhere)
+        .groupBy(courts.courtType)
+        .orderBy(desc(sql`count(distinct ${cases.id})`));
+
+      // 4. Overall active cases across courts for comprehensive context
+      const allActiveByCourtRaw = await db
+        .select({
+          courtType: sql<string>`COALESCE(${courts.courtType}, 'other')`.as("court_type"),
+          count: sql<number>`count(distinct ${cases.id})`.as("count"),
+        })
+        .from(cases)
+        .leftJoin(courts, eq(cases.courtId, courts.id))
+        .where(eq(cases.tenantId, tenantId))
+        .groupBy(courts.courtType)
+        .orderBy(desc(sql`count(distinct ${cases.id})`));
+
+      const courtBreakdown = courtBreakdownRaw.map((item) => ({
+        courtId: item.courtId ?? null,
+        courtName: item.courtName,
+        courtType: item.courtType,
+        state: item.state ?? null,
+        count: Number(item.registeredCount),
+        percentage:
+          totalRegistered > 0
+            ? Math.round((Number(item.registeredCount) / totalRegistered) * 100)
+            : 0,
+      }));
+
+      const courtTypeBreakdown = courtTypeBreakdownRaw.map((item) => ({
+        courtType: item.courtType,
+        count: Number(item.count),
+        percentage:
+          totalRegistered > 0
+            ? Math.round((Number(item.count) / totalRegistered) * 100)
+            : 0,
+      }));
+
+      const allActiveCourtBreakdown = allActiveByCourtRaw.map((item) => ({
+        courtType: item.courtType,
+        count: Number(item.count),
+      }));
+
+      return res.status(200).json({
+        success: true,
+        message: "Monthly court statistics fetched successfully",
+        data: {
+          month: monthLabel,
+          startDate: startOfMonthStr,
+          endDate: endOfMonthStr,
+          totalRegistered,
+          courtBreakdown,
+          courtTypeBreakdown,
+          allActiveCourtBreakdown,
+        },
+      });
+    } catch (error) {
+      console.error("getMonthlyCourtStats error:", error);
 
       return next(CustomErrorHandler.serverError());
     }

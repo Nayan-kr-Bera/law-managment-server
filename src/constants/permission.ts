@@ -74,10 +74,13 @@ export const PERMISSIONS = [
 
   // Tasks
   { code: "task.read", description: "View tasks" },
+  { code: "task.read_all", description: "View all chamber tasks" },
   { code: "task.create", description: "Create tasks" },
   { code: "task.update", description: "Update tasks" },
   { code: "task.delete", description: "Delete tasks" },
   { code: "task.assign", description: "Assign tasks" },
+  { code: "task.reassign", description: "Reassign tasks" },
+  { code: "task.timeline", description: "View task activity timeline and performance tracking" },
 
   // Reminders
   { code: "reminder.read", description: "View reminders" },

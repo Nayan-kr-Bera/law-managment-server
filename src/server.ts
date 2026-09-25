@@ -2,6 +2,7 @@ import app from "./app.js";
 import { config } from "./config/index.js";
 import { startReminderCron } from "./services/reminderCron.service.js";
 import { startHearingReminderCron } from "./services/hearingReminderCron.service.js";
+import { startTaskReminderCron } from "./services/taskReminderCron.service.js";
 import { startReminderWorker } from "./services/reminderEmailWorker.service.js";
 import { verifySMTP } from "./services/emailOtp.service.js";
 
@@ -14,6 +15,7 @@ const startServer = async () => {
 			await verifySMTP();
 			startReminderCron();
 			startHearingReminderCron();
+			startTaskReminderCron();
 			startReminderWorker();
 		});
 

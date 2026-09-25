@@ -2,6 +2,7 @@ import {
   pgTable,
   uuid,
   varchar,
+  text,
   date,
   timestamp,
 } from "drizzle-orm/pg-core";
@@ -14,6 +15,8 @@ import tenants from "../tenants.js";
 import offices from "../offices.js";
 import cases from "../caseMangment/cases.js";
 import users from "../users.js";
+import taskComments from "./taskComments.js";
+import taskTimelines from "./taskTimelines.js";
 
 const tasks = pgTable("tasks", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -29,6 +32,8 @@ const tasks = pgTable("tasks", {
   title: varchar("title", {
     length: 255,
   }).notNull(),
+
+  description: text("description"),
 
   dueDate: date("due_date"),
 
@@ -55,7 +60,7 @@ const tasks = pgTable("tasks", {
 
 export default tasks;
 
-export const taskRelation = relations(tasks, ({ one }) => ({
+export const taskRelation = relations(tasks, ({ one, many }) => ({
   tenant: one(tenants, {
     fields: [tasks.tenantId],
     references: [tenants.id],
@@ -87,4 +92,7 @@ export const taskRelation = relations(tasks, ({ one }) => ({
     references: [users.id],
     relationName: "task_updater",
   }),
+
+  comments: many(taskComments),
+  timelines: many(taskTimelines),
 }));

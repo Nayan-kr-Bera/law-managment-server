@@ -231,7 +231,7 @@ export const invoicesController = {
           ? typedLineItems.reduce((acc: number, item: InvoiceLineItemInput) => acc + (Number(item.amount) || 0), 0)
           : Number(inv.total);
 
-      const updateData: Record<string, any> = {
+      const updateData: Partial<typeof invoices.$inferInsert> = {
         total: String(finalTotal),
       };
       if (invoiceNo) updateData.invoiceNo = invoiceNo;

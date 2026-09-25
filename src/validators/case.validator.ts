@@ -113,8 +113,21 @@ export const createCaseSchema = z.object({
     .array(
       z.object({
         fieldId: z.uuid(),
-
-        value: z.string(),
+        value: z
+          .union([
+            z.string(),
+            z.number(),
+            z.boolean(),
+            z.array(z.string()),
+            z.null(),
+            z.undefined(),
+          ])
+          .transform((val) => {
+            if (val === undefined || val === null) return "";
+            if (Array.isArray(val)) return val.join(", ");
+            if (typeof val === "boolean") return val ? "true" : "false";
+            return String(val);
+          }),
       }),
     )
     .optional(),

@@ -1,4 +1,4 @@
-import { and, count, eq, isNull, sql, ilike, inArray } from "drizzle-orm";
+import { and, count, eq, isNull, sql, ilike, inArray, SQL } from "drizzle-orm";
 import { Request, Response, NextFunction } from "express";
 
 import db from "../../db/index.js";
@@ -630,7 +630,7 @@ const caseDocumentController = {
         );
       }
 
-      const filters: any[] = [
+      const filters: SQL[] = [
         eq(caseDocuments.tenantId, tenantId),
         eq(caseDocuments.ocrStatus, "completed"),
         ilike(caseDocuments.ocrText, `%${searchQuery}%`),
