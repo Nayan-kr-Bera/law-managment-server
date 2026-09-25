@@ -127,6 +127,7 @@ const subscriptionPlansData = [
       "Chamber / Office Location",
       "Active Daily Cause List",
       "Case Management",
+      "Advanced Case Management",
       "Client Management",
       "Basic Document Management",
       "Tasks & Reminders",
