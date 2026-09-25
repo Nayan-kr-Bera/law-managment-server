@@ -195,6 +195,89 @@ export const invoicesController = {
     }
   },
 
+  // UPDATE INVOICE
+  async updateInvoice(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return next(CustomErrorHandler.badRequest("Tenant context missing"));
+      }
+
+      const inv = await db.query.invoices.findFirst({
+        where: and(eq(invoices.id, id), eq(invoices.tenantId, tenantId)),
+        with: { items: true },
+      });
+
+      if (!inv) {
+        return next(CustomErrorHandler.notFound("Invoice not found"));
+      }
+
+      const {
+        invoiceNo,
+        clientId,
+        caseId,
+        lineItems,
+        total,
+        status,
+      } = req.body;
+
+      const typedLineItems = Array.isArray(lineItems) ? (lineItems as InvoiceLineItemInput[]) : null;
+
+      const finalTotal =
+        total !== undefined
+          ? Number(total)
+          : typedLineItems
+          ? typedLineItems.reduce((acc: number, item: InvoiceLineItemInput) => acc + (Number(item.amount) || 0), 0)
+          : Number(inv.total);
+
+      const updateData: Record<string, any> = {
+        total: String(finalTotal),
+      };
+      if (invoiceNo) updateData.invoiceNo = invoiceNo;
+      if (clientId !== undefined) updateData.clientId = clientId || null;
+      if (caseId !== undefined) updateData.caseId = caseId || null;
+      if (status) updateData.status = status;
+
+      const [updatedInvoice] = await db
+        .update(invoices)
+        .set(updateData)
+        .where(and(eq(invoices.id, id), eq(invoices.tenantId, tenantId)))
+        .returning();
+
+      if (typedLineItems !== null) {
+        await db.delete(invoiceItems).where(eq(invoiceItems.invoiceId, id));
+        if (typedLineItems.length > 0) {
+          const itemRows = typedLineItems.map((item: InvoiceLineItemInput) => ({
+            invoiceId: id,
+            description: item.description || "Legal Services",
+            quantity: item.quantity || 1,
+            price: String(item.amount ?? item.price ?? 0),
+          }));
+          await db.insert(invoiceItems).values(itemRows);
+        }
+      }
+
+      // Update client ledger debit if exists
+      if (inv.clientId) {
+        await db
+          .update(clientLedger)
+          .set({
+            debit: String(finalTotal),
+            description: `Invoice updated: ${updatedInvoice.invoiceNo}`,
+          })
+          .where(and(eq(clientLedger.invoiceId, id), eq(clientLedger.tenantId, tenantId)));
+      }
+
+      return res.status(200).json(
+        ResponseHandler(200, "Invoice updated successfully", updatedInvoice),
+      );
+    } catch (error) {
+      console.error("Update invoice error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
   // DELETE INVOICE
   async deleteInvoice(req: Request, res: Response, next: NextFunction) {
     try {
@@ -247,19 +330,35 @@ export const invoicesController = {
         (p) => p.invoice?.tenantId === tenantId,
       );
 
-      const receipts = tenantPayments.map((p, idx) => ({
-        id: p.id,
-        invoiceId: p.invoiceId,
-        invoiceNo: p.invoice?.invoiceNo || "",
-        no: `RCPT/${String(idx + 1).padStart(3, "0")}`,
-        date: p.paidAt ? new Date(p.paidAt).toISOString().split("T")[0] : "",
-        amount: Number(p.amount) || 0,
-        mode: p.paymentMethod || "Bank Transfer",
-        type: "Receipt",
-        description: p.paymentMethod ? `Payment via ${p.paymentMethod}` : "Payment Received",
-        clientName: p.invoice?.client?.companyName || `${p.invoice?.client?.firstName || ""} ${p.invoice?.client?.lastName || ""}`.trim() || "Client",
-        caseNo: p.invoice?.case?.caseNumber || "",
-      }));
+      const receipts = tenantPayments.map((p, idx) => {
+        const isPaid =
+          p.invoice?.status === "paid" ||
+          p.paymentMethod?.toLowerCase().includes("online") ||
+          p.paymentMethod?.toLowerCase().includes("razorpay");
+        const isOnline =
+          p.paymentMethod?.toLowerCase().includes("online") ||
+          p.paymentMethod?.toLowerCase().includes("razorpay");
+        const isTDS =
+          p.paymentMethod?.toLowerCase().includes("tds") || false;
+
+        return {
+          id: p.id,
+          invoiceId: p.invoiceId,
+          invoiceNo: p.invoice?.invoiceNo || "",
+          no: `RCPT/${String(idx + 1).padStart(3, "0")}`,
+          date: p.paidAt ? new Date(p.paidAt).toISOString().split("T")[0] : "",
+          amount: Number(p.amount) || 0,
+          mode: p.paymentMethod || "Bank Transfer",
+          paymentMode: p.paymentMethod || "Bank Transfer",
+          type: isTDS ? "TDS" : "Receipt",
+          description: p.paymentMethod ? (isTDS ? "TDS Deducted at Source" : `Payment via ${p.paymentMethod}`) : "Payment Received",
+          clientName: p.invoice?.client?.companyName || `${p.invoice?.client?.firstName || ""} ${p.invoice?.client?.lastName || ""}`.trim() || "Client",
+          caseNo: p.invoice?.case?.caseNumber || "",
+          status: p.invoice?.status || "paid",
+          isPaid,
+          isOnline,
+        };
+      });
 
       return res.status(200).json(
         ResponseHandler(200, "Receipts retrieved successfully", receipts),
@@ -347,10 +446,27 @@ export const invoicesController = {
 
       const existing = await db.query.payments.findFirst({
         where: eq(payments.id, id),
+        with: {
+          invoice: true,
+        },
       });
 
       if (!existing) {
         return next(CustomErrorHandler.notFound("Payment receipt not found"));
+      }
+
+      // If once generated billed paid from customer site / online or invoice is settled, it cannot be edited
+      const isOnlineOrPaid =
+        existing.invoice?.status === "paid" ||
+        existing.paymentMethod?.toLowerCase().includes("online") ||
+        existing.paymentMethod?.toLowerCase().includes("razorpay");
+
+      if (isOnlineOrPaid) {
+        return next(
+          CustomErrorHandler.badRequest(
+            "This receipt has been paid/completed from the customer portal and cannot be edited.",
+          ),
+        );
       }
 
       const [updated] = await db

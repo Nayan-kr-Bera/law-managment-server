@@ -11,6 +11,7 @@ router.post("/receipts", auth, invoicesController.createReceipt);
 router.put("/receipts/:id", auth, invoicesController.updateReceipt);
 router.delete("/receipts/:id", auth, invoicesController.deleteReceipt);
 router.get("/:id", auth, invoicesController.getInvoiceById);
+router.put("/:id", auth, invoicesController.updateInvoice);
 router.delete("/:id", auth, invoicesController.deleteInvoice);
 
 export default router;

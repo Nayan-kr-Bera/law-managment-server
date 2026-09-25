@@ -46,6 +46,7 @@ router.post(
 );
 
 router.get("/billing/invoices", clientAuth, clientPortalController.getInvoices);
+router.post("/billing/invoices/:invoiceId/create-order", clientAuth, clientPortalController.createInvoiceRazorpayOrder);
 router.post("/billing/invoices/:invoiceId/pay", clientAuth, clientPortalController.payInvoice);
 
 router.get("/support/tickets", clientAuth, supportTicketController.getClientTickets);
