@@ -16,7 +16,10 @@ router.patch("/read-all", auth, notificationController.markAllAsRead);
 // MARK single notification as read
 router.patch("/:id/read", auth, notificationController.markAsRead);
 
-// DELETE notification
+// CLEAR all read notifications
+router.delete("/clear-read", auth, notificationController.clearReadNotifications);
+
+// DELETE single notification
 router.delete("/:id", auth, notificationController.deleteNotification);
 
 export default router;

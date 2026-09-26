@@ -13,7 +13,7 @@ import ResponseHandler from "../utils/responseHandler.js";
 import { notificationEvents } from "../services/notification.service.js";
 
 const notificationController = {
-  // GET USER NOTIFICATIONS
+  // GET USER NOTIFICATIONS (User-Isolated)
   async getNotifications(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -24,66 +24,21 @@ const notificationController = {
       }
 
       const page = parseInt(req.query.page as string) || 1;
-      const limit = parseInt(req.query.limit as string) || 20;
+      const limit = parseInt(req.query.limit as string) || 30;
       const offset = (page - 1) * limit;
-      const filterOfficeId = (req.query.officeId as string) || req.officeId || null;
+      const filterOfficeId = (req.query.officeId as string) || null;
       const statusFilter = req.query.status as string; // 'unread' | 'read' | 'all'
       const typeFilter = req.query.type as string; // 'hearing' | 'task' | 'appointment' | 'invoice' | 'system'
 
-      // Check if user is SuperAdmin or Tenant Admin
-      const isSuperAdmin = Boolean(req.user?.isSuperAdmin);
-      const isTenantAdmin =
-        isSuperAdmin ||
-        Boolean(
-          req.user?.permissions?.includes("tenant.update") ||
-          req.user?.permissions?.includes("tenant.read")
-        );
+      // Construct visibility filter: strictly user-scoped
+      const visibilityConditions: SQL[] = [
+        eq(notifications.tenantId, tenantId),
+        or(eq(notifications.userId, userId), isNull(notifications.userId))!,
+      ];
 
-      // Find user's assigned offices from userScopeOffices
-      const userAssignedOfficeRecords = await db
-        .select({ officeId: userScopeOffices.officeId })
-        .from(userScopeOffices)
-        .innerJoin(userScopes, eq(userScopeOffices.userScopeId, userScopes.id))
-        .where(eq(userScopes.userId, userId));
-
-      const assignedOfficeIds = userAssignedOfficeRecords.map((r: { officeId: string }) => r.officeId);
-
-      // Construct visibility filter
-      const visibilityConditions: SQL[] = [];
-
-      if (isTenantAdmin) {
-        // Tenant Admin sees all notifications within tenant
-        visibilityConditions.push(eq(notifications.tenantId, tenantId));
-        if (filterOfficeId) {
-          visibilityConditions.push(eq(notifications.officeId, filterOfficeId));
-        }
-      } else {
-        // Regular lawyer / user visibility:
-        // 1. Direct notification to this user
-        // 2. Office-level broadcast to assigned offices only
-        // 3. Firm-wide broadcast (no officeId, no userId)
-        const userOrOfficeConditions: SQL[] = [eq(notifications.userId, userId)];
-
-        if (assignedOfficeIds.length > 0) {
-          if (filterOfficeId && assignedOfficeIds.includes(filterOfficeId)) {
-            userOrOfficeConditions.push(
-              and(eq(notifications.officeId, filterOfficeId), isNull(notifications.userId))!
-            );
-          } else if (!filterOfficeId) {
-            userOrOfficeConditions.push(
-              and(inArray(notifications.officeId, assignedOfficeIds), isNull(notifications.userId))!
-            );
-          }
-        }
-
-        // Global firm announcements
-        userOrOfficeConditions.push(
-          and(isNull(notifications.officeId), isNull(notifications.userId))!
-        );
-
+      if (filterOfficeId) {
         visibilityConditions.push(
-          eq(notifications.tenantId, tenantId),
-          or(...userOrOfficeConditions)!
+          or(eq(notifications.officeId, filterOfficeId), isNull(notifications.officeId))!
         );
       }
 
@@ -120,29 +75,17 @@ const notificationController = {
         .limit(limit)
         .offset(offset);
 
-      // Calculate total unread count for the user
-      const unreadWhereConditions: SQL[] = [
+      // Calculate unread count strictly for this user
+      const unreadWhere = and(
         eq(notifications.tenantId, tenantId),
         eq(notifications.status, "pending"),
-      ];
-
-      if (!isTenantAdmin) {
-        const unreadUserConditions: SQL[] = [eq(notifications.userId, userId)];
-        if (assignedOfficeIds.length > 0) {
-          unreadUserConditions.push(
-            and(inArray(notifications.officeId, assignedOfficeIds), isNull(notifications.userId))!
-          );
-        }
-        unreadUserConditions.push(
-          and(isNull(notifications.officeId), isNull(notifications.userId))!
-        );
-        unreadWhereConditions.push(or(...unreadUserConditions)!);
-      }
+        or(eq(notifications.userId, userId), isNull(notifications.userId))!
+      );
 
       const [unreadCountResult] = await db
         .select({ count: count() })
         .from(notifications)
-        .where(and(...unreadWhereConditions));
+        .where(unreadWhere);
 
       const [totalCountResult] = await db
         .select({ count: count() })
@@ -170,20 +113,27 @@ const notificationController = {
     }
   },
 
-  // MARK NOTIFICATION AS READ
+  // MARK NOTIFICATION AS READ (User-Isolated)
   async markAsRead(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
       const tenantId = req.user?.tenantId;
+      const userId = req.user?.userId;
 
-      if (!tenantId) {
+      if (!tenantId || !userId) {
         return next(CustomErrorHandler.unAuthorized());
       }
 
       const [updated] = await db
         .update(notifications)
         .set({ status: "read" })
-        .where(and(eq(notifications.id, id), eq(notifications.tenantId, tenantId)))
+        .where(
+          and(
+            eq(notifications.id, id),
+            eq(notifications.tenantId, tenantId),
+            or(eq(notifications.userId, userId), isNull(notifications.userId))!
+          )
+        )
         .returning();
 
       if (!updated) {
@@ -201,7 +151,7 @@ const notificationController = {
     }
   },
 
-  // MARK ALL NOTIFICATIONS AS READ
+  // MARK ALL NOTIFICATIONS AS READ (User-Isolated)
   async markAllAsRead(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -211,7 +161,7 @@ const notificationController = {
         return next(CustomErrorHandler.unAuthorized());
       }
 
-      // Mark user-specific and tenant unread notifications as read
+      // Mark only this user's pending notifications as read
       await db
         .update(notifications)
         .set({ status: "read" })
@@ -219,10 +169,7 @@ const notificationController = {
           and(
             eq(notifications.tenantId, tenantId),
             eq(notifications.status, "pending"),
-            or(
-              eq(notifications.userId, userId),
-              isNull(notifications.userId)
-            )
+            or(eq(notifications.userId, userId), isNull(notifications.userId))!
           )
         );
 
@@ -235,19 +182,26 @@ const notificationController = {
     }
   },
 
-  // DELETE NOTIFICATION
+  // DELETE SINGLE NOTIFICATION (User-Isolated)
   async deleteNotification(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
       const tenantId = req.user?.tenantId;
+      const userId = req.user?.userId;
 
-      if (!tenantId) {
+      if (!tenantId || !userId) {
         return next(CustomErrorHandler.unAuthorized());
       }
 
       const [deleted] = await db
         .delete(notifications)
-        .where(and(eq(notifications.id, id), eq(notifications.tenantId, tenantId)))
+        .where(
+          and(
+            eq(notifications.id, id),
+            eq(notifications.tenantId, tenantId),
+            or(eq(notifications.userId, userId), isNull(notifications.userId))!
+          )
+        )
         .returning();
 
       if (!deleted) {
@@ -263,7 +217,36 @@ const notificationController = {
     }
   },
 
-  // SERVER-SENT EVENTS (SSE) STREAM
+  // CLEAR ALL READ NOTIFICATIONS (User-Isolated)
+  async clearReadNotifications(req: Request, res: Response, next: NextFunction) {
+    try {
+      const tenantId = req.user?.tenantId;
+      const userId = req.user?.userId;
+
+      if (!tenantId || !userId) {
+        return next(CustomErrorHandler.unAuthorized());
+      }
+
+      await db
+        .delete(notifications)
+        .where(
+          and(
+            eq(notifications.tenantId, tenantId),
+            eq(notifications.status, "read"),
+            or(eq(notifications.userId, userId), isNull(notifications.userId))!
+          )
+        );
+
+      return res.status(200).json(
+        ResponseHandler(200, "All read notifications cleared successfully")
+      );
+    } catch (error) {
+      console.error("Clear read notifications error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  // SERVER-SENT EVENTS (SSE) STREAM (User-Isolated)
   async streamNotifications(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -272,23 +255,6 @@ const notificationController = {
       if (!tenantId || !userId) {
         return next(CustomErrorHandler.unAuthorized("User context missing"));
       }
-
-      const isSuperAdmin = Boolean(req.user?.isSuperAdmin);
-      const isTenantAdmin =
-        isSuperAdmin ||
-        Boolean(
-          req.user?.permissions?.includes("tenant.update") ||
-          req.user?.permissions?.includes("tenant.read")
-        );
-
-      // Find user's assigned offices
-      const userAssignedOfficeRecords = await db
-        .select({ officeId: userScopeOffices.officeId })
-        .from(userScopeOffices)
-        .innerJoin(userScopes, eq(userScopeOffices.userScopeId, userScopes.id))
-        .where(eq(userScopes.userId, userId));
-
-      const assignedOfficeIds = userAssignedOfficeRecords.map((r: { officeId: string }) => r.officeId);
 
       // Setup SSE Headers
       res.setHeader("Content-Type", "text/event-stream");
@@ -300,24 +266,14 @@ const notificationController = {
       // Send initial connection event
       res.write(`event: connected\ndata: ${JSON.stringify({ status: "connected", time: new Date().toISOString() })}\n\n`);
 
-      // Event listener callback
+      // Event listener callback: strictly push events targeted to this user
       const onNotification = (notif: typeof notifications.$inferSelect) => {
         try {
-          // Must belong to the same tenant
           if (notif.tenantId !== tenantId) return;
 
-          // Check if user is recipient or has visibility
-          if (isTenantAdmin) {
-            // Tenant admins receive all tenant notifications
+          // Push if explicitly targeted to this user or global unassigned
+          if (notif.userId === userId || notif.userId === null) {
             res.write(`event: notification\ndata: ${JSON.stringify(notif)}\n\n`);
-          } else {
-            // Explicit user match OR unassigned/office notification matching user's office scope
-            const isDirectRecipient = notif.userId === userId;
-            const isBroadcastToOffice = !notif.userId && (!notif.officeId || assignedOfficeIds.includes(notif.officeId));
-
-            if (isDirectRecipient || isBroadcastToOffice) {
-              res.write(`event: notification\ndata: ${JSON.stringify(notif)}\n\n`);
-            }
           }
         } catch (err) {
           console.error("Error sending SSE notification frame:", err);
