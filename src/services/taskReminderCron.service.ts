@@ -3,6 +3,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import db from "../db/index.js";
 import { tasks, cases, user, notifications } from "../db/schema/index.js";
 import { sendTaskDeadlineReminderEmail } from "./taskEmail.service.js";
+import { createNotification } from "./notification.service.js";
 
 /**
  * Task Deadline Reminder Service
@@ -74,19 +75,14 @@ export async function processTaskDeadlineReminders(): Promise<void> {
       // 1. Notify Assignee
       if (assigneeData) {
         // Send In-App Notification
-        try {
-          await db.insert(notifications).values({
-            tenantId: task.tenantId || undefined,
-            officeId: task.officeId || undefined,
-            userId: assigneeData.id,
-            title: `Deadline Tomorrow: ${task.title}`,
-            body: `Your assigned task "${task.title}" is due tomorrow (${task.dueDate}). Priority: ${task.priority.toUpperCase()}`,
-            type: "task",
-            status: "pending",
-          });
-        } catch (err) {
-          console.error("Failed to create in-app notification for assignee:", err);
-        }
+        await createNotification({
+          tenantId: task.tenantId || "",
+          officeId: task.officeId || null,
+          userId: assigneeData.id,
+          title: `Deadline Tomorrow: ${task.title}`,
+          body: `Your assigned task "${task.title}" is due tomorrow (${task.dueDate}). Priority: ${task.priority.toUpperCase()}`,
+          type: "task",
+        });
 
         // Send Email Reminder
         await sendTaskDeadlineReminderEmail({
@@ -106,19 +102,14 @@ export async function processTaskDeadlineReminders(): Promise<void> {
       // 2. Notify Creator (if different from assignee)
       if (creatorData && creatorData.id !== assigneeData?.id) {
         // Send In-App Notification
-        try {
-          await db.insert(notifications).values({
-            tenantId: task.tenantId || undefined,
-            officeId: task.officeId || undefined,
-            userId: creatorData.id,
-            title: `Task Deadline Tomorrow: ${task.title}`,
-            body: `The task "${task.title}" created by you (assigned to ${assigneeData?.name || "unassigned"}) is due tomorrow.`,
-            type: "task",
-            status: "pending",
-          });
-        } catch (err) {
-          console.error("Failed to create in-app notification for creator:", err);
-        }
+        await createNotification({
+          tenantId: task.tenantId || "",
+          officeId: task.officeId || null,
+          userId: creatorData.id,
+          title: `Task Deadline Tomorrow: ${task.title}`,
+          body: `The task "${task.title}" created by you (assigned to ${assigneeData?.name || "unassigned"}) is due tomorrow.`,
+          type: "task",
+        });
 
         // Send Email Reminder
         await sendTaskDeadlineReminderEmail({

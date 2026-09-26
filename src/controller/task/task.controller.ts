@@ -23,6 +23,7 @@ import {
 import users from "../../db/schema/users.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import { sendTaskAssignmentEmail } from "../../services/taskEmail.service.js";
+import { createNotification } from "../../services/notification.service.js";
 
 /**
  * Helper to check if a user is an administrator or has specific permission
@@ -193,15 +194,14 @@ const taskController = {
       // Dispatch Notifications if assigned to someone else
       if (assignedUserRecord) {
         try {
-          // In-App Notification
-          await db.insert(notifications).values({
+          // In-App Notification (emitted over SSE)
+          await createNotification({
             tenantId,
             officeId,
             userId: assignedUserRecord.id,
             title: `New Task Assigned: ${title}`,
             body: `${creatorRecord?.name || "A chamber colleague"} assigned you a new task: "${title}". Due: ${dueDate || "Open"}`,
             type: "task",
-            status: "pending",
           });
         } catch (notifErr) {
           console.error("Failed to create in-app notification:", notifErr);

@@ -42,6 +42,7 @@ import {
   contactUsRoutes,
   aiDraftRoutes,
   auditLogRoutes,
+  notificationRoutes,
 } from "./routes/index.js";
 
 const app = express();
@@ -118,6 +119,7 @@ app.use("/api/invoices", invoicesRoutes);
 app.use("/api/contact-us", contactUsRoutes);
 app.use("/api/ai", aiDraftRoutes);
 app.use("/api/audit-logs", auditLogRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 /* ---------- 404 ---------- */
 app.use(notFound);

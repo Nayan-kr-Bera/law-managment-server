@@ -28,6 +28,12 @@ router.post(
   tenantSubscriptionController.verifyPayment,
 );
 
+// CHANGE PLAN PREVIEW & PRORATION
+router.post(
+  "/:tenantId/preview-transition",
+  tenantSubscriptionController.previewTransition,
+);
+
 // CHANGE PLAN
 // Upgrade / Downgrade
 // Effective NEXT billing cycle

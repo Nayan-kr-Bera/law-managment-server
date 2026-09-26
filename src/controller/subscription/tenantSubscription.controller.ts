@@ -143,8 +143,7 @@ const tenantSubscriptionController = {
     }
   },
 
-  // CREATE PAYMENT ORDER
-
+  // CREATE PAYMENT ORDER (Supports Initial Subscriptions and Mid-Cycle Prorated Upgrades with 18% GST)
   async createPaymentOrder(req: Request, res: Response, next: NextFunction) {
     try {
       const { tenantId: paramTenantId } = req.params;
@@ -189,80 +188,253 @@ const tenantSubscriptionController = {
         );
       }
 
-      const existingSubscription = await db.query.tenantSubscriptions.findFirst(
-        {
-          where: eq(tenantSubscriptions.tenantId, tenantId),
+      const existingSubscription = await db.query.tenantSubscriptions.findFirst({
+        where: eq(tenantSubscriptions.tenantId, tenantId),
+        with: {
+          plan: true,
         },
-      );
+      });
 
-      if (existingSubscription) {
-        return next(
-          CustomErrorHandler.badRequest(
-            "Tenant already has a subscription. Use change-plan for an existing subscription.",
-          ),
-        );
-      }
-
-      const amount =
+      const newBasePrice =
         billingCycle === "annual"
-          ? Number(plan.annualPrice)
+          ? Number(plan.annualPrice) * 12
           : Number(plan.monthlyPrice);
 
-      if (!Number.isFinite(amount) || amount <= 0) {
-        return next(
-          CustomErrorHandler.badRequest("Invalid subscription amount"),
-        );
+      let isUpgrade = false;
+      let proratedBaseAmount = newBasePrice;
+      let remainingDays = 0;
+      let totalDaysInCycle = billingCycle === "annual" ? 365 : 30;
+      let oldPlanCredit = 0;
+      let newPlanCostForRemaining = 0;
+
+      if (existingSubscription && existingSubscription.status === "active") {
+        if (
+          String(existingSubscription.planId) === String(plan.id) &&
+          existingSubscription.billingCycle === billingCycle
+        ) {
+          return next(
+            CustomErrorHandler.badRequest(
+              "You are already active on this subscription tier and billing cycle.",
+            ),
+          );
+        }
+
+        const currentPlan = existingSubscription.plan;
+        const currentBasePrice =
+          existingSubscription.billingCycle === "annual"
+            ? Number(currentPlan?.annualPrice || 0) * 12
+            : Number(currentPlan?.monthlyPrice || 0);
+
+        const today = new Date();
+        const nextBilling = new Date(existingSubscription.nextBillingDate);
+        const diffTime = nextBilling.getTime() - today.getTime();
+        remainingDays = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+        totalDaysInCycle =
+          existingSubscription.billingCycle === "annual" ? 365 : 30;
+
+        const currentDailyRate = currentBasePrice / totalDaysInCycle;
+        const targetDailyRate =
+          newBasePrice / (billingCycle === "annual" ? 365 : 30);
+
+        oldPlanCredit =
+          Math.round(currentDailyRate * remainingDays * 100) / 100;
+        newPlanCostForRemaining =
+          Math.round(targetDailyRate * remainingDays * 100) / 100;
+
+        if (newPlanCostForRemaining > oldPlanCredit) {
+          isUpgrade = true;
+          proratedBaseAmount = Math.max(
+            1,
+            Math.round((newPlanCostForRemaining - oldPlanCredit) * 100) / 100,
+          );
+        } else {
+          return next(
+            CustomErrorHandler.badRequest(
+              "This tier change is a downgrade. Please use the schedule downgrade option (effective on next renewal).",
+            ),
+          );
+        }
       }
 
-      const amountInPaise = Math.round(amount * 100);
+      // Calculate 18% GST
+      const gstRate = 0.18;
+      const gstAmount = Math.round(proratedBaseAmount * gstRate * 100) / 100;
+      const totalAmount =
+        Math.round((proratedBaseAmount + gstAmount) * 100) / 100;
+      const amountInPaise = Math.round(totalAmount * 100);
 
       const receipt = `sub_${tenantId.slice(0, 8)}_${Date.now()}`;
 
       const order = await razorpayService.createOrder({
         amount: amountInPaise,
-
         currency: plan.currency || "INR",
-
         receipt,
-
         notes: {
           tenantId,
           planId: String(planId),
           billingCycle,
+          isUpgrade: isUpgrade ? "true" : "false",
+          proratedBaseAmount: String(proratedBaseAmount),
+          gstAmount: String(gstAmount),
+          totalAmount: String(totalAmount),
+          remainingDays: String(remainingDays),
         },
       });
 
       return res.status(201).send(
         ResponseHandler(201, "Payment order created successfully", {
           orderId: order.id,
-
           amount: order.amount,
-
           currency: order.currency,
-
           receipt: order.receipt,
-
           keyId: process.env.RAZORPAY_KEY_ID,
-
           plan: {
             id: plan.id,
             name: plan.name,
             monthlyPrice: plan.monthlyPrice,
             annualPrice: plan.annualPrice,
           },
-
           billingCycle,
+          financialBreakdown: {
+            isUpgrade,
+            baseAmount: proratedBaseAmount,
+            gstRate: "18%",
+            gstAmount,
+            totalAmount,
+            remainingDays: isUpgrade ? remainingDays : undefined,
+            oldPlanCredit: isUpgrade ? oldPlanCredit : undefined,
+            newPlanCost: isUpgrade ? newPlanCostForRemaining : undefined,
+          },
         }),
       );
     } catch (error) {
       console.error("CREATE PAYMENT ORDER ERROR:", error);
-
       return next(CustomErrorHandler.serverError());
     }
   },
 
-  // VERIFY INITIAL PAYMENT
+  // PREVIEW PLAN TRANSITION (Calculates Upgrade Proration or Downgrade Schedules)
+  async previewTransition(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { tenantId: paramTenantId } = req.params;
+      const tenantId =
+        req.user?.tenantId !== undefined
+          ? String(req.user.tenantId)
+          : paramTenantId;
+      const { planId, billingCycle = "monthly" } = req.body;
 
+      if (!tenantId || !planId) {
+        return next(
+          CustomErrorHandler.badRequest("Tenant id and Plan id are required"),
+        );
+      }
+
+      const plan = await db.query.subscriptionPlans.findFirst({
+        where: and(
+          eq(subscriptionPlans.id, String(planId)),
+          eq(subscriptionPlans.isActive, true),
+        ),
+      });
+
+      if (!plan) {
+        return next(
+          CustomErrorHandler.notFound("Subscription plan not found"),
+        );
+      }
+
+      const existingSubscription =
+        await db.query.tenantSubscriptions.findFirst({
+          where: eq(tenantSubscriptions.tenantId, tenantId),
+          with: { plan: true },
+        });
+
+      const targetBasePrice =
+        billingCycle === "annual"
+          ? Number(plan.annualPrice) * 12
+          : Number(plan.monthlyPrice);
+
+      if (!existingSubscription || existingSubscription.status !== "active") {
+        const gstAmount = Math.round(targetBasePrice * 0.18 * 100) / 100;
+        const totalAmount =
+          Math.round((targetBasePrice + gstAmount) * 100) / 100;
+        return res.status(200).send(
+          ResponseHandler(200, "Preview generated", {
+            type: "new",
+            isUpgrade: false,
+            isDowngrade: false,
+            targetPlan: plan,
+            billingCycle,
+            baseAmount: targetBasePrice,
+            gstAmount,
+            totalPayable: totalAmount,
+            remainingDays: 0,
+            effectiveDate: "Immediate",
+          }),
+        );
+      }
+
+      const currentPlan = existingSubscription.plan;
+      const currentBasePrice =
+        existingSubscription.billingCycle === "annual"
+          ? Number(currentPlan?.annualPrice || 0) * 12
+          : Number(currentPlan?.monthlyPrice || 0);
+
+      const today = new Date();
+      const nextBilling = new Date(existingSubscription.nextBillingDate);
+      const diffTime = nextBilling.getTime() - today.getTime();
+      const remainingDays = Math.max(
+        1,
+        Math.ceil(diffTime / (1000 * 60 * 60 * 24)),
+      );
+      const totalDaysInCycle =
+        existingSubscription.billingCycle === "annual" ? 365 : 30;
+
+      const currentDailyRate = currentBasePrice / totalDaysInCycle;
+      const targetDailyRate =
+        targetBasePrice / (billingCycle === "annual" ? 365 : 30);
+
+      const oldPlanCredit =
+        Math.round(currentDailyRate * remainingDays * 100) / 100;
+      const newPlanCostForRemaining =
+        Math.round(targetDailyRate * remainingDays * 100) / 100;
+
+      const isUpgrade = newPlanCostForRemaining > oldPlanCredit;
+      const proratedBaseDiff = isUpgrade
+        ? Math.round((newPlanCostForRemaining - oldPlanCredit) * 100) / 100
+        : 0;
+      const gstAmount = Math.round(proratedBaseDiff * 0.18 * 100) / 100;
+      const totalPayable = isUpgrade
+        ? Math.round((proratedBaseDiff + gstAmount) * 100) / 100
+        : 0;
+
+      return res.status(200).send(
+        ResponseHandler(200, "Plan transition preview calculated", {
+          type: isUpgrade ? "upgrade" : "downgrade",
+          isUpgrade,
+          isDowngrade: !isUpgrade,
+          currentPlan,
+          targetPlan: plan,
+          currentBasePrice,
+          targetBasePrice,
+          remainingDays,
+          totalDaysInCycle,
+          oldPlanCredit,
+          newPlanCostForRemaining,
+          proratedBaseDiff,
+          gstAmount,
+          totalPayable,
+          effectiveDate: isUpgrade
+            ? "Immediate upon payment"
+            : existingSubscription.nextBillingDate,
+        }),
+      );
+    } catch (error) {
+      console.error("PREVIEW PLAN TRANSITION ERROR:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  // VERIFY PAYMENT & ACTIVATE (New Subscriptions or Immediate Upgrades)
   async verifyPayment(req: Request, res: Response, next: NextFunction) {
     try {
       const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
@@ -278,9 +450,7 @@ const tenantSubscriptionController = {
 
       const isValid = razorpayService.verifyPayment({
         razorpayOrderId: razorpay_order_id,
-
         razorpayPaymentId: razorpay_payment_id,
-
         razorpaySignature: razorpay_signature,
       });
 
@@ -311,10 +481,12 @@ const tenantSubscriptionController = {
       const order = await razorpayService.getOrder(razorpay_order_id);
 
       const tenantId = order.notes?.tenantId;
-
       const planId = order.notes?.planId;
-
       const billingCycle = order.notes?.billingCycle;
+      const isUpgrade = order.notes?.isUpgrade === "true";
+      const totalAmount = Number(
+        order.notes?.totalAmount || Number(order.amount) / 100,
+      );
 
       if (!tenantId || !planId || !billingCycle) {
         return next(
@@ -343,80 +515,91 @@ const tenantSubscriptionController = {
       });
 
       if (!plan) {
-        return next(CustomErrorHandler.notFound("Subscription plan not found"));
-      }
-
-      const expectedAmount =
-        billingCycle === "annual"
-          ? Number(plan.annualPrice)
-          : Number(plan.monthlyPrice);
-
-      const expectedAmountInPaise = Math.round(expectedAmount * 100);
-
-      if (Number(order.amount) !== expectedAmountInPaise) {
         return next(
-          CustomErrorHandler.badRequest(
-            "Payment amount does not match subscription plan",
-          ),
+          CustomErrorHandler.notFound("Subscription plan not found"),
         );
       }
 
-      if (Number(payment.amount) !== expectedAmountInPaise) {
-        return next(CustomErrorHandler.badRequest("Payment amount is invalid"));
-      }
-
-      const existingSubscription = await db.query.tenantSubscriptions.findFirst(
-        {
+      const existingSubscription =
+        await db.query.tenantSubscriptions.findFirst({
           where: eq(tenantSubscriptions.tenantId, String(tenantId)),
-        },
-      );
-
-      if (existingSubscription) {
-        return next(
-          CustomErrorHandler.badRequest("Tenant already has a subscription"),
-        );
-      }
+        });
 
       const today = new Date();
-
-      const nextBillingDate = new Date(today);
-
-      if (billingCycle === "annual") {
-        nextBillingDate.setFullYear(nextBillingDate.getFullYear() + 1);
-      } else {
-        nextBillingDate.setMonth(nextBillingDate.getMonth() + 1);
-      }
-
-      const amount =
+      const planAmount =
         billingCycle === "annual" ? plan.annualPrice : plan.monthlyPrice;
 
       const result = await db.transaction(async (tx) => {
-        const [subscription] = await tx
-          .insert(tenantSubscriptions)
-          .values({
-            tenantId: String(tenantId),
+        let subscription;
 
-            planId: String(planId),
+        if (isUpgrade && existingSubscription) {
+          // Immediately Upgrade existing subscription
+          const [updatedSub] = await tx
+            .update(tenantSubscriptions)
+            .set({
+              planId: String(planId),
+              billingCycle,
+              amount: planAmount,
+              pendingPlanId: null,
+              pendingBillingCycle: null,
+              status: "active",
+              paymentMethodBrand: payment.method,
+              paymentMethodLast4: payment.card?.last4 || null,
+              updatedAt: new Date(),
+            })
+            .where(eq(tenantSubscriptions.id, existingSubscription.id))
+            .returning();
 
-            status: "active",
+          subscription = updatedSub;
+        } else {
+          // New Subscription
+          const nextBillingDate = new Date(today);
+          if (billingCycle === "annual") {
+            nextBillingDate.setFullYear(nextBillingDate.getFullYear() + 1);
+          } else {
+            nextBillingDate.setMonth(nextBillingDate.getMonth() + 1);
+          }
 
-            billingCycle,
+          if (existingSubscription) {
+            const [updatedSub] = await tx
+              .update(tenantSubscriptions)
+              .set({
+                planId: String(planId),
+                status: "active",
+                billingCycle,
+                amount: planAmount,
+                startDate: today.toISOString().split("T")[0],
+                nextBillingDate: nextBillingDate.toISOString().split("T")[0],
+                autoRenew: true,
+                paymentMethodBrand: payment.method,
+                paymentMethodLast4: payment.card?.last4 || null,
+                updatedAt: new Date(),
+              })
+              .where(eq(tenantSubscriptions.id, existingSubscription.id))
+              .returning();
 
-            amount,
+            subscription = updatedSub;
+          } else {
+            const [newSub] = await tx
+              .insert(tenantSubscriptions)
+              .values({
+                tenantId: String(tenantId),
+                planId: String(planId),
+                status: "active",
+                billingCycle,
+                amount: planAmount,
+                currency: plan.currency,
+                startDate: today.toISOString().split("T")[0],
+                nextBillingDate: nextBillingDate.toISOString().split("T")[0],
+                autoRenew: true,
+                paymentMethodBrand: payment.method,
+                paymentMethodLast4: payment.card?.last4 || null,
+              })
+              .returning();
 
-            currency: plan.currency,
-
-            startDate: today.toISOString().split("T")[0],
-
-            nextBillingDate: nextBillingDate.toISOString().split("T")[0],
-
-            autoRenew: true,
-
-            paymentMethodBrand: payment.method,
-
-            paymentMethodLast4: payment.card?.last4 || null,
-          })
-          .returning();
+            subscription = newSub;
+          }
+        }
 
         const invoiceNumber = `INV-${Date.now()}`;
 
@@ -424,25 +607,17 @@ const tenantSubscriptionController = {
           .insert(subscriptionPaymentHistory)
           .values({
             tenantId: String(tenantId),
-
             invoiceNumber,
-
             planId: String(planId),
-
-            planName: plan.name,
-
-            amount,
-
+            planName: isUpgrade
+              ? `${plan.name} (Upgrade Prorated + 18% GST)`
+              : `${plan.name} (Subscription + 18% GST)`,
+            amount: String(totalAmount),
             currency: plan.currency,
-
             status: "paid",
-
             billingCycle,
-
             paymentMethod: payment.method,
-
             transactionDate: new Date(),
-
             createdAt: new Date(),
           })
           .returning();
@@ -456,15 +631,14 @@ const tenantSubscriptionController = {
       return res.status(200).send(
         ResponseHandler(
           200,
-          "Payment verified and subscription activated successfully",
+          isUpgrade
+            ? "Upgrade payment verified and plan activated immediately"
+            : "Payment verified and subscription activated successfully",
           {
             subscription: result.subscription,
-
             payment: result.paymentHistory,
-
             razorpay: {
               orderId: razorpay_order_id,
-
               paymentId: razorpay_payment_id,
             },
           },
@@ -472,7 +646,6 @@ const tenantSubscriptionController = {
       );
     } catch (error) {
       console.error("VERIFY PAYMENT ERROR:", error);
-
       return next(CustomErrorHandler.serverError());
     }
   },
