@@ -60,6 +60,7 @@ services:
 
     environment:
       NODE_ENV: development
+      CHOKIDAR_USEPOLLING: "true"
 
       # Docker service names
       DB_HOST: db

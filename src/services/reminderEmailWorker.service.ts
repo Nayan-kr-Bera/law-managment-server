@@ -178,10 +178,10 @@ export async function sendReminderEmail(job: ReminderEmailJob): Promise<boolean>
         });
       }
 
-      console.log(`✉️ Reminder email sent successfully to ${cleanRecipient}`);
+      console.log(`✉️ [Email Worker] Email delivered successfully to: ${cleanRecipient} (Subject: "${subject}")`);
       successCount++;
     } catch (err) {
-      console.error(`Failed to send reminder email to ${cleanRecipient}:`, err);
+      console.error(`❌ [Email Worker] Failed to deliver email to ${cleanRecipient}:`, err);
     }
   }
 
@@ -189,8 +189,9 @@ export async function sendReminderEmail(job: ReminderEmailJob): Promise<boolean>
 }
 
 export function startReminderWorker(): void {
+  console.log(`⚙️ [Email Worker] Initializing RabbitMQ reminder email consumer...`);
   void consumeFromQueue<ReminderEmailJob>(REMINDER_EMAIL_QUEUE, async (job) => {
-    console.log(`⚙️ Processing reminder email job for reminder ID: ${job.reminderId}`);
+    console.log(`\n📨 [Email Worker Task] Processing reminder job [ID: ${job.reminderId}] for ${job.recipients?.length || 0} recipient(s) (Case: ${job.caseNo || "N/A"})`);
     await sendReminderEmail(job);
   });
 }

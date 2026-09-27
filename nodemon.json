@@ -1,0 +1,8 @@
+{
+  "watch": ["src"],
+  "ext": "ts,js,json",
+  "ignore": ["src/**/*.spec.ts", "node_modules", "dist"],
+  "exec": "tsx src/server.ts",
+  "legacyWatch": true,
+  "pollingInterval": 500
+}

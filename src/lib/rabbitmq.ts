@@ -11,6 +11,7 @@ export async function connectRabbitMQ(): Promise<Channel | null> {
 
   try {
     const url = config.RABBITMQ_URL || "amqp://guest:guest@localhost:5672";
+    console.log(`🐰 [RabbitMQ] Connecting to broker at: ${url.replace(/:[^:@]+@/, ":****@")}...`);
     const conn: ChannelModel = await amqp.connect(url);
     connection = conn;
     const ch: Channel = await conn.createChannel();
@@ -18,16 +19,16 @@ export async function connectRabbitMQ(): Promise<Channel | null> {
 
     await ch.assertQueue(REMINDER_EMAIL_QUEUE, { durable: true });
 
-    console.log("🐰 Connected to RabbitMQ successfully");
+    console.log(`✅ [RabbitMQ] Connected successfully! Queue "${REMINDER_EMAIL_QUEUE}" is ready.`);
 
     conn.on("error", (err: unknown) => {
-      console.error("RabbitMQ connection error:", err);
+      console.error("❌ [RabbitMQ] Connection error:", err);
       channel = null;
       connection = null;
     });
 
     conn.on("close", () => {
-      console.log("RabbitMQ connection closed");
+      console.warn("⚠️ [RabbitMQ] Connection closed");
       channel = null;
       connection = null;
     });
@@ -35,8 +36,7 @@ export async function connectRabbitMQ(): Promise<Channel | null> {
     return channel;
   } catch (error) {
     console.warn(
-      "⚠️ RabbitMQ connection failed. Queue operations will be skipped or degraded:",
-      (error as Error).message
+      `⚠️ [RabbitMQ] Connection failed (${(error as Error).message}). Queue operations will run in offline fallback mode.`
     );
     channel = null;
     connection = null;
@@ -48,14 +48,15 @@ export async function publishToQueue(queue: string, data: object): Promise<boole
   try {
     const ch = await connectRabbitMQ();
     if (!ch) {
-      console.warn(`[RabbitMQ fallback] RabbitMQ offline. Queue payload skipped for ${queue}`);
+      console.warn(`⚠️ [RabbitMQ Fallback] RabbitMQ offline. Message skipped for queue: "${queue}"`);
       return false;
     }
     const message = Buffer.from(JSON.stringify(data));
-    ch.sendToQueue(queue, message, { persistent: true });
-    return true;
+    const sent = ch.sendToQueue(queue, message, { persistent: true });
+    console.log(`📤 [RabbitMQ Producer] Published job to queue "${queue}":`, JSON.stringify(data).slice(0, 120) + "...");
+    return sent;
   } catch (error) {
-    console.error(`Error publishing message to queue ${queue}:`, error);
+    console.error(`❌ [RabbitMQ Producer] Error publishing message to queue "${queue}":`, error);
     return false;
   }
 }
@@ -67,14 +68,14 @@ export async function consumeFromQueue<T>(
   try {
     const ch = await connectRabbitMQ();
     if (!ch) {
-      console.warn(`[RabbitMQ fallback] RabbitMQ offline. Consumer for ${queue} not started.`);
+      console.warn(`⚠️ [RabbitMQ Fallback] RabbitMQ offline. Consumer for "${queue}" not started.`);
       return;
     }
 
     await ch.assertQueue(queue, { durable: true });
     ch.prefetch(5);
 
-    console.log(`📡 Registered worker consumer for queue: ${queue}`);
+    console.log(`📡 [RabbitMQ Consumer] Worker listening on queue: "${queue}"`);
 
     ch.consume(
       queue,
@@ -82,16 +83,18 @@ export async function consumeFromQueue<T>(
         if (!msg) return;
         try {
           const content: T = JSON.parse(msg.content.toString());
+          console.log(`📥 [RabbitMQ Consumer] Received message from "${queue}" [DeliveryTag: ${msg.fields.deliveryTag}]`);
           await handler(content);
           ch.ack(msg);
+          console.log(`✔️ [RabbitMQ Consumer] Message acknowledged (ACK) for tag ${msg.fields.deliveryTag}`);
         } catch (err) {
-          console.error(`Error processing message from ${queue}:`, err);
+          console.error(`❌ [RabbitMQ Consumer] Error processing message from "${queue}":`, err);
           ch.nack(msg, false, false);
         }
       },
       { noAck: false }
     );
   } catch (error) {
-    console.error(`Error consuming from queue ${queue}:`, error);
+    console.error(`❌ [RabbitMQ Consumer] Error consuming from queue "${queue}":`, error);
   }
 }
