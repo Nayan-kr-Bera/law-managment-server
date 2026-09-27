@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from "express";
 import { eq, and, inArray, desc, asc } from "drizzle-orm";
 import db from "../../db/index.js";
+import clients from "../../db/schema/clients/clients.js";
+import tenants from "../../db/schema/tenants.js";
 import clientProfiles from "../../db/schema/clients/clientProfiles.js";
 import cases from "../../db/schema/caseMangment/cases.js";
 import caseClients from "../../db/schema/caseMangment/caseClients.js";
@@ -386,7 +388,7 @@ const clientPortalController = {
     }
   },
 
-  // GET CLIENT INVOICES — all-in-one tunnel by client identity
+  // GET CLIENT INVOICES — all-in-one tunnel by client identity with full GST & item breakdown
   async getInvoices(req: Request, res: Response, next: NextFunction) {
     try {
       const clientId = req.clientUser?.clientId;
@@ -403,24 +405,103 @@ const clientPortalController = {
           case: {
             columns: { id: true, caseNumber: true, title: true },
           },
+          items: true,
+          client: true,
+          payments: {
+            orderBy: [asc(payments.paidAt)],
+          },
           office: true,
           tenant: true,
         },
+        orderBy: [desc(invoices.createdAt)],
         limit: 100,
       });
 
-      const formattedInvoices = invs.map((inv) => ({
-        ...inv,
-        invoiceNumber: inv.invoiceNo,
-        totalAmount: Number(inv.total) || 0,
-        paidAmount: inv.status === "paid" ? Number(inv.total) : 0,
-        amount: Number(inv.total) || 0,
-        taxAmount: 0,
-        caseNumber: inv.case?.caseNumber || undefined,
-        caseTitle: inv.case?.title || undefined,
-        officeName: inv.office?.name || undefined,
-        firmName: inv.tenant?.name || undefined,
-      }));
+      const formattedInvoices = (invs as any[]).map((inv: any) => {
+        const totalPaid = (inv.payments || []).reduce(
+          (sum: number, p: any) => sum + (Number(p.amount) || 0),
+          0,
+        );
+        const totalAmount = Number(inv.total) || 0;
+        const dynamicStatus =
+          totalPaid >= totalAmount - 0.01 && totalAmount > 0
+            ? "paid"
+            : totalPaid > 0
+            ? "partially_paid"
+            : inv.status === "paid"
+            ? "paid"
+            : "unpaid";
+
+        const lineItems = (inv.items || []).map((it: any) => {
+          const isNonGst =
+            typeof it.description === "string" &&
+            (it.description.toLowerCase().includes("non-gst") ||
+              it.description.toLowerCase().includes("stamp") ||
+              it.description.toLowerCase().includes("court fee") ||
+              it.description.toLowerCase().includes("registry"));
+          const price = Number(it.price) || 0;
+          const qty = it.quantity || 1;
+          const subtotal = price * qty;
+          const gstRate = isNonGst ? 0 : 18;
+          const gstAmount = isNonGst ? 0 : Math.round(subtotal * 0.18 * 100) / 100;
+
+          return {
+            id: it.id,
+            description: it.description,
+            quantity: qty,
+            price,
+            amount: subtotal,
+            isGstApplicable: !isNonGst,
+            gstRate,
+            gstAmount,
+            total: subtotal + gstAmount,
+          };
+        });
+
+        const taxableSubtotal = lineItems
+          .filter((li: any) => li.isGstApplicable)
+          .reduce((sum: number, li: any) => sum + li.amount, 0);
+
+        const nonTaxableSubtotal = lineItems
+          .filter((li: any) => !li.isGstApplicable)
+          .reduce((sum: number, li: any) => sum + li.amount, 0);
+
+        const totalGst = lineItems.reduce((sum: number, li: any) => sum + li.gstAmount, 0);
+        const cgst = Math.round((totalGst / 2) * 100) / 100;
+        const sgst = Math.round((totalGst / 2) * 100) / 100;
+
+        return {
+          ...inv,
+          invoiceNumber: inv.invoiceNo,
+          totalAmount,
+          paidAmount: totalPaid,
+          status: dynamicStatus,
+          amount: taxableSubtotal + nonTaxableSubtotal,
+          taxAmount: totalGst,
+          taxableSubtotal,
+          nonTaxableSubtotal,
+          totalGst,
+          cgst,
+          sgst,
+          lineItems,
+          items: lineItems,
+          payments: inv.payments || [],
+          caseNumber: inv.case?.caseNumber || undefined,
+          caseTitle: inv.case?.title || undefined,
+          courtName: undefined,
+          clientName:
+            inv.client?.companyName ||
+            `${inv.client?.firstName || ""} ${inv.client?.lastName || ""}`.trim() ||
+            "Client",
+          clientEmail: inv.client?.email || undefined,
+          clientPhone: inv.client?.phone || undefined,
+          clientAddress: [inv.client?.address, inv.client?.city, inv.client?.state]
+            .filter(Boolean)
+            .join(", ") || undefined,
+          officeName: inv.office?.name || undefined,
+          firmName: inv.tenant?.name || "Advocate Legal Chambers",
+        };
+      });
 
       return res.status(200).json(
         ResponseHandler(200, "Client invoices fetched successfully", formattedInvoices)
@@ -431,17 +512,21 @@ const clientPortalController = {
     }
   },
 
-  // CREATE INVOICE RAZORPAY ORDER
+  // CREATE INVOICE RAZORPAY ORDER (Supports Full or Part/Hearing Payment)
   async createInvoiceRazorpayOrder(req: Request, res: Response, next: NextFunction) {
     try {
       const { invoiceId } = req.params;
       const clientId = req.clientUser?.clientId;
+      const customAmount = req.body.amount ? Number(req.body.amount) : undefined;
 
       const invoiceRecord = await db.query.invoices.findFirst({
         where: and(
           eq(invoices.id, invoiceId),
           clientId ? eq(invoices.clientId, clientId) : undefined
         ),
+        with: {
+          payments: true,
+        },
       });
 
       if (!invoiceRecord) {
@@ -453,7 +538,23 @@ const clientPortalController = {
       }
 
       const totalNum = Number(invoiceRecord.total) || 0;
-      const amountInPaise = Math.round(totalNum * 100);
+      const existingPaid = (invoiceRecord.payments || []).reduce(
+        (sum, p) => sum + (Number(p.amount) || 0),
+        0
+      );
+      const remainingDue = Math.max(0, totalNum - existingPaid);
+
+      if (remainingDue <= 0) {
+        return next(CustomErrorHandler.badRequest("No balance remaining on this invoice"));
+      }
+
+      // If client chose a partial amount for hearing/milestone, validate and clamp it
+      let payAmount = remainingDue;
+      if (customAmount && customAmount > 0) {
+        payAmount = Math.min(customAmount, remainingDue);
+      }
+
+      const amountInPaise = Math.round(payAmount * 100);
       const receipt = `inv_${invoiceRecord.id.slice(0, 8)}_${Date.now()}`;
 
       let orderId = `order_${Date.now()}`;
@@ -466,6 +567,8 @@ const clientPortalController = {
             invoiceId: invoiceRecord.id,
             invoiceNo: invoiceRecord.invoiceNo,
             clientId: invoiceRecord.clientId || "",
+            payingAmount: String(payAmount),
+            remainingDue: String(remainingDue),
           },
         });
         orderId = order.id;
@@ -481,6 +584,9 @@ const clientPortalController = {
           keyId: process.env.RAZORPAY_KEY_ID || "rzp_test_placeholder",
           invoiceNumber: invoiceRecord.invoiceNo,
           totalAmount: totalNum,
+          paidAmount: existingPaid,
+          remainingDue,
+          payingAmount: payAmount,
         })
       );
     } catch (error) {
@@ -489,20 +595,42 @@ const clientPortalController = {
     }
   },
 
-  // PAY INVOICE
+  // PAY INVOICE (Online Client Part/Full Settlement via Razorpay)
   async payInvoice(req: Request, res: Response, next: NextFunction) {
     try {
       const { invoiceId } = req.params;
       const clientId = req.clientUser?.clientId;
-      const { paymentMethod = "Razorpay (Online)" } = req.body;
+      const {
+        amount,
+        paymentMethod = "Razorpay (Online)",
+        razorpayPaymentId,
+        razorpayOrderId,
+        hearingNotes,
+      } = req.body;
       const receiptNo = `RCPT-2026-${Math.floor(1000 + Math.random() * 9000)}`;
 
-      // Inner query: lookup invoice by ID & clientId to get tenantId, officeId, and caseId
+      // Security check: Clients cannot self-record offline cash or cheque payments
+      if (
+        paymentMethod &&
+        (paymentMethod.toLowerCase().includes("cash") ||
+          paymentMethod.toLowerCase().includes("cheque") ||
+          paymentMethod.toLowerCase().includes("offline"))
+      ) {
+        return next(
+          CustomErrorHandler.badRequest(
+            "Clients cannot self-certify offline cash/cheque payments. Please pay online via Razorpay or deposit funds at the advocate chamber."
+          )
+        );
+      }
+
       const invoiceRecord = await db.query.invoices.findFirst({
         where: and(
           eq(invoices.id, invoiceId),
           clientId ? eq(invoices.clientId, clientId) : undefined
         ),
+        with: {
+          payments: true,
+        },
       });
 
       if (!invoiceRecord) {
@@ -513,13 +641,34 @@ const clientPortalController = {
         return next(CustomErrorHandler.badRequest("This invoice has already been settled and paid in full"));
       }
 
+      const totalNum = Number(invoiceRecord.total) || 0;
+      const existingPaid = (invoiceRecord.payments || []).reduce(
+        (sum, p) => sum + (Number(p.amount) || 0),
+        0
+      );
+      const remainingDue = Math.max(0, totalNum - existingPaid);
+
+      if (remainingDue <= 0) {
+        return next(CustomErrorHandler.badRequest("No balance remaining on this invoice"));
+      }
+
+      let payAmount = remainingDue;
+      if (amount && Number(amount) > 0) {
+        payAmount = Math.min(Number(amount), remainingDue);
+      }
+
+      const isPartPayment = payAmount < remainingDue - 0.01;
+      const verifiedPaymentMethod = razorpayPaymentId
+        ? `Razorpay (Online) - Ref: ${razorpayPaymentId}`
+        : "Razorpay (Online)";
+
       // 1. Insert into payments table
       const [newPayment] = await db
         .insert(payments)
         .values({
           invoiceId: invoiceRecord.id,
-          amount: String(invoiceRecord.total),
-          paymentMethod: paymentMethod,
+          amount: String(payAmount),
+          paymentMethod: verifiedPaymentMethod,
         })
         .returning();
 
@@ -528,36 +677,148 @@ const clientPortalController = {
         await db.insert(clientLedger).values({
           tenantId: invoiceRecord.tenantId,
           clientId: invoiceRecord.clientId,
+          caseId: invoiceRecord.caseId,
           invoiceId: invoiceRecord.id,
           paymentId: newPayment?.id,
           debit: "0",
-          credit: String(invoiceRecord.total),
-          description: `Online Payment via ${paymentMethod} for ${invoiceRecord.invoiceNo}`,
+          credit: String(payAmount),
+          description: isPartPayment
+            ? `Part Payment via ${verifiedPaymentMethod} for ${invoiceRecord.invoiceNo}${
+                hearingNotes ? ` (${hearingNotes})` : ""
+              }`
+            : `Settlement Payment via ${verifiedPaymentMethod} for ${invoiceRecord.invoiceNo}`,
           transactionDate: new Date(),
         });
       }
 
-      // 3. Mark invoice as paid
+      // 3. Update invoice status based on accumulated paid total
+      const newTotalPaid = existingPaid + payAmount;
+      const newStatus = newTotalPaid >= totalNum - 0.01 ? "paid" : "partially_paid";
+
       await db
         .update(invoices)
         .set({
-          status: "paid",
+          status: newStatus,
         })
         .where(eq(invoices.id, invoiceId));
 
       return res.status(200).json(
-        ResponseHandler(200, "Invoice paid successfully", {
+        ResponseHandler(200, isPartPayment ? "Part payment processed successfully" : "Invoice settled successfully", {
           receiptNo,
           invoiceId,
           paymentId: newPayment?.id,
           tenantId: invoiceRecord.tenantId,
           officeId: invoiceRecord.officeId,
           caseId: invoiceRecord.caseId,
-          amountPaid: Number(invoiceRecord.total) || 0,
+          amountPaid: payAmount,
+          newTotalPaid,
+          remainingDue: Math.max(0, totalNum - newTotalPaid),
+          status: newStatus,
         })
       );
     } catch (error) {
       console.error("Pay invoice error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  // GET CLIENT RUNNING LEDGER (Account Statement across all cases & hearing fees)
+  async getClientLedger(req: Request, res: Response, next: NextFunction) {
+    try {
+      const clientId = req.clientUser?.clientId;
+      const tenantId = (req.query.tenantId as string) || (req.headers["x-tenant-id"] as string) || undefined;
+      const caseId = (req.query.caseId as string) || undefined;
+
+      if (!clientId) {
+        return next(CustomErrorHandler.badRequest("Client identity required"));
+      }
+
+      const clientRecord = await db.query.clients.findFirst({
+        where: eq(clients.id, clientId),
+      });
+
+      const effectiveTenantId = tenantId || req.clientUser?.tenantId;
+      const tenantRecord = effectiveTenantId
+        ? await db.query.tenants.findFirst({
+            where: eq(tenants.id, effectiveTenantId),
+          })
+        : null;
+
+      const ledgerRecords = await db.query.clientLedger.findMany({
+        where: and(
+          eq(clientLedger.clientId, clientId),
+          effectiveTenantId ? eq(clientLedger.tenantId, effectiveTenantId) : undefined,
+          caseId ? eq(clientLedger.caseId, caseId) : undefined
+        ),
+        with: {
+          case: {
+            columns: { id: true, caseNumber: true, title: true },
+          },
+          invoice: {
+            columns: { id: true, invoiceNo: true, total: true, status: true, caseId: true },
+            with: {
+              case: {
+                columns: { id: true, caseNumber: true, title: true },
+              },
+            },
+          },
+          payment: {
+            columns: { id: true, paymentMethod: true, amount: true, paidAt: true },
+          },
+        },
+        orderBy: [asc(clientLedger.transactionDate), asc(clientLedger.createdAt)],
+      });
+
+      let runningBalance = 0;
+      let totalDebits = 0;
+      let totalCredits = 0;
+
+      const formattedEntries = (ledgerRecords as any[]).map((entry) => {
+        const debit = Number(entry.debit) || 0;
+        const credit = Number(entry.credit) || 0;
+        totalDebits += debit;
+        totalCredits += credit;
+        runningBalance = runningBalance + debit - credit;
+
+        const resolvedCaseNumber =
+          entry.case?.caseNumber || entry.invoice?.case?.caseNumber || undefined;
+        const resolvedCaseTitle =
+          entry.case?.title || entry.invoice?.case?.title || undefined;
+
+        return {
+          id: entry.id,
+          transactionDate: entry.transactionDate ? new Date(entry.transactionDate).toISOString() : new Date().toISOString(),
+          description: entry.description,
+          debit,
+          credit,
+          runningBalance,
+          caseId: entry.caseId || entry.invoice?.caseId || undefined,
+          caseNumber: resolvedCaseNumber,
+          caseTitle: resolvedCaseTitle,
+          invoiceId: entry.invoiceId,
+          invoiceNumber: entry.invoice?.invoiceNo || undefined,
+          paymentId: entry.paymentId,
+          paymentMethod: entry.payment?.paymentMethod || undefined,
+        };
+      });
+
+      const clientName = clientRecord?.companyName || `${clientRecord?.firstName || ""} ${clientRecord?.lastName || ""}`.trim() || "Valued Client";
+      const firmName = tenantRecord?.name || "Advocate Legal Chambers";
+
+      return res.status(200).json(
+        ResponseHandler(200, "Client ledger fetched successfully", {
+          summary: {
+            totalBilled: totalDebits,
+            totalPaid: totalCredits,
+            netBalanceDue: runningBalance,
+          },
+          clientName,
+          firmName,
+          entries: formattedEntries,
+        })
+      );
+    } catch (error) {
+      console.error("Get client ledger error:", error);
       return next(CustomErrorHandler.serverError());
     }
   },

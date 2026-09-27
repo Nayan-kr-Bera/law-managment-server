@@ -33,6 +33,8 @@ export const invoicesController = {
           case: {
             columns: { id: true, caseNumber: true, title: true },
           },
+          office: true,
+          tenant: true,
           items: true,
           payments: true,
         },
@@ -55,6 +57,16 @@ export const invoicesController = {
           createdAt: inv.createdAt,
           description: inv.items?.[0]?.description || "Legal Services",
           prefix: "INV",
+          tenantId: inv.tenantId,
+          tenantName: inv.tenant?.name || "Advocate Legal Chambers",
+          tenantGst: inv.tenant?.gst || "",
+          tenantEmail: inv.tenant?.organisationEmail || "",
+          tenantPhone: inv.tenant?.organisationPhone || "",
+          officeId: inv.officeId,
+          officeName: inv.office?.name || "Main Chamber Office",
+          officeAddress: [inv.office?.address, inv.office?.city, inv.office?.state, inv.office?.postalCode].filter(Boolean).join(", "),
+          officePhone: inv.office?.phone || inv.tenant?.organisationPhone || "",
+          officeEmail: inv.office?.email || inv.tenant?.organisationEmail || "",
           clientId: inv.clientId,
           clientName: inv.client?.companyName || `${inv.client?.firstName || ""} ${inv.client?.lastName || ""}`.trim() || "Client",
           clientContact: inv.client?.phone || "",
@@ -70,6 +82,7 @@ export const invoicesController = {
             amount: Number(item.price) * (item.quantity || 1),
             quantity: item.quantity,
             price: Number(item.price),
+            isGstApplicable: !item.description?.toLowerCase().includes("non-gst"),
           })),
           discountMode: "flat",
           discountValue: 0,
@@ -149,6 +162,7 @@ export const invoicesController = {
         await db.insert(clientLedger).values({
           tenantId,
           clientId,
+          caseId: caseId || undefined,
           invoiceId: newInvoice.id,
           debit: String(finalTotal),
           credit: "0",
@@ -177,6 +191,8 @@ export const invoicesController = {
         with: {
           client: true,
           case: true,
+          office: true,
+          tenant: true,
           items: true,
           payments: true,
         },
@@ -231,13 +247,38 @@ export const invoicesController = {
           ? typedLineItems.reduce((acc: number, item: InvoiceLineItemInput) => acc + (Number(item.amount) || 0), 0)
           : Number(inv.total);
 
+      const targetClientId =
+        clientId !== undefined
+          ? clientId && typeof clientId === "string" && clientId.trim().length > 0
+            ? clientId.trim()
+            : null
+          : inv.clientId;
+
+      const targetCaseId =
+        caseId !== undefined
+          ? caseId && typeof caseId === "string" && caseId.trim().length > 0
+            ? caseId.trim()
+            : null
+          : inv.caseId;
+
       const updateData: Partial<typeof invoices.$inferInsert> = {
         total: String(finalTotal),
       };
-      if (invoiceNo) updateData.invoiceNo = invoiceNo;
-      if (clientId !== undefined) updateData.clientId = clientId || null;
-      if (caseId !== undefined) updateData.caseId = caseId || null;
-      if (status) updateData.status = status;
+      if (invoiceNo && typeof invoiceNo === "string" && invoiceNo.trim()) {
+        updateData.invoiceNo = invoiceNo.trim();
+      }
+      if (clientId !== undefined) {
+        updateData.clientId = targetClientId;
+      }
+      if (caseId !== undefined) {
+        updateData.caseId = targetCaseId;
+      }
+      if (status) {
+        const validStatuses = ["draft", "sent", "partially_paid", "paid", "overdue", "cancelled"];
+        if (validStatuses.includes(status)) {
+          updateData.status = status as any;
+        }
+      }
 
       const [updatedInvoice] = await db
         .update(invoices)
@@ -258,23 +299,42 @@ export const invoicesController = {
         }
       }
 
-      // Update client ledger debit if exists
-      if (inv.clientId) {
-        await db
-          .update(clientLedger)
-          .set({
+      // Upsert into client ledger debit entry
+      if (targetClientId) {
+        const existingLedger = await db.query.clientLedger.findFirst({
+          where: and(eq(clientLedger.invoiceId, id), eq(clientLedger.tenantId, tenantId)),
+        });
+
+        if (existingLedger) {
+          await db
+            .update(clientLedger)
+            .set({
+              clientId: targetClientId,
+              caseId: targetCaseId || null,
+              debit: String(finalTotal),
+              description: `Invoice updated: ${updatedInvoice.invoiceNo}`,
+            })
+            .where(eq(clientLedger.id, existingLedger.id));
+        } else {
+          await db.insert(clientLedger).values({
+            tenantId,
+            clientId: targetClientId,
+            caseId: targetCaseId || undefined,
+            invoiceId: id,
             debit: String(finalTotal),
-            description: `Invoice updated: ${updatedInvoice.invoiceNo}`,
-          })
-          .where(and(eq(clientLedger.invoiceId, id), eq(clientLedger.tenantId, tenantId)));
+            credit: "0",
+            description: `Invoice generated: ${updatedInvoice.invoiceNo}`,
+            transactionDate: new Date(),
+          });
+        }
       }
 
       return res.status(200).json(
         ResponseHandler(200, "Invoice updated successfully", updatedInvoice),
       );
-    } catch (error) {
+    } catch (error: any) {
       console.error("Update invoice error:", error);
-      return next(CustomErrorHandler.serverError());
+      return next(CustomErrorHandler.serverError(error?.message || "Failed to update invoice"));
     }
   },
 
@@ -320,6 +380,10 @@ export const invoicesController = {
             with: {
               client: true,
               case: true,
+              office: true,
+              tenant: true,
+              items: true,
+              payments: true,
             },
           },
         },
@@ -331,15 +395,14 @@ export const invoicesController = {
       );
 
       const receipts = tenantPayments.map((p, idx) => {
-        const isPaid =
-          p.invoice?.status === "paid" ||
-          p.paymentMethod?.toLowerCase().includes("online") ||
-          p.paymentMethod?.toLowerCase().includes("razorpay");
-        const isOnline =
-          p.paymentMethod?.toLowerCase().includes("online") ||
-          p.paymentMethod?.toLowerCase().includes("razorpay");
         const isTDS =
           p.paymentMethod?.toLowerCase().includes("tds") || false;
+        const isOnline =
+          p.paymentMethod?.toLowerCase().includes("razorpay") || false;
+
+        const invTotal = Number(p.invoice?.total) || 0;
+        const sisterPayments = p.invoice?.payments || [];
+        const totalPaidSoFar = sisterPayments.reduce((s, sp) => s + (Number(sp.amount) || 0), 0);
 
         return {
           id: p.id,
@@ -348,15 +411,44 @@ export const invoicesController = {
           no: `RCPT/${String(idx + 1).padStart(3, "0")}`,
           date: p.paidAt ? new Date(p.paidAt).toISOString().split("T")[0] : "",
           amount: Number(p.amount) || 0,
+          totalAmount: invTotal,
+          totalPaid: totalPaidSoFar,
+          remainingDue: Math.max(0, invTotal - totalPaidSoFar),
           mode: p.paymentMethod || "Bank Transfer",
           paymentMode: p.paymentMethod || "Bank Transfer",
           type: isTDS ? "TDS" : "Receipt",
           description: p.paymentMethod ? (isTDS ? "TDS Deducted at Source" : `Payment via ${p.paymentMethod}`) : "Payment Received",
           clientName: p.invoice?.client?.companyName || `${p.invoice?.client?.firstName || ""} ${p.invoice?.client?.lastName || ""}`.trim() || "Client",
+          clientEmail: p.invoice?.client?.email || "",
+          clientPhone: p.invoice?.client?.phone || "",
+          clientAddress: [p.invoice?.client?.address, p.invoice?.client?.city, p.invoice?.client?.state].filter(Boolean).join(", "),
+          tenantName: p.invoice?.tenant?.name || "Advocate Legal Chambers",
+          tenantGst: p.invoice?.tenant?.gst || "",
+          officeName: p.invoice?.office?.name || "Main Chamber",
+          officeAddress: [p.invoice?.office?.address, p.invoice?.office?.city, p.invoice?.office?.state, p.invoice?.office?.postalCode].filter(Boolean).join(", "),
+          officePhone: p.invoice?.office?.phone || p.invoice?.tenant?.organisationPhone || "",
+          officeEmail: p.invoice?.office?.email || p.invoice?.tenant?.organisationEmail || "",
           caseNo: p.invoice?.case?.caseNumber || "",
-          status: p.invoice?.status || "paid",
-          isPaid,
+          caseTitle: p.invoice?.case?.title || "",
+          status: p.invoice?.status || "sent",
+          isPaid: p.invoice?.status === "paid",
           isOnline,
+          lineItems: (p.invoice?.items || []).map((it) => ({
+            id: it.id,
+            description: it.description,
+            amount: Number(it.price) * (it.quantity || 1),
+            quantity: it.quantity,
+            price: Number(it.price),
+            isGstApplicable: !it.description?.toLowerCase().includes("non-gst"),
+          })),
+          payments: sisterPayments.map((sp, sIdx) => ({
+            id: sp.id,
+            receiptNo: `RCPT/${String(sIdx + 1).padStart(3, "0")}`,
+            date: sp.paidAt ? new Date(sp.paidAt).toISOString().split("T")[0] : "",
+            amount: Number(sp.amount) || 0,
+            mode: sp.paymentMethod || "Direct",
+            description: sp.paymentMethod || "Payment",
+          })),
         };
       });
 
@@ -420,6 +512,7 @@ export const invoicesController = {
         await db.insert(clientLedger).values({
           tenantId,
           clientId: inv.clientId,
+          caseId: inv.caseId || undefined,
           invoiceId,
           paymentId: newPayment.id,
           debit: "0",
@@ -442,12 +535,14 @@ export const invoicesController = {
   async updateReceipt(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
-      const { amount, mode } = req.body;
+      const { amount, mode, description } = req.body;
 
       const existing = await db.query.payments.findFirst({
         where: eq(payments.id, id),
         with: {
-          invoice: true,
+          invoice: {
+            with: { payments: true },
+          },
         },
       });
 
@@ -455,16 +550,12 @@ export const invoicesController = {
         return next(CustomErrorHandler.notFound("Payment receipt not found"));
       }
 
-      // If once generated billed paid from customer site / online or invoice is settled, it cannot be edited
-      const isOnlineOrPaid =
-        existing.invoice?.status === "paid" ||
-        existing.paymentMethod?.toLowerCase().includes("online") ||
-        existing.paymentMethod?.toLowerCase().includes("razorpay");
-
-      if (isOnlineOrPaid) {
+      // If processed through Razorpay online gateway, lock it permanently for financial audit compliance
+      const isOnlineRazorpay = existing.paymentMethod?.toLowerCase().includes("razorpay");
+      if (isOnlineRazorpay) {
         return next(
           CustomErrorHandler.badRequest(
-            "This receipt has been paid/completed from the customer portal and cannot be edited.",
+            "This payment was processed online through Razorpay by the client. It cannot be modified to preserve transaction integrity.",
           ),
         );
       }
@@ -472,11 +563,40 @@ export const invoicesController = {
       const [updated] = await db
         .update(payments)
         .set({
-          amount: amount ? String(amount) : undefined,
+          amount: amount !== undefined ? String(amount) : undefined,
           paymentMethod: mode || undefined,
         })
         .where(eq(payments.id, id))
         .returning();
+
+      // Update client ledger entry if exists
+      if (existing.invoice?.clientId && amount !== undefined) {
+        await db
+          .update(clientLedger)
+          .set({
+            credit: String(amount),
+            description: description || (mode ? `Payment received via ${mode}` : undefined),
+          })
+          .where(eq(clientLedger.paymentId, id));
+      }
+
+      // Recalculate invoice status
+      if (existing.invoiceId && existing.invoice) {
+        const remainingPayments = await db.query.payments.findMany({
+          where: eq(payments.invoiceId, existing.invoiceId),
+        });
+        const totalPaid = remainingPayments.reduce(
+          (sum, p) => sum + (Number(p.amount) || 0),
+          0,
+        );
+        const invoiceTotal = Number(existing.invoice.total) || 0;
+        const newStatus = totalPaid >= invoiceTotal ? "paid" : "sent";
+
+        await db
+          .update(invoices)
+          .set({ status: newStatus })
+          .where(eq(invoices.id, existing.invoiceId));
+      }
 
       return res.status(200).json(
         ResponseHandler(200, "Receipt updated successfully", updated),
@@ -494,13 +614,51 @@ export const invoicesController = {
 
       const existing = await db.query.payments.findFirst({
         where: eq(payments.id, id),
+        with: {
+          invoice: true,
+        },
       });
 
       if (!existing) {
         return next(CustomErrorHandler.notFound("Payment receipt not found"));
       }
 
+      // If processed through Razorpay online gateway, lock it permanently for financial audit compliance
+      const isOnlineRazorpay = existing.paymentMethod?.toLowerCase().includes("razorpay");
+      if (isOnlineRazorpay) {
+        return next(
+          CustomErrorHandler.badRequest(
+            "This payment was processed online through Razorpay by the client. It cannot be deleted to protect client payment records.",
+          ),
+        );
+      }
+
+      const invoiceId = existing.invoiceId;
+      const invoiceRecord = existing.invoice;
+
+      // Delete associated client ledger entries first
+      await db.delete(clientLedger).where(eq(clientLedger.paymentId, id));
+
+      // Delete payment record
       await db.delete(payments).where(eq(payments.id, id));
+
+      // Recalculate invoice status and total settled
+      if (invoiceId && invoiceRecord) {
+        const remainingPayments = await db.query.payments.findMany({
+          where: eq(payments.invoiceId, invoiceId),
+        });
+        const totalPaid = remainingPayments.reduce(
+          (sum, p) => sum + (Number(p.amount) || 0),
+          0,
+        );
+        const invoiceTotal = Number(invoiceRecord.total) || 0;
+        const newStatus = totalPaid >= invoiceTotal && invoiceTotal > 0 ? "paid" : "sent";
+
+        await db
+          .update(invoices)
+          .set({ status: newStatus })
+          .where(eq(invoices.id, invoiceId));
+      }
 
       return res.status(200).json(
         ResponseHandler(200, "Receipt deleted successfully", null),

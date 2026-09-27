@@ -6,12 +6,27 @@ export interface IUserJwtPayload {
   email: string;
   roleIds: string[];
   permissions: string[];
-  isSuperAdmin: boolean;
+  isSuperAdmin?: boolean;
+  portal?: "tenant";
   iat?: number;
   exp?: number;
 }
 
-export type IJwtPayload = IUserJwtPayload;
+export interface IAdminJwtPayload {
+  userId: string;
+  adminId?: string;
+  email: string;
+  role: "admin" | "super_admin" | string;
+  roleId?: string;
+  permissions: string[];
+  isSuperAdmin: boolean;
+  isAdminPortalUser?: boolean;
+  portal: "admin";
+  iat?: number;
+  exp?: number;
+}
+
+export type IJwtPayload = IUserJwtPayload | IAdminJwtPayload;
 
 export interface IClientJwtPayload {
   /** The global client identity ID (clients.id) */

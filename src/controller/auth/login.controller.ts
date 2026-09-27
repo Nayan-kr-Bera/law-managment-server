@@ -9,6 +9,7 @@ import {
   refreshTokens,
   rolePermissions,
   roles,
+  tenants,
   user,
   userPermissions,
   userRoles,
@@ -26,59 +27,61 @@ import emailOtpService from "../../services/emailOtp.service.js";
 const REFRESH_EXPIRES = "7d";
 
 const loginController = {
+  // =========================================================================
+  // TENANT CLIENT LOGIN (Law Firm Partners, Advocates, Staff, Clients)
+  // =========================================================================
   async userlogin(req: Request, res: Response, next: NextFunction) {
     try {
       const { email, password } = req.body;
 
       if (!email || !password) {
         return next(
-          CustomErrorHandler.wrongCredentials(
-            "Please enter email and password",
-          ),
+          CustomErrorHandler.wrongCredentials("Please enter email and password")
         );
       }
 
       // Find User
-      const adminUser = await db.query.user.findFirst({
+      const clientUser = await db.query.user.findFirst({
         where: eq(user.email, email),
       });
 
-      if (!adminUser) {
+      if (!clientUser) {
         return next(
-          CustomErrorHandler.wrongCredentials("Email or password is incorrect"),
+          CustomErrorHandler.wrongCredentials("Email or password is incorrect")
         );
       }
 
       // Verify Password
-      const isMatch = await bcrypt.compare(password, adminUser.password);
+      const isMatch = await bcrypt.compare(password, clientUser.password);
 
       if (!isMatch) {
         return next(
-          CustomErrorHandler.wrongCredentials("Email or password is incorrect"),
+          CustomErrorHandler.wrongCredentials("Email or password is incorrect")
         );
       }
 
-      if (!adminUser.isEmailVerified) {
-        await emailOtpService({ id: adminUser.id, email: adminUser.email });
+      if (!clientUser.isEmailVerified) {
+        await emailOtpService({ id: clientUser.id, email: clientUser.email });
         return res.status(403).json(
           ResponseHandler(403, "Email verification required", {
             requireVerification: true,
-            email: adminUser.email,
-          }),
+            email: clientUser.email,
+          })
         );
       }
 
-      // Get Default Scope
+      // Get Default Tenant Scope
       const scope = await db.query.userScopes.findFirst({
         where: and(
-          eq(userScopes.userId, adminUser.id),
-          eq(userScopes.isDefault, true),
+          eq(userScopes.userId, clientUser.id),
+          eq(userScopes.isDefault, true)
         ),
       });
 
       if (!scope) {
-        return next(CustomErrorHandler.notFound("No default tenant found"));
+        return next(CustomErrorHandler.notFound("No active law firm workspace found for this account"));
       }
+
       const scopeOffices = await db
         .select({
           id: offices.id,
@@ -96,7 +99,7 @@ const loginController = {
 
       const roleIds = assignedRoles.map((r) => r.roleId);
 
-      // Get Role Names
+      // Get Role Names & Types
       const roleData =
         roleIds.length > 0
           ? await db
@@ -104,24 +107,50 @@ const loginController = {
                 id: roles.id,
                 name: roles.name,
                 slug: roles.slug,
+                isSystemRole: roles.isSystemRole,
+                tenantId: roles.tenantId,
               })
               .from(roles)
               .where(inArray(roles.id, roleIds))
           : [];
 
-      const isSuperAdmin = roleData.some((role) => role.slug === "super_admin");
-      
-      // Get Role Permissions
+      const isSuperAdmin = roleData.some((r) => r.slug === "super_admin");
+      const isPlatformAdmin =
+        isSuperAdmin ||
+        roleData.some(
+          (r) =>
+            r.slug === "admin" ||
+            r.slug === "system_admin" ||
+            r.slug === "platform_admin" ||
+            r.slug === "support_admin" ||
+            (r.isSystemRole && !r.tenantId)
+        );
+
+      // Check if user belongs to system tenant
+      const tenant = await db.query.tenants.findFirst({
+        where: eq(tenants.id, scope.tenantId!),
+      });
+
+      if (isSuperAdmin || isPlatformAdmin || tenant?.slug === "system") {
+        return next(
+          CustomErrorHandler.unAuthorized(
+            "Administrator accounts cannot log in to the Client Portal. Please log in via the Admin Console."
+          )
+        );
+      }
+
+      // Get Role Permissions (Only tenant / client permissions)
       const rolePermissionData =
         roleIds.length > 0
           ? await db
               .select({
                 code: permissions.code,
+                isAdminPortal: permissions.isAdminPortal,
               })
               .from(rolePermissions)
               .innerJoin(
                 permissions,
-                eq(rolePermissions.permissionId, permissions.id),
+                eq(rolePermissions.permissionId, permissions.id)
               )
               .where(inArray(rolePermissions.roleId, roleIds))
           : [];
@@ -130,49 +159,64 @@ const loginController = {
       const userPermissionData = await db
         .select({
           code: permissions.code,
+          isAdminPortal: permissions.isAdminPortal,
         })
         .from(userPermissions)
         .innerJoin(
           permissions,
-          eq(userPermissions.permissionId, permissions.id),
+          eq(userPermissions.permissionId, permissions.id)
         )
         .where(eq(userPermissions.scopeId, scope.id));
 
-      // Merge Permissions
+      // Merge Tenant Permissions (Filter out admin portal permissions)
       const permissionCodes = [
         ...new Set([
-          ...rolePermissionData.map((p) => p.code),
-          ...userPermissionData.map((p) => p.code),
+          ...rolePermissionData.filter((p) => !p.isAdminPortal).map((p) => p.code),
+          ...userPermissionData.filter((p) => !p.isAdminPortal).map((p) => p.code),
         ]),
       ];
 
-      //Payload
+      // If the user only has Admin Portal permissions and zero Client Portal permissions
+      if (
+        permissionCodes.length === 0 &&
+        (rolePermissionData.some((p) => p.isAdminPortal) ||
+          userPermissionData.some((p) => p.isAdminPortal))
+      ) {
+        return next(
+          CustomErrorHandler.unAuthorized(
+            "This account only has Admin Console access and cannot access the Client Portal."
+          )
+        );
+      }
+
+      // Dedicated Tenant JWT Payload
       const payload: IUserJwtPayload = {
-        userId: adminUser.id,
+        userId: clientUser.id,
         tenantId: scope.tenantId!,
         scopeId: scope.id,
-        email: adminUser.email,
+        email: clientUser.email,
         roleIds,
         permissions: permissionCodes,
-        isSuperAdmin,
+        portal: "tenant",
       };
 
       // Generate Tokens
-      const access_token = JwtService.sign(payload, "10s");
+      const access_token = JwtService.sign(payload, "15m");
 
       const refresh_token = JwtService.sign(
         {
-          userId: adminUser.id,
+          userId: clientUser.id,
           tenantId: scope.tenantId,
           scopeId: scope.id,
+          portal: "tenant",
         },
         REFRESH_EXPIRES,
-        config.REFRESH_SECRET,
+        config.REFRESH_SECRET
       );
 
       // Save Refresh Token
       const existingToken = await db.query.refreshTokens.findFirst({
-        where: eq(refreshTokens.userId, adminUser.id),
+        where: eq(refreshTokens.userId, clientUser.id),
       });
 
       if (existingToken) {
@@ -182,25 +226,23 @@ const loginController = {
             token: refresh_token,
             expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
           })
-          .where(eq(refreshTokens.userId, adminUser.id));
+          .where(eq(refreshTokens.userId, clientUser.id));
       } else {
         await db.insert(refreshTokens).values({
-          userId: adminUser.id,
+          userId: clientUser.id,
           token: refresh_token,
           expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         });
       }
 
-      // Response
       return res.status(200).json(
         ResponseHandler(200, "Login successful", {
           user: {
-            id: adminUser.id,
-            name: adminUser.name,
-            email: adminUser.email,
-            email_verified: adminUser.isEmailVerified,
-            phone_verified: adminUser.isPhoneVerified,
-            isSuperAdmin,
+            id: clientUser.id,
+            name: clientUser.name,
+            email: clientUser.email,
+            email_verified: clientUser.isEmailVerified,
+            phone_verified: clientUser.isPhoneVerified,
           },
           roles: roleData,
           permissions: permissionCodes,
@@ -210,7 +252,7 @@ const loginController = {
           },
           access_token,
           refresh_token,
-        }),
+        })
       );
     } catch (error) {
       console.error(error);

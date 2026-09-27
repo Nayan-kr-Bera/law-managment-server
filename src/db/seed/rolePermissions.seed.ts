@@ -8,6 +8,11 @@ export default async function seedRolePermissions() {
     .from(roles)
     .where(eq(roles.slug, "super_admin"));
 
+  const [platformAdminRole] = await db
+    .select()
+    .from(roles)
+    .where(eq(roles.slug, "admin"));
+
   const [tenantAdminRole] = await db
     .select()
     .from(roles)
@@ -23,217 +28,46 @@ export default async function seedRolePermissions() {
     allPermissions.map((permission) => [permission.code, permission.id]),
   );
 
-  // Super Admin gets everything
+  // 1. Super Admin gets EVERYTHING unconditionally
   const superAdminPermissions = allPermissions.map((permission) => ({
     roleId: superAdminRole.id,
     permissionId: permission.id,
   }));
 
-  // Tenant Admin permissions
-  const TENANT_ADMIN_PERMISSIONS = [
-    // Dashboard
-    "dashboard.read",
-    "dashboard.export",
+  // 2. Platform Admin gets all Admin Portal permissions (isAdminPortal: true)
+  const adminPortalPermissionsList = allPermissions
+    .filter((p) => p.isAdminPortal)
+    .map((permission) => ({
+      roleId: platformAdminRole?.id || superAdminRole.id,
+      permissionId: permission.id,
+    }));
 
-    // Search
-    "search.read",
+  // 3. Tenant Admin permissions (strictly isAdminPortal: false)
+  const TENANT_ADMIN_PERMISSIONS = allPermissions
+    .filter((p) => !p.isAdminPortal)
+    .map((p) => p.code);
 
-    // Calendar
-    "calendar.read",
-    "calendar.create",
-    "calendar.update",
-    "calendar.delete",
-
-    // Users
-    "user.read",
-    "user.create",
-    "user.update",
-    "user.delete",
-    "user.assign_role",
-    "user_permission.manage",
-
-    // Advocates
-    "advocate.read",
-    "advocate.create",
-    "advocate.update",
-    "advocate.delete",
-
-    // Partners
-    "partner.read",
-    "partner.create",
-    "partner.update",
-    "partner.delete",
-
-    // Roles
-    "role.read",
-    "role.create",
-    "role.update",
-    "role.delete",
-    "role.assign",
-
-    // Clients
-    "client.read",
-    "client.create",
-    "client.update",
-    "client.delete",
-    "client.export",
-
-    // Cases
-    "case.read",
-    "case.create",
-    "case.update",
-    "case.delete",
-    "case.export",
-    "case.assign",
-    "case.status_update",
-
-    // Hearings
-    "hearing.read",
-    "hearing.create",
-    "hearing.update",
-    "hearing.delete",
-
-    // Documents
-    "document.read",
-    "document.create",
-    "document.upload",
-    "document.update",
-    "document.delete",
-    "document.download",
-    "document.share",
-
-    // AI Drafter
-    "ai_drafter.use",
-
-    // Tasks
-    "task.read",
-    "task.create",
-    "task.update",
-    "task.delete",
-    "task.assign",
-
-    // Reminders
-    "reminder.read",
-    "reminder.create",
-    "reminder.update",
-    "reminder.delete",
-
-    // Appointments
-    "appointment.read",
-    "appointment.create",
-    "appointment.update",
-    "appointment.delete",
-
-    // Billing
-    "billing.read",
-    "billing.create",
-    "billing_history.read",
-
-    // Invoices
-    "invoice.read",
-    "invoice.create",
-    "invoice.update",
-    "invoice.delete",
-    "invoice.download",
-
-    // Payments
-    "payment.read",
-    "payment.create",
-    "payment.update",
-    "payment.delete",
-
-    // Case Types
-    "case_type.read",
-    "case_type.create",
-    "case_type.update",
-    "case_type.delete",
-
-    // Courts
-    "court.read",
-    "court.create",
-    "court.update",
-    "court.delete",
-
-    // Police Stations
-    "police_station.read",
-    "police_station.create",
-    "police_station.update",
-    "police_station.delete",
-
-    // Companies
-    "company.read",
-    "company.create",
-    "company.update",
-    "company.delete",
-
-    // Under Sections
-    "under_section.read",
-    "under_section.create",
-    "under_section.update",
-    "under_section.delete",
-
-    // Empanelments
-    "empanelment.read",
-    "empanelment.create",
-    "empanelment.update",
-    "empanelment.delete",
-
-    // Custom Fields
-    "custom_field.read",
-    "custom_field.create",
-    "custom_field.update",
-    "custom_field.delete",
-
-    // Case Labels
-    "case_label.read",
-    "case_label.create",
-    "case_label.update",
-    "case_label.delete",
-
-    // Notifications
-    "notification.read",
-    "notification.create",
-    "notification.update",
-    "notification.delete",
-
-    // Settings
-    "settings.read",
-    "settings.update",
-
-    // Tenant
-    "tenant.read",
-    "tenant.update",
-
-    // Workspaces
-    "workspace.read",
-    "workspace.switch",
-
-    // Offices
-    "office.read",
-    "office.create",
-    "office.update",
-    "office.delete",
-
-    // Audit
-    "audit.read",
-    "audit.export",
-
-    // Reports
-    "report.read",
-    "report.export",
-  ];
-  const tenantAdminPermissions = TENANT_ADMIN_PERMISSIONS.map((code) =>
-    permissionMap.get(code),
-  )
-    .filter((id): id is string => Boolean(id))
-    .map((permissionId) => ({
+  const tenantAdminPermissions = TENANT_ADMIN_PERMISSIONS.map((code) => {
+    const permissionId = permissionMap.get(code);
+    if (!permissionId) {
+      throw new Error(`Permission ${code} not found in database`);
+    }
+    return {
       roleId: tenantAdminRole.id,
       permissionId,
-    }));
+    };
+  });
+
+  const allRolePermissions = [
+    ...superAdminPermissions,
+    ...(platformAdminRole ? adminPortalPermissionsList : []),
+    ...tenantAdminPermissions,
+  ];
+
   await db
     .insert(rolePermissions)
-    .values([...superAdminPermissions, ...tenantAdminPermissions])
+    .values(allRolePermissions)
     .onConflictDoNothing();
 
-  console.log("✅ Role permissions seeded");
+  console.log("✅ Role permissions seeded (Super Admin, Platform Admin, Tenant Admin)");
 }

@@ -8,15 +8,23 @@ export default async function seedRoles() {
       {
         name: "Super Admin",
         slug: "super_admin",
-        isSystemRole:true,
+        isSystemRole: true,
+        description: "Master administrator with unrestricted global platform access",
+      },
+      {
+        name: "Platform Admin",
+        slug: "admin",
+        isSystemRole: true,
+        description: "Departmental platform administrator with assigned admin portal permissions",
       },
       {
         name: "System Administrator",
         slug: "tenant_admin",
-        isSystemRole:true,
+        isSystemRole: true,
+        description: "Managing Partner / Chamber owner administrator for tenant workspace",
       },
     ])
     .onConflictDoNothing();
 
-  console.log("✅ Roles Seeded");
+  console.log("✅ System Roles Seeded (super_admin, admin, tenant_admin)");
 }

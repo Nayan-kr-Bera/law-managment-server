@@ -36,4 +36,5 @@ export { default as contactUsRoutes } from "./contactUs.route.js";
 export { default as aiDraftRoutes } from "./aiDraft.route.js";
 export { default as auditLogRoutes } from "./auditLog.route.js";
 export { default as notificationRoutes } from "./notification.route.js";
+export { default as adminRoutes } from "./admin/admin.routes.js";
 

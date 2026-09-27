@@ -1,9 +1,10 @@
-import type { IUserJwtPayload, IClientJwtPayload, ISubscriptionContext } from "./payload.types.js";
+import type { IUserJwtPayload, IAdminJwtPayload, IClientJwtPayload, ISubscriptionContext } from "./payload.types.js";
 
 declare global {
   namespace Express {
     interface Request {
-      user: IUserJwtPayload;
+      user: any;
+      adminUser?: IAdminJwtPayload;
       clientUser?: IClientJwtPayload;
       tenantId?: string;
       officeId?: string;

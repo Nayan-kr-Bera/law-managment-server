@@ -49,7 +49,7 @@ const notificationController = {
       }
 
       if (typeFilter && typeFilter !== "all") {
-        visibilityConditions.push(eq(notifications.type, typeFilter as any));
+        visibilityConditions.push(eq(notifications.type, typeFilter as (typeof notifications.$inferSelect)["type"]));
       }
 
       const finalWhere = and(...visibilityConditions);

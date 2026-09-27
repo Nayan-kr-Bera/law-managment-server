@@ -43,6 +43,7 @@ import {
   aiDraftRoutes,
   auditLogRoutes,
   notificationRoutes,
+  adminRoutes,
 } from "./routes/index.js";
 
 const app = express();
@@ -108,8 +109,11 @@ app.use("/api/appointments", appointmentRoutes);
 app.use("/api/case-actions", caseActionRoutes);
 app.use("/api/system", systemAlartsRoutes);
 app.use("/api/subscriptionPayment", subscriptionPaymentRoutes);
+app.use("/api/subscription-payments", subscriptionPaymentRoutes);
 app.use("/api/subscriptions", subscriptionPlanRoutes);
+app.use("/api/subscription-plans", subscriptionPlanRoutes);
 app.use("/api/tenantsubscription", tenantsubscriptionRoutes);
+app.use("/api/tenant-subscription", tenantsubscriptionRoutes);
 app.use("/api/document", documentsRoutes);
 app.use("/api/documentFolder",documentsFolderRoutes);
 app.use("/api/reminders", reminderRoutes);
@@ -120,6 +124,10 @@ app.use("/api/contact-us", contactUsRoutes);
 app.use("/api/ai", aiDraftRoutes);
 app.use("/api/audit-logs", auditLogRoutes);
 app.use("/api/notifications", notificationRoutes);
+
+/* ---------- Admin Portal Routes ---------- */
+app.use("/api/admin", adminRoutes);
+app.use("/api/system-stats", adminRoutes);
 
 /* ---------- 404 ---------- */
 app.use(notFound);
