@@ -1,7 +1,7 @@
 import { EventEmitter } from "events";
 import { and, eq } from "drizzle-orm";
 import db from "../db/index.js";
-import { notifications, userScopes, userScopeOffices } from "../db/schema/index.js";
+import { notifications, notificationQueue, userScopes, userScopeOffices } from "../db/schema/index.js";
 
 export const notificationEvents = new EventEmitter();
 notificationEvents.setMaxListeners(0); // Unlimited listeners for active SSE connections
@@ -14,6 +14,53 @@ export interface CreateNotificationParams {
   body: string;
   type: "system" | "case" | "hearing" | "task" | "appointment" | "invoice" | "payment" | "reminder";
 }
+
+export interface CreateClientNotificationParams {
+  tenantId: string;
+  officeId?: string | null;
+  caseId?: string | null;
+  clientId: string;
+  channel?: string;
+  recipient?: string | null;
+  title: string;
+  message: string;
+  payload?: Record<string, unknown>;
+}
+
+/**
+ * Creates notifications for the Client Portal and pushes real-time SSE event.
+ */
+export const createClientNotification = async (params: CreateClientNotificationParams) => {
+  try {
+    const [queueItem] = await db
+      .insert(notificationQueue)
+      .values({
+        tenantId: params.tenantId,
+        officeId: params.officeId || null,
+        caseId: params.caseId || null,
+        clientId: params.clientId,
+        channel: params.channel || "portal",
+        recipient: params.recipient || "",
+        payload: {
+          title: params.title,
+          message: params.message,
+          caseId: params.caseId || null,
+          ...(params.payload || {}),
+        },
+        status: "sent",
+        sentAt: new Date(),
+      })
+      .returning();
+
+    if (queueItem) {
+      notificationEvents.emit("client_notification:new", queueItem);
+    }
+    return queueItem;
+  } catch (error) {
+    console.error("Failed to create client notification:", error);
+    return null;
+  }
+};
 
 /**
  * Creates notifications using User-Isolated Fan-Out (Approach A).
@@ -130,5 +177,6 @@ export const createNotification = async (params: CreateNotificationParams) => {
 
 export default {
   createNotification,
+  createClientNotification,
   notificationEvents,
 };

@@ -21,6 +21,7 @@ import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import ResponseHandler from "../../utils/responseHandler.js";
 import { config } from "../../config/index.js";
 import { IClientJwtPayload } from "../../@types/payload.types.js";
+import { notificationEvents } from "../../services/notification.service.js";
 
 const clientPortalController = {
   // CLIENT REFRESH TOKEN — verifies client JWT payload and issues scoped token via clientProfiles
@@ -1102,6 +1103,125 @@ const clientPortalController = {
       );
     } catch (error) {
       console.error("Mark all notifications read error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  async deleteNotification(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const clientId = req.clientUser?.clientId;
+      if (!clientId) {
+        return next(CustomErrorHandler.unAuthorized("Client ID not found"));
+      }
+
+      await db
+        .delete(notificationQueue)
+        .where(
+          and(
+            eq(notificationQueue.id, id),
+            eq(notificationQueue.clientId, clientId)
+          )
+        );
+
+      return res.status(200).json(
+        ResponseHandler(200, "Notification deleted successfully")
+      );
+    } catch (error) {
+      console.error("Delete client notification error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  async clearReadNotifications(req: Request, res: Response, next: NextFunction) {
+    try {
+      const clientId = req.clientUser?.clientId;
+      if (!clientId) {
+        return next(CustomErrorHandler.unAuthorized("Client ID not found"));
+      }
+
+      await db
+        .delete(notificationQueue)
+        .where(
+          and(
+            eq(notificationQueue.clientId, clientId),
+            eq(notificationQueue.status, "read")
+          )
+        );
+
+      return res.status(200).json(
+        ResponseHandler(200, "All read notifications cleared successfully")
+      );
+    } catch (error) {
+      console.error("Clear read client notifications error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  // ─── CLIENT SSE STREAM (Real-time live notifications) ────────────────
+  async streamNotifications(req: Request, res: Response, next: NextFunction) {
+    try {
+      const clientId = req.clientUser?.clientId;
+      if (!clientId) {
+        return next(CustomErrorHandler.unAuthorized("Client ID not found"));
+      }
+
+      // Setup SSE Headers
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+
+      // Send initial connection event
+      res.write(
+        `event: connected\ndata: ${JSON.stringify({
+          status: "connected",
+          clientId,
+          time: new Date().toISOString(),
+        })}\n\n`
+      );
+
+      // Event listener callback: strictly push events targeted to this client
+      const onClientNotification = (item: typeof notificationQueue.$inferSelect) => {
+        try {
+          if (item.clientId === clientId) {
+            res.write(`event: notification\ndata: ${JSON.stringify(item)}\n\n`);
+          }
+        } catch (err) {
+          console.error("Error sending Client SSE notification frame:", err);
+        }
+      };
+
+      notificationEvents.on("client_notification:new", onClientNotification);
+
+      // Keep connection alive with heartbeat every 25s
+      const heartbeatInterval = setInterval(() => {
+        try {
+          if (!res.writableEnded) {
+            res.write(`: heartbeat\n\n`);
+          } else {
+            clearInterval(heartbeatInterval);
+          }
+        } catch {
+          clearInterval(heartbeatInterval);
+        }
+      }, 25000);
+
+      // Clean up when client disconnects
+      req.on("close", () => {
+        clearInterval(heartbeatInterval);
+        notificationEvents.off("client_notification:new", onClientNotification);
+        try {
+          if (!res.writableEnded) {
+            res.end();
+          }
+        } catch {
+          // Socket already cleanly closed
+        }
+      });
+    } catch (error) {
+      console.error("Client SSE stream error:", error);
       return next(CustomErrorHandler.serverError());
     }
   },

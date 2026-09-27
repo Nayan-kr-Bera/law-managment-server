@@ -20,6 +20,7 @@ import {
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import ResponseHandler from "../../utils/responseHandler.js";
 import { sendClientCaseNotificationEmail } from "../../services/clientNotificationEmail.service.js";
+import { notificationEvents } from "../../services/notification.service.js";
 const DISPOSAL_NATURES = [
   "judgment",
   "dismissed",
@@ -1402,6 +1403,10 @@ const caseActionController = {
             sentAt: new Date(),
           })
           .returning();
+
+        if (queueItem) {
+          notificationEvents.emit("client_notification:new", queueItem);
+        }
 
         // 3. Log to notificationLogs
         if (queueItem) {

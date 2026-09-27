@@ -54,8 +54,11 @@ router.get("/support/tickets", clientAuth, supportTicketController.getClientTick
 router.post("/support/tickets", clientAuth, supportTicketController.createTicket);
 router.post("/support/tickets/:ticketId/reply", clientAuth, supportTicketController.replyTicket);
 
+router.get("/notifications/stream", clientAuth, clientPortalController.streamNotifications);
 router.get("/notifications", clientAuth, clientPortalController.getNotifications);
 router.patch("/notifications/mark-all-read", clientAuth, clientPortalController.markAllNotificationsRead);
 router.patch("/notifications/:id/read", clientAuth, clientPortalController.markNotificationRead);
+router.delete("/notifications/clear-read", clientAuth, clientPortalController.clearReadNotifications);
+router.delete("/notifications/:id", clientAuth, clientPortalController.deleteNotification);
 
 export default router;

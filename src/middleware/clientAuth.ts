@@ -15,12 +15,17 @@ const clientAuth = async (
 ) => {
   try {
     const authHeader = req.headers.authorization;
+    let token: string | undefined;
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      throw new AppError("Unauthorized Client", 401);
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      token = authHeader.split(" ")[1];
+    } else if (typeof req.query.token === "string" && req.query.token) {
+      token = req.query.token;
     }
 
-    const token = authHeader.split(" ")[1];
+    if (!token) {
+      throw new AppError("Unauthorized Client", 401);
+    }
     const decoded = JwtService.verifyClient(token);
 
     if (!decoded || (!decoded.clientUserId && !decoded.clientId)) {
