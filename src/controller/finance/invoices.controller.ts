@@ -18,16 +18,22 @@ interface InvoiceLineItemInput {
 }
 
 export const invoicesController = {
-  // GET ALL INVOICES FOR TENANT
+  // GET ALL INVOICES FOR TENANT (Filtered by active office)
   async getInvoices(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
+      const officeId = (req.headers["x-office-id"] as string) || (req.query.officeId as string) || undefined;
       if (!tenantId) {
         return next(CustomErrorHandler.badRequest("Tenant context missing"));
       }
 
+      const whereConditions = [eq(invoices.tenantId, tenantId)];
+      if (officeId) {
+        whereConditions.push(eq(invoices.officeId, officeId));
+      }
+
       const invList = await db.query.invoices.findMany({
-        where: eq(invoices.tenantId, tenantId),
+        where: and(...whereConditions),
         with: {
           client: true,
           case: {
@@ -371,10 +377,11 @@ export const invoicesController = {
     }
   },
 
-  // GET ALL RECEIPTS / PAYMENTS
+  // GET ALL RECEIPTS / PAYMENTS (Filtered by active office)
   async getReceipts(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
+      const officeId = (req.headers["x-office-id"] as string) || (req.query.officeId as string) || undefined;
       if (!tenantId) {
         return next(CustomErrorHandler.badRequest("Tenant context missing"));
       }
@@ -395,9 +402,13 @@ export const invoicesController = {
         orderBy: [desc(payments.paidAt)],
       });
 
-      const tenantPayments = allPayments.filter(
-        (p) => p.invoice?.tenantId === tenantId,
-      );
+      const tenantPayments = allPayments.filter((p) => {
+        if (!p.invoice || p.invoice.tenantId !== tenantId) return false;
+        if (officeId) {
+          return p.invoice.officeId === officeId;
+        }
+        return true;
+      });
 
       const receipts = tenantPayments.map((p, idx) => {
         const isTDS =

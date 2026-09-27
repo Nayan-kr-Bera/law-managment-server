@@ -285,7 +285,11 @@ const notificationController = {
       // Keep connection alive with heartbeat every 25s
       const heartbeatInterval = setInterval(() => {
         try {
-          res.write(`: heartbeat\n\n`);
+          if (!res.writableEnded) {
+            res.write(`: heartbeat\n\n`);
+          } else {
+            clearInterval(heartbeatInterval);
+          }
         } catch {
           clearInterval(heartbeatInterval);
         }
@@ -295,7 +299,13 @@ const notificationController = {
       req.on("close", () => {
         clearInterval(heartbeatInterval);
         notificationEvents.off("notification:new", onNotification);
-        res.end();
+        try {
+          if (!res.writableEnded) {
+            res.end();
+          }
+        } catch {
+          // Socket already cleanly closed by remote client
+        }
       });
     } catch (error) {
       console.error("SSE stream error:", error);
