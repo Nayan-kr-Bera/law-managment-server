@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import db from "../../db/index.js";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import invoices from "../../db/schema/finance/invoices.js";
 import invoiceItems from "../../db/schema/finance/invoiceItems.js";
 import payments from "../../db/schema/finance/payments.js";
@@ -276,7 +276,7 @@ export const invoicesController = {
       if (status) {
         const validStatuses = ["draft", "sent", "partially_paid", "paid", "overdue", "cancelled"];
         if (validStatuses.includes(status)) {
-          updateData.status = status as any;
+          updateData.status = status as typeof invoices.$inferSelect.status;
         }
       }
 
@@ -302,7 +302,11 @@ export const invoicesController = {
       // Upsert into client ledger debit entry
       if (targetClientId) {
         const existingLedger = await db.query.clientLedger.findFirst({
-          where: and(eq(clientLedger.invoiceId, id), eq(clientLedger.tenantId, tenantId)),
+          where: and(
+            eq(clientLedger.invoiceId, id),
+            eq(clientLedger.tenantId, tenantId),
+            isNull(clientLedger.paymentId),
+          ),
         });
 
         if (existingLedger) {
@@ -332,9 +336,10 @@ export const invoicesController = {
       return res.status(200).json(
         ResponseHandler(200, "Invoice updated successfully", updatedInvoice),
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Update invoice error:", error);
-      return next(CustomErrorHandler.serverError(error?.message || "Failed to update invoice"));
+      const message = error instanceof Error ? error.message : "Failed to update invoice";
+      return next(CustomErrorHandler.serverError(message));
     }
   },
 

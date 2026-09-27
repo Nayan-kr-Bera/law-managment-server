@@ -417,9 +417,9 @@ const clientPortalController = {
         limit: 100,
       });
 
-      const formattedInvoices = (invs as any[]).map((inv: any) => {
+      const formattedInvoices = invs.map((inv) => {
         const totalPaid = (inv.payments || []).reduce(
-          (sum: number, p: any) => sum + (Number(p.amount) || 0),
+          (sum: number, p) => sum + (Number(p.amount) || 0),
           0,
         );
         const totalAmount = Number(inv.total) || 0;
@@ -432,7 +432,7 @@ const clientPortalController = {
             ? "paid"
             : "unpaid";
 
-        const lineItems = (inv.items || []).map((it: any) => {
+        const lineItems = (inv.items || []).map((it) => {
           const isNonGst =
             typeof it.description === "string" &&
             (it.description.toLowerCase().includes("non-gst") ||
@@ -459,14 +459,14 @@ const clientPortalController = {
         });
 
         const taxableSubtotal = lineItems
-          .filter((li: any) => li.isGstApplicable)
-          .reduce((sum: number, li: any) => sum + li.amount, 0);
+          .filter((li) => li.isGstApplicable)
+          .reduce((sum: number, li) => sum + li.amount, 0);
 
         const nonTaxableSubtotal = lineItems
-          .filter((li: any) => !li.isGstApplicable)
-          .reduce((sum: number, li: any) => sum + li.amount, 0);
+          .filter((li) => !li.isGstApplicable)
+          .reduce((sum: number, li) => sum + li.amount, 0);
 
-        const totalGst = lineItems.reduce((sum: number, li: any) => sum + li.gstAmount, 0);
+        const totalGst = lineItems.reduce((sum: number, li) => sum + li.gstAmount, 0);
         const cgst = Math.round((totalGst / 2) * 100) / 100;
         const sgst = Math.round((totalGst / 2) * 100) / 100;
 
@@ -773,9 +773,13 @@ const clientPortalController = {
       let totalDebits = 0;
       let totalCredits = 0;
 
-      const formattedEntries = (ledgerRecords as any[]).map((entry) => {
-        const debit = Number(entry.debit) || 0;
-        const credit = Number(entry.credit) || 0;
+      const formattedEntries = ledgerRecords.map((entry) => {
+        // Strict double-entry accounting guarantee:
+        // Payment entries (has paymentId or credit > 0) are strictly credits (debit = 0).
+        // Invoice entries (no paymentId) are strictly debits (credit = 0).
+        let debit = entry.paymentId ? 0 : Number(entry.debit) || 0;
+        let credit = entry.paymentId ? Number(entry.credit) || (entry.payment?.amount ? Number(entry.payment.amount) : 0) : 0;
+
         totalDebits += debit;
         totalCredits += credit;
         runningBalance = runningBalance + debit - credit;
@@ -785,10 +789,16 @@ const clientPortalController = {
         const resolvedCaseTitle =
           entry.case?.title || entry.invoice?.case?.title || undefined;
 
+        // Clean up description display
+        let displayDescription = entry.description;
+        if (entry.paymentId && (!displayDescription || displayDescription.startsWith("Invoice updated:"))) {
+          displayDescription = `Payment Received${entry.payment?.paymentMethod ? ` via ${entry.payment.paymentMethod}` : ""}`;
+        }
+
         return {
           id: entry.id,
           transactionDate: entry.transactionDate ? new Date(entry.transactionDate).toISOString() : new Date().toISOString(),
-          description: entry.description,
+          description: displayDescription,
           debit,
           credit,
           runningBalance,

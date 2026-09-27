@@ -3,7 +3,7 @@ import type { IUserJwtPayload, IAdminJwtPayload, IClientJwtPayload, ISubscriptio
 declare global {
   namespace Express {
     interface Request {
-      user: any;
+      user: IUserJwtPayload;
       adminUser?: IAdminJwtPayload;
       clientUser?: IClientJwtPayload;
       tenantId?: string;

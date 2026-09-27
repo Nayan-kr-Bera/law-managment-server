@@ -31,7 +31,7 @@ const adminTenantController = {
       const conditions: SQL[] = [];
 
       if (status && status.trim() !== "" && status !== "all") {
-        conditions.push(eq(tenants.status, status as any));
+        conditions.push(eq(tenants.status, status as typeof tenants.$inferSelect.status));
       }
 
       if (search && search.trim() !== "") {
@@ -94,7 +94,7 @@ const adminTenantController = {
                   validUntil: sub.nextBillingDate
                     ? new Date(sub.nextBillingDate).toISOString()
                     : undefined,
-                  status: sub.status as any,
+                  status: sub.status,
                 }
               : undefined,
           };
@@ -167,7 +167,7 @@ const adminTenantController = {
               validUntil: sub.nextBillingDate
                 ? new Date(sub.nextBillingDate).toISOString()
                 : undefined,
-              status: sub.status as any,
+              status: sub.status,
             }
           : undefined,
       };

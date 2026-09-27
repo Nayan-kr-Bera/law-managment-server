@@ -25,7 +25,7 @@ const adminSubscriptionController = {
 
       const conditions: SQL[] = [];
       if (status && status !== "all") {
-        conditions.push(eq(tenantSubscriptions.status, status as any));
+        conditions.push(eq(tenantSubscriptions.status, status as typeof tenantSubscriptions.$inferSelect.status));
       }
 
       const allSubs = await db.query.tenantSubscriptions.findMany({

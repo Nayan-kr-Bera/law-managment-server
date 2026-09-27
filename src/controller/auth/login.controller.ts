@@ -114,32 +114,24 @@ const loginController = {
               .where(inArray(roles.id, roleIds))
           : [];
 
-      const isSuperAdmin = roleData.some((r) => r.slug === "super_admin");
-      const isPlatformAdmin =
-        isSuperAdmin ||
-        roleData.some(
-          (r) =>
-            r.slug === "admin" ||
-            r.slug === "system_admin" ||
-            r.slug === "platform_admin" ||
-            r.slug === "support_admin" ||
-            (r.isSystemRole && !r.tenantId)
-        );
-
       // Check if user belongs to system tenant
       const tenant = await db.query.tenants.findFirst({
         where: eq(tenants.id, scope.tenantId!),
       });
 
-      if (isSuperAdmin || isPlatformAdmin || tenant?.slug === "system") {
+      const isSystemTenant = tenant?.slug === "system";
+      const isSuperAdmin = roleData.some((r) => r.slug === "super_admin");
+
+      // Only block pure platform super-admins on the system tenant from logging into tenant portal
+      if (isSystemTenant && isSuperAdmin) {
         return next(
           CustomErrorHandler.unAuthorized(
-            "Administrator accounts cannot log in to the Client Portal. Please log in via the Admin Console."
+            "Platform Administrator accounts must log in via the Admin Console."
           )
         );
       }
 
-      // Get Role Permissions (Only tenant / client permissions)
+      // Get Role Permissions (Only tenant permissions)
       const rolePermissionData =
         roleIds.length > 0
           ? await db
@@ -169,24 +161,24 @@ const loginController = {
         .where(eq(userPermissions.scopeId, scope.id));
 
       // Merge Tenant Permissions (Filter out admin portal permissions)
-      const permissionCodes = [
+      let permissionCodes = [
         ...new Set([
           ...rolePermissionData.filter((p) => !p.isAdminPortal).map((p) => p.code),
           ...userPermissionData.filter((p) => !p.isAdminPortal).map((p) => p.code),
         ]),
       ];
 
-      // If the user only has Admin Portal permissions and zero Client Portal permissions
-      if (
-        permissionCodes.length === 0 &&
-        (rolePermissionData.some((p) => p.isAdminPortal) ||
-          userPermissionData.some((p) => p.isAdminPortal))
-      ) {
-        return next(
-          CustomErrorHandler.unAuthorized(
-            "This account only has Admin Console access and cannot access the Client Portal."
-          )
-        );
+      // If tenant admin/owner and no granular permissions are bound, grant all tenant permissions
+      const isTenantAdmin = roleData.some(
+        (r) => r.slug === "admin" || r.slug === "tenant_admin" || r.slug === "super_admin"
+      );
+
+      if (isTenantAdmin && permissionCodes.length === 0) {
+        const allTenantPerms = await db
+          .select({ code: permissions.code })
+          .from(permissions)
+          .where(eq(permissions.isAdminPortal, false));
+        permissionCodes = allTenantPerms.map((p) => p.code);
       }
 
       // Dedicated Tenant JWT Payload

@@ -407,9 +407,9 @@ const adminAuthController = {
             phone_verified: adminUser.isPhoneVerified,
             isSuperAdmin: req.user?.isSuperAdmin ?? false,
           },
-          role: req.user?.role || "admin",
-          roles: [req.user?.role || "admin"],
-          permissions: req.user?.permissions || [],
+          role: req.adminUser?.role || req.user?.role || "admin",
+          roles: [req.adminUser?.role || req.user?.role || "admin"],
+          permissions: req.adminUser?.permissions || req.user?.permissions || [],
         })
       );
     } catch (error) {

@@ -13,7 +13,7 @@ import {
 } from "../db/schema/index.js";
 import JwtService from "../utils/jwtServices.js";
 import { AppError } from "./errorHandler.js";
-import { IAdminJwtPayload } from "../@types/payload.types.js";
+import { IAdminJwtPayload, IUserJwtPayload } from "../@types/payload.types.js";
 
 export const adminAuth = async (
   req: Request,
@@ -132,7 +132,7 @@ export const adminAuth = async (
       );
     }
 
-    req.user = decoded;
+    req.user = decoded as unknown as IUserJwtPayload;
     req.adminUser = decoded;
     next();
   } catch (err) {

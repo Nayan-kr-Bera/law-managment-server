@@ -64,7 +64,7 @@ const adminAuditController = {
         tenantName: l.tenantName || undefined,
         ipAddress: l.ipAddress || "127.0.0.1",
         userAgent: "Admin Console Web",
-        details: (l.details as Record<string, any>) || { description: l.description },
+        details: (l.details as Record<string, unknown>) || { description: l.description },
         createdAt: l.createdAt ? new Date(l.createdAt).toISOString() : new Date().toISOString(),
       }));
 

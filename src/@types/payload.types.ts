@@ -4,6 +4,7 @@ export interface IUserJwtPayload {
   tenantId: string;
   scopeId: string;
   email: string;
+  role?: string;
   roleIds: string[];
   permissions: string[];
   isSuperAdmin?: boolean;

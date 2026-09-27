@@ -1066,10 +1066,15 @@ const clientController = {
       let balance = 0;
 
       const ledgerWithBalance = filteredLedger.map((entry) => {
-        const billed = Number(entry.debit || 0);
-        const paid = Number(entry.credit || 0);
+        const billed = entry.paymentId ? 0 : Number(entry.debit || 0);
+        const paid = entry.paymentId ? Number(entry.credit || 0) : 0;
 
         balance += billed - paid;
+
+        let displayDescription = entry.description;
+        if (entry.paymentId && (!displayDescription || displayDescription.startsWith("Invoice updated:"))) {
+          displayDescription = `Payment Received${entry.payment?.paymentMethod ? ` via ${entry.payment.paymentMethod}` : ""}`;
+        }
 
         return {
           id: entry.id,
@@ -1077,7 +1082,7 @@ const clientController = {
           caseNumber: entry.case?.caseNumber ?? null,
           firstParty: entry.case?.firstParty ?? null,
           oppositeParty: entry.case?.oppositeParty ?? null,
-          description: entry.description,
+          description: displayDescription,
           mode:
             entry.payment?.paymentMethod ??
             (entry.invoice ? "Invoice" : "Ledger"),
