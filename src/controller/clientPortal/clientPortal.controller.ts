@@ -22,6 +22,7 @@ import ResponseHandler from "../../utils/responseHandler.js";
 import { config } from "../../config/index.js";
 import { IClientJwtPayload } from "../../@types/payload.types.js";
 import { notificationEvents } from "../../services/notification.service.js";
+import bcrypt from "bcrypt";
 
 const clientPortalController = {
   // CLIENT REFRESH TOKEN — verifies client JWT payload and issues scoped token via clientProfiles
@@ -1222,6 +1223,135 @@ const clientPortalController = {
       });
     } catch (error) {
       console.error("Client SSE stream error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  // ─── CLIENT PROFILE & ACCOUNT SETTINGS ───────────────────────────────
+  async getProfile(req: Request, res: Response, next: NextFunction) {
+    try {
+      const clientId = req.clientUser?.clientId || req.clientUser?.clientUserId;
+      if (!clientId) {
+        return next(CustomErrorHandler.unAuthorized("Client identity not found"));
+      }
+
+      const client = await db.query.clients.findFirst({
+        where: eq(clients.id, clientId),
+      });
+
+      if (!client) {
+        return next(CustomErrorHandler.notFound("Client profile record not found"));
+      }
+
+      // Also fetch active profile engagement
+      let tenantInfo = null;
+      let officeInfo = null;
+      if (req.clientUser?.tenantId) {
+        tenantInfo = await db.query.tenants.findFirst({
+          where: eq(tenants.id, req.clientUser.tenantId),
+        });
+      }
+
+      const { passwordHash, ...sanitizedClient } = client;
+
+      return res.status(200).json(
+        ResponseHandler(200, "Client profile retrieved successfully", {
+          ...sanitizedClient,
+          tenant: tenantInfo ? { id: tenantInfo.id, name: tenantInfo.name } : null,
+          officeId: req.clientUser?.officeId || null,
+        })
+      );
+    } catch (error) {
+      console.error("Get client profile error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  async updateProfile(req: Request, res: Response, next: NextFunction) {
+    try {
+      const clientId = req.clientUser?.clientId || req.clientUser?.clientUserId;
+      if (!clientId) {
+        return next(CustomErrorHandler.unAuthorized("Client identity not found"));
+      }
+
+      const { firstName, lastName, phone, companyName, address, city, state, country } = req.body;
+
+      if (!firstName || !firstName.trim()) {
+        return next(CustomErrorHandler.badRequest("First name is required"));
+      }
+
+      const updated = await db
+        .update(clients)
+        .set({
+          firstName: firstName.trim(),
+          lastName: lastName ? lastName.trim() : null,
+          phone: phone ? phone.trim() : null,
+          companyName: companyName ? companyName.trim() : null,
+          address: address ? address.trim() : null,
+          city: city ? city.trim() : null,
+          state: state ? state.trim() : null,
+          country: country ? country.trim() : null,
+        })
+        .where(eq(clients.id, clientId))
+        .returning();
+
+      if (!updated.length) {
+        return next(CustomErrorHandler.notFound("Client not found"));
+      }
+
+      const { passwordHash, ...sanitizedClient } = updated[0];
+
+      return res.status(200).json(
+        ResponseHandler(200, "Profile updated successfully", sanitizedClient)
+      );
+    } catch (error) {
+      console.error("Update client profile error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  async changePassword(req: Request, res: Response, next: NextFunction) {
+    try {
+      const clientId = req.clientUser?.clientId || req.clientUser?.clientUserId;
+      if (!clientId) {
+        return next(CustomErrorHandler.unAuthorized("Client identity not found"));
+      }
+
+      const { currentPassword, newPassword } = req.body;
+
+      if (!currentPassword || !newPassword) {
+        return next(CustomErrorHandler.badRequest("Current password and new password are required"));
+      }
+
+      if (newPassword.length < 6) {
+        return next(CustomErrorHandler.badRequest("New password must be at least 6 characters long"));
+      }
+
+      const client = await db.query.clients.findFirst({
+        where: eq(clients.id, clientId),
+      });
+
+      if (!client || !client.passwordHash) {
+        return next(CustomErrorHandler.unAuthorized("Client account not found"));
+      }
+
+      const isValid = await bcrypt.compare(currentPassword, client.passwordHash);
+      if (!isValid) {
+        return next(CustomErrorHandler.badRequest("Current password does not match"));
+      }
+
+      const newHash = await bcrypt.hash(newPassword, 10);
+
+      await db
+        .update(clients)
+        .set({ passwordHash: newHash })
+        .where(eq(clients.id, clientId));
+
+      return res.status(200).json(
+        ResponseHandler(200, "Password changed successfully")
+      );
+    } catch (error) {
+      console.error("Change client password error:", error);
       return next(CustomErrorHandler.serverError());
     }
   },

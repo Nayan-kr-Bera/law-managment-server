@@ -54,6 +54,10 @@ router.get("/support/tickets", clientAuth, supportTicketController.getClientTick
 router.post("/support/tickets", clientAuth, supportTicketController.createTicket);
 router.post("/support/tickets/:ticketId/reply", clientAuth, supportTicketController.replyTicket);
 
+router.get("/profile", clientAuth, clientPortalController.getProfile);
+router.put("/profile", clientAuth, clientPortalController.updateProfile);
+router.post("/change-password", clientAuth, clientPortalController.changePassword);
+
 router.get("/notifications/stream", clientAuth, clientPortalController.streamNotifications);
 router.get("/notifications", clientAuth, clientPortalController.getNotifications);
 router.patch("/notifications/mark-all-read", clientAuth, clientPortalController.markAllNotificationsRead);
