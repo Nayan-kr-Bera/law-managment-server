@@ -232,7 +232,7 @@ class IndiaCodeService {
   /**
    * Helper to parse criminal classification fields into schema enums
    */
-  private parseClassification(classifications?: IIndiaCodeSectionDetail["classification"]) {
+  public parseClassification(classifications?: IIndiaCodeSectionDetail["classification"]) {
     if (!classifications || classifications.length === 0) {
       return {
         bailableStatus: "not_applicable" as const,
@@ -283,6 +283,54 @@ class IndiaCodeService {
   }
 
   /**
+   * Background Sync: Inserts Acts returned by IndiaCode / e-Courts search into the database
+   */
+  async syncActsToDatabase(acts: IIndiaCodeSearchResult[]) {
+    if (!acts || acts.length === 0) return;
+
+    for (const act of acts) {
+      if (!act.id || !act.short_title) continue;
+      try {
+        const category = this.deduceCategory(act.short_title);
+        const shortCode = this.deriveShortCode(act.short_title, act.id);
+
+        const isState = Boolean(
+          act.jurisdiction &&
+            act.jurisdiction.toLowerCase() !== "central" &&
+            act.jurisdiction.toLowerCase() !== "union"
+        );
+        const stateJurisdiction = isState ? act.jurisdiction : null;
+        const jurisdiction: "state" | "central" = isState ? "state" : "central";
+
+        await db
+          .insert(bareActs)
+          .values({
+            title: act.short_title,
+            shortCode,
+            slug: act.id,
+            longTitle: act.short_title,
+            actNumber: act.act_number ? `Act No. ${act.act_number} of ${act.act_year || ""}`.trim() : null,
+            actYear: act.act_year || new Date().getFullYear(),
+            category,
+            jurisdiction,
+            stateJurisdiction,
+            ministry: act.ministry || null,
+            status: act.in_force ? "active" : "amended",
+            source: "system_seed",
+            isFeatured: false,
+            totalSections: act.section_count || 0,
+            totalChapters: 0,
+            description: `Statute enacted by Parliament/State Legislature in ${act.act_year || ""}.`,
+            keywords: [act.short_title.toLowerCase(), act.id, shortCode.toLowerCase()],
+          })
+          .onConflictDoNothing({ target: bareActs.slug });
+      } catch (err: unknown) {
+        console.error(`Failed to background sync act '${act.id}':`, err);
+      }
+    }
+  }
+
+  /**
    * ADMIN ONE-CLICK IMPORT:
    * Imports an entire Act, all its sections, classifications, and judgments into Postgres.
    */
@@ -304,6 +352,14 @@ class IndiaCodeService {
       this.deduceCategory(act.short_title, act.long_title);
     const shortCode = this.deriveShortCode(act.short_title, act.id);
 
+    const isStateAct = Boolean(
+      act.jurisdiction &&
+        act.jurisdiction.toLowerCase() !== "central" &&
+        act.jurisdiction.toLowerCase() !== "union"
+    );
+    const stateJurisdiction = isStateAct ? act.jurisdiction : null;
+    const jurisdiction: "state" | "central" = isStateAct ? "state" : "central";
+
     // 1. Check or Upsert bareAct record
     let actRecord = await db.query.bareActs.findFirst({
       where: eq(bareActs.slug, act.id),
@@ -320,7 +376,8 @@ class IndiaCodeService {
           actNumber: act.act_number ? `Act No. ${act.act_number} of ${act.act_year || ""}`.trim() : null,
           actYear: act.act_year || new Date().getFullYear(),
           category,
-          jurisdiction: act.jurisdiction?.toLowerCase() === "state" ? "state" : "central",
+          jurisdiction,
+          stateJurisdiction,
           ministry: act.ministry || null,
           status: act.in_force ? "active" : "amended",
           enactmentDate: act.enact_date || null,
@@ -366,9 +423,63 @@ class IndiaCodeService {
       console.log(`  📋 Saved ${schedules.length} schedules.`);
     }
 
-    // 3. Batch import sections
-    const sectionsToImport = options?.maxSections ? sections.slice(0, options.maxSections) : sections;
-    console.log(`  ⚡ Fetching & importing ${sectionsToImport.length} sections from IndiaCode...`);
+    // 3. Fast Outline Insertion for ALL sections in the Act (e.g. 282 sections)
+    const existingSections = await db
+      .select({
+        id: bareActSections.id,
+        sectionNumber: bareActSections.sectionNumber,
+      })
+      .from(bareActSections)
+      .where(eq(bareActSections.actId, actId));
+
+    const existingSectionSet = new Set(
+      existingSections.map((s) => s.sectionNumber.toLowerCase().trim())
+    );
+
+    const newOutlineRecords: (typeof bareActSections.$inferInsert)[] = [];
+    for (let idx = 0; idx < sections.length; idx++) {
+      const sec = sections[idx];
+      const secNumberStr = `${act.unit === "article" ? "Article" : "Section"} ${sec.number}`;
+      if (!existingSectionSet.has(secNumberStr.toLowerCase().trim())) {
+        const secSlug = `${act.id}-section-${sec.number.toLowerCase()}`;
+        const secNumeric = this.parseNumeric(sec.number);
+        newOutlineRecords.push({
+          actId,
+          sectionType: act.unit === "article" ? "article" : "section",
+          sectionNumber: secNumberStr,
+          sectionNumeric: secNumeric,
+          title: sec.heading || `Provision ${sec.number}`,
+          slug: secSlug,
+          content: sec.heading || `${secNumberStr} of ${act.short_title}.`,
+          bailableStatus: "not_applicable",
+          cognizableStatus: "not_applicable",
+          compoundableStatus: "not_applicable",
+          orderIndex: idx + 1,
+          keywords: [secNumberStr.toLowerCase(), sec.heading?.toLowerCase() || "", act.id],
+        });
+        existingSectionSet.add(secNumberStr.toLowerCase().trim());
+      }
+    }
+
+    if (newOutlineRecords.length > 0) {
+      console.log(`  📋 Fast outline-inserting ${newOutlineRecords.length} sections into DB...`);
+      for (let i = 0; i < newOutlineRecords.length; i += 50) {
+        const chunk = newOutlineRecords.slice(i, i + 50);
+        await db.insert(bareActSections).values(chunk);
+      }
+    }
+
+    const totalSectionsInDb = existingSections.length + newOutlineRecords.length;
+    await db
+      .update(bareActs)
+      .set({
+        totalSections: Math.max(act.section_count || 0, totalSectionsInDb),
+      })
+      .where(eq(bareActs.id, actId));
+
+    // 4. Batch enrich detailed statutory text, classification, and judgments
+    const sectionsToImport = options?.maxSections ? sections.slice(0, options.maxSections) : sections.slice(0, 20);
+    console.log(`  ⚡ Enriching statutory text for ${sectionsToImport.length} sections from IndiaCode...`);
 
     const batchSize = Math.max(1, options?.batchSize || 5);
     let importedSectionsCount = 0;

@@ -197,11 +197,13 @@ export const bareActController = {
         return res.status(400).json(ResponseHandler(400, "actSlug is required"));
       }
 
+      const adminUserId = req.adminUser?.userId || req.user?.userId;
+
       const result = await indiaCodeService.importActWithSections(actSlug, {
         category,
         maxSections: maxSections ? Number(maxSections) : undefined,
         batchSize: batchSize ? Number(batchSize) : 5,
-        uploadedByAdminId: req.user?.userId,
+        uploadedByAdminId: adminUserId,
       });
 
       return res

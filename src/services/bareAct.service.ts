@@ -31,6 +31,28 @@ import {
 import seedBareActs from "../db/seed/bareActs.seed.js";
 import indiaCodeService from "./indiaCode.service.js";
 
+// In-memory cache for dynamic criminal law comparisons to prevent CPU & DB table scans
+interface ICachedCriminalComparisons {
+  data: Array<{
+    subject: string;
+    oldLaw: string;
+    newLaw: string;
+    punishment: string;
+    bailable: string;
+    cognizable: string;
+    actSlug: string;
+    sectionSlug: string | null;
+    isLiveInDb: boolean;
+  }>;
+  timestamp: number;
+}
+let cachedCriminalComparisons: ICachedCriminalComparisons | null = null;
+const CRIMINAL_COMPARISONS_TTL_MS = 15 * 60 * 1000; // 15-minute TTL
+
+export function invalidateCriminalComparisonsCache(): void {
+  cachedCriminalComparisons = null;
+}
+
 export class BareActService {
   /* =========================================================================
      CLIENT / ADVOCATE FACING QUERIES
@@ -82,8 +104,16 @@ export class BareActService {
       conditions.push(eq(bareActs.jurisdiction, query.jurisdiction as (typeof bareActJurisdictionEnum.enumValues)[number]));
     }
 
-    if (query.state) {
-      conditions.push(ilike(bareActs.stateJurisdiction, `%${query.state}%`));
+    if (query.state && query.state.trim()) {
+      const stateTerm = `%${query.state.trim()}%`;
+      conditions.push(
+        or(
+          ilike(bareActs.stateJurisdiction, stateTerm),
+          ilike(bareActs.title, stateTerm),
+          ilike(bareActs.longTitle, stateTerm),
+          sql`${bareActs.keywords}::text ILIKE ${stateTerm}`
+        )!
+      );
     }
 
     if (query.status) {
@@ -122,7 +152,7 @@ export class BareActService {
         break;
     }
 
-    const [acts, [{ totalCount }]] = await Promise.all([
+    let [acts, [{ totalCount }]] = await Promise.all([
       db
         .select()
         .from(bareActs)
@@ -136,8 +166,71 @@ export class BareActService {
         .where(whereClause),
     ]);
 
+    // Fallback: If no acts in local DB match search or state query, query IndiaCode / e-Courts API
+    // ONLY when an explicit search term or state name is provided (prevents unneeded external queries)
+    const hasSearchQuery = Boolean(query.q && query.q.trim().length >= 2);
+    const hasStateQuery = Boolean(query.state && query.state.trim().length >= 2);
+
+    if (acts.length === 0 && page === 1 && (hasSearchQuery || hasStateQuery)) {
+      try {
+        const queryTerm = query.q?.trim() || query.state?.trim()!;
+        const searchRes = await indiaCodeService.searchActs(queryTerm, {
+          jurisdiction: query.state?.trim() || (query.jurisdiction === "state" ? undefined : query.jurisdiction),
+          limit,
+        });
+
+        if (searchRes.acts && searchRes.acts.length > 0) {
+          await indiaCodeService.syncActsToDatabase(searchRes.acts);
+
+          // Re-query from DB
+          const [syncedActs, [{ totalCount: newTotal }]] = await Promise.all([
+            db
+              .select()
+              .from(bareActs)
+              .where(whereClause)
+              .orderBy(orderByClause)
+              .limit(limit)
+              .offset(offset),
+            db
+              .select({ totalCount: count() })
+              .from(bareActs)
+              .where(whereClause),
+          ]);
+
+          if (syncedActs.length > 0) {
+            acts = syncedActs;
+            totalCount = newTotal;
+          } else {
+            const slugs = searchRes.acts.map((a) => a.id).filter(Boolean);
+            if (slugs.length > 0) {
+              const fallbackActs = await db
+                .select()
+                .from(bareActs)
+                .where(inArray(bareActs.slug, slugs))
+                .limit(limit);
+              if (fallbackActs.length > 0) {
+                acts = fallbackActs;
+                totalCount = fallbackActs.length;
+              }
+            }
+          }
+        }
+      } catch (err: unknown) {
+        console.error("IndiaCode live search fallback failed:", err);
+      }
+    }
+
+    // Deduplicate acts by id and slug to guarantee clean response
+    const seenActKeys = new Set<string>();
+    const deduplicatedActs = acts.filter((act) => {
+      const key = act.id || act.slug;
+      if (seenActKeys.has(key)) return false;
+      seenActKeys.add(key);
+      return true;
+    });
+
     return {
-      data: acts,
+      data: deduplicatedActs,
       pagination: {
         page,
         limit,
@@ -148,15 +241,50 @@ export class BareActService {
   }
 
   /**
+   * Helper to normalize common act slugs and aliases (e.g. bns, constitution, ibc)
+   */
+  public normalizeActSlug(rawSlug: string): string {
+    const slug = rawSlug.toLowerCase().trim();
+    const aliasMap: Record<string, string> = {
+      "the-constitution-of-india": "constitution-of-india",
+      "constitution": "constitution-of-india",
+      "constitution-of-india-1950": "constitution-of-india",
+      "bharatiya-nyaya-sanhita-2023": "bns",
+      "bharatiya-nyaya-sanhita": "bns",
+      "bharatiya-nagarik-suraksha-sanhita-2023": "bnss",
+      "bharatiya-nagarik-suraksha-sanhita": "bnss",
+      "bharatiya-sakshya-adhiniyam-2023": "bsa",
+      "bharatiya-sakshya-adhiniyam": "bsa",
+      "ibc": "insolvency-bankruptcy-code-2016",
+      "ibc-2016": "insolvency-bankruptcy-code-2016",
+      "the-insolvency-and-bankruptcy-code-2016": "insolvency-bankruptcy-code-2016",
+      "the-insolvency-and-bankruptcy-code": "insolvency-bankruptcy-code-2016",
+      "companies-act-2013": "companies-act",
+      "the-companies-act-2013": "companies-act",
+      "the-companies-act": "companies-act",
+      "motor-vehicles-act-1988": "mv-act",
+      "motor-vehicles-act": "mv-act",
+      "the-motor-vehicles-act": "mv-act",
+      "arbitration-act-1996": "arbitration-act",
+      "the-arbitration-and-conciliation-act-1996": "arbitration-act",
+      "arbitration-and-conciliation-act": "arbitration-act",
+    };
+    return aliasMap[slug] || slug;
+  }
+
+  /**
    * Get single Bare Act by slug or ID with Table of Contents (Chapters & Sections summary)
    */
   async getActBySlugOrId(slugOrId: string) {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
       slugOrId
     );
+    const normalizedSlug = isUuid ? slugOrId : this.normalizeActSlug(slugOrId);
 
     let act = await db.query.bareActs.findFirst({
-      where: isUuid ? eq(bareActs.id, slugOrId) : eq(bareActs.slug, slugOrId),
+      where: isUuid
+        ? eq(bareActs.id, slugOrId)
+        : or(eq(bareActs.slug, slugOrId), eq(bareActs.slug, normalizedSlug)),
       with: {
         chapters: {
           orderBy: [asc(bareActChapters.orderIndex), asc(bareActChapters.createdAt)],
@@ -187,9 +315,9 @@ export class BareActService {
 
     if (!act && !isUuid) {
       try {
-        await indiaCodeService.importActWithSections(slugOrId, { maxSections: 15, batchSize: 5 });
+        await indiaCodeService.importActWithSections(normalizedSlug, { maxSections: 20, batchSize: 5 });
         act = await db.query.bareActs.findFirst({
-          where: eq(bareActs.slug, slugOrId),
+          where: eq(bareActs.slug, normalizedSlug),
           with: {
             chapters: {
               orderBy: [asc(bareActChapters.orderIndex), asc(bareActChapters.createdAt)],
@@ -224,6 +352,48 @@ export class BareActService {
 
     if (!act) {
       throw new AppError("Bare Act not found", 404);
+    }
+
+    // If Act exists in DB (from background search sync) but chapters haven't been fetched yet,
+    // fetch its structure on-demand from IndiaCode
+    if (!isUuid && (!act.chapters || act.chapters.length === 0)) {
+      try {
+        await indiaCodeService.importActWithSections(act.slug, { maxSections: 20, batchSize: 5 });
+        const reloaded = await db.query.bareActs.findFirst({
+          where: eq(bareActs.slug, act.slug),
+          with: {
+            chapters: {
+              orderBy: [asc(bareActChapters.orderIndex), asc(bareActChapters.createdAt)],
+              with: {
+                sections: {
+                  columns: {
+                    id: true,
+                    sectionType: true,
+                    sectionNumber: true,
+                    sectionNumeric: true,
+                    title: true,
+                    slug: true,
+                    punishment: true,
+                    bailableStatus: true,
+                    cognizableStatus: true,
+                    compoundableStatus: true,
+                    orderIndex: true,
+                  },
+                  orderBy: [asc(bareActSections.orderIndex), asc(bareActSections.sectionNumeric)],
+                },
+              },
+            },
+            schedules: {
+              orderBy: [asc(bareActSchedules.orderIndex)],
+            },
+          },
+        });
+        if (reloaded) {
+          act = reloaded;
+        }
+      } catch (err: unknown) {
+        // Continue with current record
+      }
     }
 
     // Also get sections that don't belong to any chapter
@@ -268,6 +438,28 @@ export class BareActService {
   ) {
     const act = await this.resolveActId(actSlugOrId);
 
+    // If an act has 0 sections or fewer sections in DB than its totalSections, sync remaining outline sections
+    if (!query.q && !query.chapterId) {
+      const [{ currentCount }] = await db
+        .select({ currentCount: count() })
+        .from(bareActSections)
+        .where(eq(bareActSections.actId, act.id));
+
+      if (
+        Number(currentCount) === 0 ||
+        (act.totalSections && Number(currentCount) < act.totalSections)
+      ) {
+        try {
+          await indiaCodeService.importActWithSections(act.slug, {
+            maxSections: 20,
+            batchSize: 5,
+          });
+        } catch (err) {
+          console.warn(`Could not sync outline sections for ${act.slug}:`, err);
+        }
+      }
+    }
+
     const page = Math.max(1, Number(query.page) || 1);
     const limit = Math.min(100, Math.max(1, Number(query.limit) || 30));
     const offset = (page - 1) * limit;
@@ -305,7 +497,6 @@ export class BareActService {
     }
 
     const whereClause = and(...conditions);
-
 
     const [sections, [{ totalCount }]] = await Promise.all([
       db
@@ -372,6 +563,45 @@ export class BareActService {
         activeSection = await indiaCodeService.getOrFetchSection(act.slug, sectionSlugOrNumberOrId);
       } catch {
         throw new AppError("Bare Act Section not found", 404);
+      }
+    } else if (
+      activeSection &&
+      (!activeSection.content ||
+        activeSection.content === activeSection.title ||
+        activeSection.content.length <= (activeSection.title?.length || 0) + 15)
+    ) {
+      // Content is just the outline heading, fetch full statutory text and classification
+      try {
+        const cleanNumber = activeSection.sectionNumber.replace(/^(section|article)\s+/i, "").trim();
+        const secDetail = await indiaCodeService.getSection(act.slug, cleanNumber);
+        if (secDetail?.section?.text || secDetail?.section?.html) {
+          const parsedClass = indiaCodeService.parseClassification(secDetail.classification);
+          const landmarkJudgments = (secDetail.judgments || []).map((j) => ({
+            title: j.title,
+            citation: j.citation,
+            summary: j.applied_to_this_section || j.ratio_decidendi || undefined,
+          }));
+
+          const [updated] = await db
+            .update(bareActSections)
+            .set({
+              content: secDetail.section.text || secDetail.section.html || activeSection.content,
+              punishment: parsedClass.punishment || activeSection.punishment,
+              bailableStatus: parsedClass.bailableStatus || activeSection.bailableStatus,
+              cognizableStatus: parsedClass.cognizableStatus || activeSection.cognizableStatus,
+              compoundableStatus: parsedClass.compoundableStatus || activeSection.compoundableStatus,
+              triableBy: parsedClass.triableBy || activeSection.triableBy,
+              crossReferences: landmarkJudgments.length ? { landmarkJudgments } : activeSection.crossReferences,
+            })
+            .where(eq(bareActSections.id, activeSection.id))
+            .returning();
+
+          if (updated) {
+            activeSection = { ...activeSection, ...updated };
+          }
+        }
+      } catch (err) {
+        console.warn(`Could not on-demand enrich section text:`, err);
       }
     }
 
@@ -628,29 +858,46 @@ export class BareActService {
 
   /**
    * Criminal Laws Quick Comparison (IPC vs BNS, CrPC vs BNSS, IEA vs BSA)
+   * Dynamically enriched with live sections, punishment, bailable/cognizable classification,
+   * and direct navigation slugs from the database.
    */
   async getCriminalLawComparisons() {
-    return [
+    // 0. Return in-memory cached result if fresh (prevents repeated DB queries & high CPU)
+    if (
+      cachedCriminalComparisons &&
+      Date.now() - cachedCriminalComparisons.timestamp < CRIMINAL_COMPARISONS_TTL_MS
+    ) {
+      return cachedCriminalComparisons.data;
+    }
+
+    // Base curated statutory bridge between Colonial statutes and 2024 New Criminal Laws
+    const baseComparisons = [
       {
-        subject: "Murder",
+        subject: "Murder & Mob Lynching",
         oldLaw: "IPC Section 302",
         newLaw: "BNS Section 103",
+        newSectionLookup: "103",
+        actSlug: "bns",
         punishment: "Death or Imprisonment for Life, and Fine (Mob lynching sub-clause 2 added)",
         bailable: "Non-Bailable",
         cognizable: "Cognizable",
       },
       {
-        subject: "Rape & Sexual Offences",
+        subject: "Rape & Aggravated Sexual Offences",
         oldLaw: "IPC Section 375 & 376",
         newLaw: "BNS Section 63 & 64",
+        newSectionLookup: "64",
+        actSlug: "bns",
         punishment: "Rigorous Imprisonment 10 years to Life, and Fine",
         bailable: "Non-Bailable",
         cognizable: "Cognizable",
       },
       {
-        subject: "Sexual intercourse by deceitful means / False promise of marriage",
+        subject: "Sexual intercourse by deceitful promise to marry",
         oldLaw: "IPC Section 417 / 376(2)(n) (Judicial interpretation)",
         newLaw: "BNS Section 69",
+        newSectionLookup: "69",
+        actSlug: "bns",
         punishment: "Imprisonment up to 10 years and Fine",
         bailable: "Non-Bailable",
         cognizable: "Cognizable",
@@ -659,7 +906,39 @@ export class BareActService {
         subject: "Cruelty by Husband or Relatives (Dowry Harassment)",
         oldLaw: "IPC Section 498A",
         newLaw: "BNS Section 85 & 86",
+        newSectionLookup: "85",
+        actSlug: "bns",
         punishment: "Imprisonment up to 3 years and Fine",
+        bailable: "Non-Bailable",
+        cognizable: "Cognizable",
+      },
+      {
+        subject: "Organised Crime & Syndicated Gang Offence",
+        oldLaw: "MCOCA / State Enactments (No IPC provision)",
+        newLaw: "BNS Section 111",
+        newSectionLookup: "111",
+        actSlug: "bns",
+        punishment: "Death or Life Imprisonment, with minimum fine of ₹5,00,000",
+        bailable: "Non-Bailable",
+        cognizable: "Cognizable",
+      },
+      {
+        subject: "Petty Organised Crime / Snatching",
+        oldLaw: "IPC Section 379 / Local Laws",
+        newLaw: "BNS Section 112",
+        newSectionLookup: "112",
+        actSlug: "bns",
+        punishment: "Imprisonment 1 to 7 years, and Fine",
+        bailable: "Non-Bailable",
+        cognizable: "Cognizable",
+      },
+      {
+        subject: "Terrorist Act defined under General Criminal Law",
+        oldLaw: "UAPA Section 15 (Special Act only)",
+        newLaw: "BNS Section 113",
+        newSectionLookup: "113",
+        actSlug: "bns",
+        punishment: "Death or Imprisonment for Life, and Fine",
         bailable: "Non-Bailable",
         cognizable: "Cognizable",
       },
@@ -667,6 +946,8 @@ export class BareActService {
         subject: "Theft (with Community Service for First Offender < ₹5000)",
         oldLaw: "IPC Section 379",
         newLaw: "BNS Section 303",
+        newSectionLookup: "303",
+        actSlug: "bns",
         punishment: "Up to 3 years or fine (Community Service for petty first offence)",
         bailable: "Non-Bailable",
         cognizable: "Cognizable",
@@ -675,6 +956,8 @@ export class BareActService {
         subject: "Cheating and Dishonestly Inducing Delivery of Property (420)",
         oldLaw: "IPC Section 420",
         newLaw: "BNS Section 318(4)",
+        newSectionLookup: "318",
+        actSlug: "bns",
         punishment: "Imprisonment up to 7 years and Fine",
         bailable: "Non-Bailable",
         cognizable: "Cognizable",
@@ -683,7 +966,19 @@ export class BareActService {
         subject: "Criminal Breach of Trust",
         oldLaw: "IPC Section 406",
         newLaw: "BNS Section 316",
+        newSectionLookup: "316",
+        actSlug: "bns",
         punishment: "Imprisonment up to 5 years, or fine, or both",
+        bailable: "Non-Bailable",
+        cognizable: "Cognizable",
+      },
+      {
+        subject: "Endangering Sovereignty, Unity & Integrity of India",
+        oldLaw: "IPC Section 124A (Sedition - Repealed)",
+        newLaw: "BNS Section 152",
+        newSectionLookup: "152",
+        actSlug: "bns",
+        punishment: "Imprisonment for Life or up to 7 years, and Fine",
         bailable: "Non-Bailable",
         cognizable: "Cognizable",
       },
@@ -691,15 +986,29 @@ export class BareActService {
         subject: "First Information Report (FIR / Zero FIR / e-FIR)",
         oldLaw: "CrPC Section 154",
         newLaw: "BNSS Section 173",
+        newSectionLookup: "173",
+        actSlug: "bnss",
         punishment: "Procedure for Zero FIR & Electronic FIR registration within 3 days",
         bailable: "N/A",
         cognizable: "N/A",
       },
       {
-        subject: "Magistrate Statement / Confession Recording",
+        subject: "Magistrate Statement / Audio-Video Victim Recording",
         oldLaw: "CrPC Section 164",
         newLaw: "BNSS Section 183",
+        newSectionLookup: "183",
+        actSlug: "bnss",
         punishment: "Mandatory Audio-Video recording for sexual assault victim statements",
+        bailable: "N/A",
+        cognizable: "N/A",
+      },
+      {
+        subject: "Police Custody / Remand beyond Initial 15 Days",
+        oldLaw: "CrPC Section 167(2)",
+        newLaw: "BNSS Section 187",
+        newSectionLookup: "187",
+        actSlug: "bnss",
+        punishment: "15-day police custody can be taken in parts across first 40 or 60 days of detention",
         bailable: "N/A",
         cognizable: "N/A",
       },
@@ -707,6 +1016,8 @@ export class BareActService {
         subject: "Regular Bail in Non-Bailable Offences",
         oldLaw: "CrPC Section 437",
         newLaw: "BNSS Section 480",
+        newSectionLookup: "480",
+        actSlug: "bnss",
         punishment: "Magisterial bail procedure & maximum custody thresholds",
         bailable: "N/A",
         cognizable: "N/A",
@@ -715,6 +1026,8 @@ export class BareActService {
         subject: "Anticipatory Bail (Pre-Arrest Bail)",
         oldLaw: "CrPC Section 438",
         newLaw: "BNSS Section 482",
+        newSectionLookup: "482",
+        actSlug: "bnss",
         punishment: "Sessions Court / High Court pre-arrest bail directions",
         bailable: "N/A",
         cognizable: "N/A",
@@ -723,6 +1036,8 @@ export class BareActService {
         subject: "Special Powers of High Court / Sessions Court on Bail",
         oldLaw: "CrPC Section 439",
         newLaw: "BNSS Section 483",
+        newSectionLookup: "483",
+        actSlug: "bnss",
         punishment: "Superior Court regular bail jurisdiction",
         bailable: "N/A",
         cognizable: "N/A",
@@ -731,11 +1046,181 @@ export class BareActService {
         subject: "Inherent Powers of High Court (Quashing of FIR & Proceedings)",
         oldLaw: "CrPC Section 482",
         newLaw: "BNSS Section 528",
+        newSectionLookup: "528",
+        actSlug: "bnss",
         punishment: "High Court power to prevent abuse of process & secure ends of justice",
         bailable: "N/A",
         cognizable: "N/A",
       },
+      {
+        subject: "Admissibility of Electronic Records & Digital Evidence",
+        oldLaw: "IEA Section 65B",
+        newLaw: "BSA Section 61 & 63",
+        newSectionLookup: "61",
+        actSlug: "bsa",
+        punishment: "Electronic records recognized as primary documents under prescribed certification",
+        bailable: "N/A",
+        cognizable: "N/A",
+      },
     ];
+
+    try {
+      // 1. Fetch live BNS, BNSS, and BSA acts from DB
+      const targetActs = await db
+        .select({
+          id: bareActs.id,
+          slug: bareActs.slug,
+          title: bareActs.title,
+        })
+        .from(bareActs)
+        .where(
+          inArray(bareActs.slug, [
+            "bns",
+            "bnss",
+            "bsa",
+            "bharatiya-nyaya-sanhita-2023",
+            "bharatiya-nagarik-suraksha-sanhita-2023",
+            "bharatiya-sakshya-adhiniyam-2023",
+          ])
+        );
+
+      if (targetActs.length === 0) {
+        return baseComparisons.map((c) => ({
+          subject: c.subject,
+          oldLaw: c.oldLaw,
+          newLaw: c.newLaw,
+          punishment: c.punishment,
+          bailable: c.bailable,
+          cognizable: c.cognizable,
+          actSlug: c.actSlug,
+          sectionSlug: null,
+          isLiveInDb: false,
+        }));
+      }
+
+      // Map act id to canonical slug
+      const actIdToSlug = new Map<string, string>();
+      for (const a of targetActs) {
+        const canonical =
+          a.slug === "bharatiya-nyaya-sanhita-2023" ? "bns" :
+          a.slug === "bharatiya-nagarik-suraksha-sanhita-2023" ? "bnss" :
+          a.slug === "bharatiya-sakshya-adhiniyam-2023" ? "bsa" : a.slug;
+        actIdToSlug.set(a.id, canonical);
+      }
+
+      const actIds = targetActs.map((a) => a.id);
+
+      // 2. Fetch live sections from bare_act_sections for these criminal acts
+      const liveSections = await db
+        .select({
+          id: bareActSections.id,
+          actId: bareActSections.actId,
+          sectionNumber: bareActSections.sectionNumber,
+          title: bareActSections.title,
+          slug: bareActSections.slug,
+          punishment: bareActSections.punishment,
+          bailableStatus: bareActSections.bailableStatus,
+          cognizableStatus: bareActSections.cognizableStatus,
+          crossReferences: bareActSections.crossReferences,
+        })
+        .from(bareActSections)
+        .where(inArray(bareActSections.actId, actIds));
+
+      // Build quick lookup index by "actSlug:digits" e.g. "bns:103", "bns:69"
+      const sectionIndex = new Map<string, (typeof liveSections)[0]>();
+      for (const sec of liveSections) {
+        const actSlug = actIdToSlug.get(sec.actId) || "bns";
+        const digits = sec.sectionNumber.replace(/\D/g, "");
+        if (digits) {
+          sectionIndex.set(`${actSlug}:${digits}`, sec);
+        }
+        sectionIndex.set(`${actSlug}:${sec.slug}`, sec);
+      }
+
+      // Format helpers
+      const formatBail = (status: string | null | undefined, defaultVal: string) => {
+        if (!status || status === "not_applicable") return defaultVal;
+        if (status === "bailable") return "Bailable";
+        if (status === "non_bailable") return "Non-Bailable";
+        return defaultVal;
+      };
+
+      const formatCognizance = (status: string | null | undefined, defaultVal: string) => {
+        if (!status || status === "not_applicable") return defaultVal;
+        if (status === "cognizable") return "Cognizable";
+        if (status === "non_cognizable") return "Non-Cognizable";
+        return defaultVal;
+      };
+
+      // 3. Dynamically enrich base comparisons
+      const enrichedList = baseComparisons.map((c) => {
+        const matched = sectionIndex.get(`${c.actSlug}:${c.newSectionLookup}`);
+        if (matched) {
+          return {
+            subject: c.subject,
+            oldLaw: c.oldLaw,
+            newLaw: c.newLaw,
+            punishment: matched.punishment && matched.punishment.length > 5 ? matched.punishment : c.punishment,
+            bailable: formatBail(matched.bailableStatus, c.bailable),
+            cognizable: formatCognizance(matched.cognizableStatus, c.cognizable),
+            actSlug: c.actSlug,
+            sectionSlug: matched.slug,
+            isLiveInDb: true,
+          };
+        }
+        return {
+          subject: c.subject,
+          oldLaw: c.oldLaw,
+          newLaw: c.newLaw,
+          punishment: c.punishment,
+          bailable: c.bailable,
+          cognizable: c.cognizable,
+          actSlug: c.actSlug,
+          sectionSlug: null,
+          isLiveInDb: false,
+        };
+      });
+
+      // 4. Dynamically append any other sections in DB that have explicit crossReferences.oldEquivalent
+      for (const sec of liveSections) {
+        const oldEq = sec.crossReferences?.oldEquivalent;
+        if (oldEq && !enrichedList.some((e) => e.sectionSlug === sec.slug || e.oldLaw.includes(oldEq))) {
+          const actSlug = actIdToSlug.get(sec.actId) || "bns";
+          enrichedList.push({
+            subject: sec.title,
+            oldLaw: oldEq,
+            newLaw: `${actSlug.toUpperCase()} ${sec.sectionNumber}`,
+            punishment: sec.punishment || "As prescribed under the Code",
+            bailable: formatBail(sec.bailableStatus, "N/A"),
+            cognizable: formatCognizance(sec.cognizableStatus, "N/A"),
+            actSlug,
+            sectionSlug: sec.slug,
+            isLiveInDb: true,
+          });
+        }
+      }
+
+      // Store in memory cache before returning
+      cachedCriminalComparisons = {
+        data: enrichedList,
+        timestamp: Date.now(),
+      };
+
+      return enrichedList;
+    } catch (err) {
+      console.warn("Error fetching dynamic criminal comparisons, returning curated list:", err);
+      return baseComparisons.map((c) => ({
+        subject: c.subject,
+        oldLaw: c.oldLaw,
+        newLaw: c.newLaw,
+        punishment: c.punishment,
+        bailable: c.bailable,
+        cognizable: c.cognizable,
+        actSlug: c.actSlug,
+        sectionSlug: null,
+        isLiveInDb: false,
+      }));
+    }
   }
 
   /* =========================================================================
@@ -1196,16 +1681,19 @@ export class BareActService {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
       slugOrId
     );
+    const normalizedSlug = isUuid ? slugOrId : this.normalizeActSlug(slugOrId);
 
     let act = await db.query.bareActs.findFirst({
-      where: isUuid ? eq(bareActs.id, slugOrId) : eq(bareActs.slug, slugOrId),
+      where: isUuid
+        ? eq(bareActs.id, slugOrId)
+        : or(eq(bareActs.slug, slugOrId), eq(bareActs.slug, normalizedSlug)),
     });
 
     if (!act && !isUuid) {
       try {
-        await indiaCodeService.importActWithSections(slugOrId, { maxSections: 10, batchSize: 5 });
+        await indiaCodeService.importActWithSections(normalizedSlug, { maxSections: 15, batchSize: 5 });
         act = await db.query.bareActs.findFirst({
-          where: eq(bareActs.slug, slugOrId),
+          where: eq(bareActs.slug, normalizedSlug),
         });
       } catch (err) {
         // Fallback to error below
