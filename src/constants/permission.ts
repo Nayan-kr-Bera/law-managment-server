@@ -238,9 +238,17 @@ export const PERMISSIONS: PermissionDefinition[] = [
   { code: "admin.support.read", description: "View support tickets and contact inquiries", isAdminPortal: true },
   { code: "admin.support.update", description: "Respond to and update support tickets status", isAdminPortal: true },
 
+  // Bare Acts Library & Indian Legislation (Client/Advocate Access)
+  { code: "bare_act.read", description: "Search, browse and view Bare Acts and Constitution library", isAdminPortal: false },
+  { code: "bare_act.export", description: "Export or print Bare Act sections and reference sheets", isAdminPortal: false },
+
   // Admin Security & Audit Trail
   { code: "admin.audit.read", description: "View immutable platform security audit logs", isAdminPortal: true },
   { code: "admin.audit.export", description: "Export security logs and authentication events", isAdminPortal: true },
+
+  // Admin Bare Acts Management (System Seeds, Acts Upload, Chapter & Section Curations)
+  { code: "admin.bare_acts.read", description: "View global Bare Acts repository and analytics", isAdminPortal: true },
+  { code: "admin.bare_acts.manage", description: "Create, upload, curate, edit and seed Bare Acts", isAdminPortal: true },
 
   // Admin Platform Settings
   { code: "admin.settings.read", description: "View global platform runtime settings", isAdminPortal: true },

@@ -14,15 +14,6 @@ const subscriptionMiddleware = async (
 ) => {
   try {
     // ============================================================
-    // SUPER ADMIN BYPASS
-    // ============================================================
-
-    if (req.user?.isSuperAdmin) {
-      console.log("[subscriptionMiddleware] Super admin bypass granted");
-      return next();
-    }
-
-    // ============================================================
     // GET TENANT FROM AUTHENTICATED USER
     // ============================================================
 

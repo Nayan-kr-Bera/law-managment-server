@@ -238,3 +238,65 @@ export const subscriptionPaymentStatusEnum = pgEnum(
   "subscription_payment_status",
   ["paid", "pending", "failed", "refunded"]
 );
+
+// Bare Acts Enums
+export const bareActCategoryEnum = pgEnum("bare_act_category", [
+  "constitutional",
+  "criminal",
+  "civil_procedure",
+  "corporate_commercial",
+  "banking_finance",
+  "family_personal",
+  "property_realestate",
+  "labour_employment",
+  "taxation",
+  "cyber_ipr",
+  "consumer_environment",
+  "motor_accidents",
+  "arbitration_adr",
+  "general_special",
+]);
+
+export const bareActJurisdictionEnum = pgEnum("bare_act_jurisdiction", [
+  "central",
+  "state",
+]);
+
+export const bareActStatusEnum = pgEnum("bare_act_status", [
+  "active",
+  "repealed",
+  "amended",
+  "pending_enforcement",
+]);
+
+export const bareActSourceEnum = pgEnum("bare_act_source", [
+  "system_seed",
+  "admin_upload",
+]);
+
+export const sectionTypeEnum = pgEnum("section_type", [
+  "section",
+  "article",
+  "order_rule",
+  "clause",
+  "schedule",
+]);
+
+export const bailableStatusEnum = pgEnum("bailable_status", [
+  "bailable",
+  "non_bailable",
+  "not_applicable",
+]);
+
+export const cognizableStatusEnum = pgEnum("cognizable_status", [
+  "cognizable",
+  "non_cognizable",
+  "not_applicable",
+]);
+
+export const compoundableStatusEnum = pgEnum("compoundable_status", [
+  "compoundable",
+  "non_compoundable",
+  "compoundable_with_permission",
+  "not_applicable",
+]);

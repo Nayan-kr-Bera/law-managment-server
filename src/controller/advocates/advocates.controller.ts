@@ -1095,11 +1095,11 @@ const advocatesController = {
         return next(CustomErrorHandler.badRequest("Tenant ID is required."));
       }
 
-      // Authorization check: Tenant Admin / Super Admin OR user with 'user_permission.manage' permission
-      const isSuperAdmin = req.user?.isSuperAdmin;
+      // Authorization check: Tenant Admin OR user with 'user_permission.manage' permission
+      const isTenantAdmin = req.user?.isTenantAdmin;
       const userPermissionsList = req.user?.permissions || [];
       let isAuthorized =
-        Boolean(isSuperAdmin) ||
+        Boolean(isTenantAdmin) ||
         userPermissionsList.includes("user_permission.manage");
 
       if (!isAuthorized && req.user?.roleIds?.length) {

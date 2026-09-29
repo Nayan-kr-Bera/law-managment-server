@@ -7,7 +7,7 @@ export interface IUserJwtPayload {
   role?: string;
   roleIds: string[];
   permissions: string[];
-  isSuperAdmin?: boolean;
+  isTenantAdmin?: boolean;
   portal?: "tenant";
   iat?: number;
   exp?: number;

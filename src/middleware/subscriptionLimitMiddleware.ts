@@ -19,11 +19,6 @@ const subscriptionLimitMiddleware = {
 
   async checkUserLimit(req: Request, res: Response, next: NextFunction) {
     try {
-      if (req.user?.isSuperAdmin) {
-        console.log("[checkUserLimit] Super admin bypass granted");
-        return next();
-      }
-
       const tenantId = req.user?.tenantId;
 
       if (!tenantId) {
@@ -88,10 +83,6 @@ const subscriptionLimitMiddleware = {
 
   async checkOfficeLimit(req: Request, res: Response, next: NextFunction) {
     try {
-      if (req.user?.isSuperAdmin) {
-        return next();
-      }
-
       const tenantId = req.user?.tenantId;
 
       if (!tenantId) {
@@ -141,11 +132,6 @@ const subscriptionLimitMiddleware = {
 
   async checkStorageLimit(req: Request, res: Response, next: NextFunction) {
     try {
-      // Super admin bypass
-      if (req.user?.isSuperAdmin) {
-        return next();
-      }
-
       const tenantId = req.user?.tenantId;
 
       if (!tenantId) {

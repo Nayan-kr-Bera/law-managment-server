@@ -1,6 +1,6 @@
 // ===== ENUMS =====
 export * from "./enum.js";
-export {default as systemAlerts} from "./systemAlerts.js"
+export { default as systemAlerts } from "./systemAlerts.js"
 // Core
 export { default as tenants } from "./tenants.js";
 export { default as offices } from "./offices.js";
@@ -121,4 +121,24 @@ export { default as supportTickets } from "./support/supportTickets.js";
 export { default as supportTicketMessages } from "./support/supportTicketMessages.js";
 
 // Contact Us & Inquiries
-export { default as contactUsMessages } from "./contactUs.js";
+export { default as contactUsMessages } from "./contactUs.js";
+
+// Bare Acts & Indian Legislation
+export { default as bareActs, bareActsRelations } from "./bareActs/bareActs.js";
+export {
+  default as bareActChapters,
+  bareActChaptersRelations,
+} from "./bareActs/bareActChapters.js";
+export {
+  default as bareActSections,
+  bareActSectionsRelations,
+  type ISubSectionItem,
+  type ICrossReferenceInfo,
+} from "./bareActs/bareActSections.js";
+export {
+  default as bareActSchedules,
+  bareActSchedulesRelations,
+} from "./bareActs/bareActSchedules.js";
+
+
+

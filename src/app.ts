@@ -44,9 +44,11 @@ import {
   auditLogRoutes,
   notificationRoutes,
   adminRoutes,
+  bareActRoutes,
 } from "./routes/index.js";
 
 const app = express();
+
 
 /* ---------- Global Middlewares ---------- */
 app.use(express.json());
@@ -124,8 +126,10 @@ app.use("/api/contact-us", contactUsRoutes);
 app.use("/api/ai", aiDraftRoutes);
 app.use("/api/audit-logs", auditLogRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/bare-acts", bareActRoutes);
 
 /* ---------- Admin Portal Routes ---------- */
+
 app.use("/api/admin", adminRoutes);
 app.use("/api/system-stats", adminRoutes);
 

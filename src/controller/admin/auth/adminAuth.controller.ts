@@ -405,7 +405,7 @@ const adminAuthController = {
             avatar: adminUser.avatar,
             email_verified: adminUser.isEmailVerified,
             phone_verified: adminUser.isPhoneVerified,
-            isSuperAdmin: req.user?.isSuperAdmin ?? false,
+            isSuperAdmin: req.adminUser?.isSuperAdmin ?? false,
           },
           role: req.adminUser?.role || req.user?.role || "admin",
           roles: [req.adminUser?.role || req.user?.role || "admin"],

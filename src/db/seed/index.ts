@@ -12,12 +12,12 @@ async function runSeeders() {
     await seedPermissions();
     await seedRolePermissions();
     await seedSuperAdmin();
-    await seedTags()
+    await seedTags();
     await seedSystemAlerts();
     await seedSubscriptionPlans();
 
-
     console.log('🌱 Database seeded successfully');
+
 
     process.exit(0);
   } catch (error) {

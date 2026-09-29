@@ -168,17 +168,17 @@ const loginController = {
         ]),
       ];
 
-      // If tenant admin/owner and no granular permissions are bound, grant all tenant permissions
-      const isTenantAdmin = roleData.some(
-        (r) => r.slug === "admin" || r.slug === "tenant_admin" || r.slug === "super_admin"
-      );
+      // Check if user has the seeded tenant_admin role
+      const isTenantAdmin = roleData.some((r) => r.slug === "tenant_admin");
 
-      if (isTenantAdmin && permissionCodes.length === 0) {
+      // If tenant admin, grant all tenant client permissions unconditionally
+      if (isTenantAdmin) {
         const allTenantPerms = await db
           .select({ code: permissions.code })
           .from(permissions)
           .where(eq(permissions.isAdminPortal, false));
-        permissionCodes = allTenantPerms.map((p) => p.code);
+        const allCodes = allTenantPerms.map((p) => p.code);
+        permissionCodes = [...new Set([...permissionCodes, ...allCodes])];
       }
 
       // Dedicated Tenant JWT Payload
@@ -235,9 +235,11 @@ const loginController = {
             email: clientUser.email,
             email_verified: clientUser.isEmailVerified,
             phone_verified: clientUser.isPhoneVerified,
+            isTenantAdmin,
           },
           roles: roleData,
           permissions: permissionCodes,
+          isTenantAdmin,
           scope: {
             ...scope,
             offices: scopeOffices,

@@ -51,8 +51,8 @@ const auth = async (
       throw new AppError("Email not verified", 403);
     }
 
-    // If token payload is missing permissions or isSuperAdmin, load them from DB
-    if (!decoded.permissions || decoded.isSuperAdmin === undefined) {
+    // If token payload is missing permissions or isTenantAdmin, load them from DB
+    if (!decoded.permissions || decoded.isTenantAdmin === undefined) {
       const scope = decoded.scopeId
         ? await db.query.userScopes.findFirst({
             where: eq(userScopes.id, decoded.scopeId),
@@ -72,7 +72,7 @@ const auth = async (
           .where(eq(userRoles.scopeId, scope.id));
 
         const roleIds = userRoleData.map((r) => r.roleId);
-        const isSuperAdmin = userRoleData.some((r) => r.slug === "super_admin");
+        const isTenantAdmin = userRoleData.some((r) => r.slug === "tenant_admin");
 
         const rolePermissionData =
           roleIds.length > 0
@@ -99,15 +99,24 @@ const auth = async (
           )
           .where(eq(userPermissions.scopeId, scope.id));
 
-        const permissionCodes = [
+        let permissionCodes = [
           ...new Set([
             ...rolePermissionData.map((p) => p.code),
             ...userPermissionData.map((p) => p.code),
           ]),
         ];
 
+        if (isTenantAdmin) {
+          const allTenantPerms = await db
+            .select({ code: permissions.code })
+            .from(permissions)
+            .where(eq(permissions.isAdminPortal, false));
+          const allCodes = allTenantPerms.map((p) => p.code);
+          permissionCodes = [...new Set([...permissionCodes, ...allCodes])];
+        }
+
         decoded.permissions = permissionCodes;
-        decoded.isSuperAdmin = isSuperAdmin;
+        decoded.isTenantAdmin = isTenantAdmin;
         decoded.tenantId = decoded.tenantId || scope.tenantId!;
         decoded.scopeId = decoded.scopeId || scope.id;
       }
