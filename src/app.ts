@@ -56,16 +56,25 @@ app.use(express.json());
 app.use(
   cors({
     origin: (origin, callback) => {
+      const allowedOrigins = [
+        config.ORIGIN_FRONTEND,
+        config.ORIGIN_CLIENT,
+        config.ORIGIN_ADMIN,
+      ].filter(Boolean) as string[];
+
       const isAllowed =
         !origin ||
         origin.startsWith("http://localhost:") ||
         origin.startsWith("http://127.0.0.1:") ||
-        origin === config.ORIGIN_FRONTEND ||
-        origin === config.ORIGIN_CLIENT;
+        origin.endsWith(".vercel.app") ||
+        allowedOrigins.includes(origin) ||
+        (process.env.ALLOWED_ORIGINS &&
+          process.env.ALLOWED_ORIGINS.split(",").map((s) => s.trim()).includes(origin));
+
       if (isAllowed) {
         callback(null, true);
       } else {
-        callback(new Error("Not allowed by CORS"));
+        callback(new Error(`Not allowed by CORS: ${origin}`));
       }
     },
     credentials: true,

@@ -185,21 +185,13 @@ const adminAuthController = {
         config.REFRESH_SECRET
       );
 
-      // Save Admin Refresh Token
-      await db
-        .insert(refreshTokens)
-        .values({
-          userId: adminUser.id,
-          token: refresh_token,
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        })
-        .onConflictDoUpdate({
-          target: refreshTokens.userId,
-          set: {
-            token: refresh_token,
-            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-          },
-        });
+      // Save Admin Refresh Token (clean up previous session and insert fresh token)
+      await db.delete(refreshTokens).where(eq(refreshTokens.userId, adminUser.id));
+      await db.insert(refreshTokens).values({
+        userId: adminUser.id,
+        token: refresh_token,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      });
 
       return res.status(200).json(
         ResponseHandler(200, "Admin authentication successful", {

@@ -6,6 +6,7 @@ export const config = {
   NODE_ENV: process.env.NODE_ENV || "development",
   ORIGIN_FRONTEND: process.env.ORIGIN_FRONTEND,
   ORIGIN_CLIENT: process.env.ORIGIN_CLIENT,
+  ORIGIN_ADMIN: process.env.ORIGIN_ADMIN,
   BASE_URL: process.env.BASE_URL,
   APP_NAME: process.env.APP_NAME,
   REFRESH_SECRET: process.env.REFRESH_SECRET,

@@ -34,6 +34,10 @@ router.get("/system-stats", adminAuth, adminPermissionGuard("admin.dashboard.rea
    TENANTS MANAGEMENT
    ========================================================================= */
 router.get("/tenants", adminAuth, adminPermissionGuard("admin.tenants.read"), adminTenantController.getTenants);
+router.get("/tenants/ecosystem", adminAuth, adminPermissionGuard("admin.tenants.read"), adminTenantController.getTenantEcosystem);
+router.get("/tenants/multi-org-customers", adminAuth, adminPermissionGuard("admin.tenants.read"), adminTenantController.getMultiOrgCustomers);
+router.get("/tenants/user/:userId/organizations", adminAuth, adminPermissionGuard("admin.tenants.read"), adminTenantController.getUserOrganizations);
+router.post("/tenants/provision-for-user", adminAuth, adminPermissionGuard("admin.tenants.create"), adminTenantController.provisionOrganizationForUser);
 router.get("/tenants/:id", adminAuth, adminPermissionGuard("admin.tenants.read"), adminTenantController.getTenantById);
 router.post("/tenants", adminAuth, adminPermissionGuard("admin.tenants.create"), adminTenantController.createTenant);
 router.put("/tenants/:id", adminAuth, adminPermissionGuard("admin.tenants.update"), upload.single("logo"), adminTenantController.updateTenant);
@@ -59,15 +63,22 @@ router.post("/subscriptions/:tenantId/cancel", adminAuth, adminPermissionGuard("
 /* =========================================================================
    SYSTEM USERS MANAGEMENT
    ========================================================================= */
+router.get("/users/permissions", adminAuth, adminPermissionGuard("admin.users.read"), adminUserController.getAvailablePermissions);
 router.get("/users", adminAuth, adminPermissionGuard("admin.users.read"), adminUserController.getSystemUsers);
+router.post("/users", adminAuth, adminPermissionGuard("admin.users.create"), adminUserController.createAdminUser);
+router.put("/users/:userId/permissions", adminAuth, adminPermissionGuard("admin.users.update"), adminUserController.updateAdminPermissions);
 router.patch("/users/:userId/status", adminAuth, adminPermissionGuard("admin.users.update"), adminUserController.toggleUserStatus);
 
 /* =========================================================================
    SUPPORT TICKETS & INQUIRIES
    ========================================================================= */
+router.get("/support/stats", adminAuth, adminPermissionGuard("admin.support.read"), adminSupportController.getSupportStats);
 router.get("/support/tickets", adminAuth, adminPermissionGuard("admin.support.read"), adminSupportController.getSupportTickets);
+router.get("/support/tickets/:id", adminAuth, adminPermissionGuard("admin.support.read"), adminSupportController.getTicketById);
 router.patch("/support/tickets/:id/status", adminAuth, adminPermissionGuard("admin.support.update"), adminSupportController.updateTicketStatus);
+router.post("/support/tickets/:id/reply", adminAuth, adminPermissionGuard("admin.support.update"), adminSupportController.replyTicket);
 router.get("/support/inquiries", adminAuth, adminPermissionGuard("admin.support.read"), adminSupportController.getContactInquiries);
+router.patch("/support/inquiries/:id/status", adminAuth, adminPermissionGuard("admin.support.update"), adminSupportController.updateContactInquiryStatus);
 
 /* =========================================================================
    AUDIT LOGS

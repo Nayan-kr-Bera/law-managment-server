@@ -96,7 +96,11 @@ const adminSubscriptionController = {
         currency: p.currency || "INR",
         status: p.status === "paid" ? "success" : p.status,
         orderId: p.invoiceNumber || `INV-${p.id.substring(0, 8)}`,
-        paymentId: p.invoiceNumber || `PAY-${p.id.substring(0, 8)}`,
+        paymentId: p.paymentMethod || `PAY-${p.id.substring(0, 8)}`,
+        invoiceNumber: p.invoiceNumber,
+        billingCycle: p.billingCycle || "monthly",
+        paymentMethod: p.paymentMethod || "Online Gateway",
+        receiptUrl: p.receiptUrl || undefined,
         createdAt: p.transactionDate
           ? new Date(p.transactionDate).toISOString()
           : new Date().toISOString(),

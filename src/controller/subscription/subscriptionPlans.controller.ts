@@ -9,13 +9,38 @@ const subscriptionPlanController = {
   // GET ALL PLANS
   async getPlans(req: Request, res: Response, next: NextFunction) {
     try {
+      const { all, includeInternal } = req.query;
+      const showAll = all === "true" || includeInternal === "true";
+
       const plans = await db.query.subscriptionPlans.findMany({
-        where: eq(subscriptionPlans.isInternal, false),
+        where: showAll ? undefined : eq(subscriptionPlans.isInternal, false),
 
         orderBy: (subscriptionPlans, { asc }) => [
+          asc(subscriptionPlans.monthlyPrice),
           asc(subscriptionPlans.createdAt),
         ],
       });
+
+      const formattedPlans = plans.map((p) => ({
+        ...p,
+        monthlyPrice: Number(p.monthlyPrice || 0),
+        annualPrice: Number(p.annualPrice || 0),
+        yearlyPrice: Number(p.annualPrice || 0),
+        maxUsers: p.maxUsers,
+        maxOffices: p.maxOffices,
+        maxStorageGb: p.maxStorageGb,
+        monthlyOcrPages: p.monthlyOcrPages ?? 0,
+        monthlyAiDrafts: p.monthlyAiDrafts ?? 0,
+        limits: {
+          maxOffices: p.maxOffices || 1,
+          maxAdvocates: p.maxUsers || 5,
+          maxCases: 500,
+          maxStorageGB: p.maxStorageGb || 10,
+          monthlyOcrPages: p.monthlyOcrPages ?? 0,
+          monthlyAiDrafts: p.monthlyAiDrafts ?? 0,
+          aiDraftsPerMonth: p.monthlyAiDrafts ?? 0,
+        },
+      }));
 
       return res
         .status(200)
@@ -23,7 +48,7 @@ const subscriptionPlanController = {
           ResponseHandler(
             200,
             "Subscription plans fetched successfully",
-            plans,
+            formattedPlans,
           ),
         );
     } catch (error) {
@@ -70,10 +95,14 @@ const subscriptionPlanController = {
         description,
         monthlyPrice,
         annualPrice,
+        yearlyPrice,
         currency,
         maxUsers,
+        maxAdvocates,
         maxOffices,
         maxStorageGb,
+        monthlyOcrPages,
+        monthlyAiDrafts,
         features,
         badge,
         isPopular,
@@ -94,11 +123,12 @@ const subscriptionPlanController = {
         return next(CustomErrorHandler.badRequest("Monthly price is required"));
       }
 
-      if (annualPrice === undefined) {
+      if (annualPrice === undefined && yearlyPrice === undefined) {
         return next(CustomErrorHandler.badRequest("Annual price is required"));
       }
 
-      if (maxUsers === undefined) {
+      const usersLimit = maxUsers ?? maxAdvocates;
+      if (usersLimit === undefined) {
         return next(CustomErrorHandler.badRequest("Maximum users is required"));
       }
 
@@ -141,15 +171,19 @@ const subscriptionPlanController = {
 
           monthlyPrice: String(monthlyPrice),
 
-          annualPrice: String(annualPrice),
+          annualPrice: String(annualPrice ?? yearlyPrice),
 
           currency: currency || "INR",
 
-          maxUsers: Number(maxUsers),
+          maxUsers: Number(usersLimit),
 
           maxOffices: Number(maxOffices),
 
           maxStorageGb: Number(maxStorageGb),
+
+          monthlyOcrPages: Number(monthlyOcrPages ?? 0),
+
+          monthlyAiDrafts: Number(monthlyAiDrafts ?? 0),
 
           features: Array.isArray(features) ? features : [],
 
@@ -199,10 +233,15 @@ const subscriptionPlanController = {
         description,
         monthlyPrice,
         annualPrice,
+        yearlyPrice,
         currency,
         maxUsers,
+        maxAdvocates,
         maxOffices,
         maxStorageGb,
+        maxStorageGB,
+        monthlyOcrPages,
+        monthlyAiDrafts,
         features,
         badge,
         isPopular,
@@ -218,18 +257,30 @@ const subscriptionPlanController = {
           ...(monthlyPrice !== undefined && {
             monthlyPrice: String(monthlyPrice),
           }),
-          ...(annualPrice !== undefined && {
-            annualPrice: String(annualPrice),
-          }),
+          ...(annualPrice !== undefined
+            ? { annualPrice: String(annualPrice) }
+            : yearlyPrice !== undefined
+            ? { annualPrice: String(yearlyPrice) }
+            : {}),
           ...(currency !== undefined && { currency }),
-          ...(maxUsers !== undefined && {
-            maxUsers: Number(maxUsers),
-          }),
+          ...(maxUsers !== undefined
+            ? { maxUsers: Number(maxUsers) }
+            : maxAdvocates !== undefined
+            ? { maxUsers: Number(maxAdvocates) }
+            : {}),
           ...(maxOffices !== undefined && {
             maxOffices: Number(maxOffices),
           }),
-          ...(maxStorageGb !== undefined && {
-            maxStorageGb: Number(maxStorageGb),
+          ...(maxStorageGb !== undefined
+            ? { maxStorageGb: Number(maxStorageGb) }
+            : maxStorageGB !== undefined
+            ? { maxStorageGb: Number(maxStorageGB) }
+            : {}),
+          ...(monthlyOcrPages !== undefined && {
+            monthlyOcrPages: Number(monthlyOcrPages),
+          }),
+          ...(monthlyAiDrafts !== undefined && {
+            monthlyAiDrafts: Number(monthlyAiDrafts),
           }),
           ...(features !== undefined && {
             features: Array.isArray(features) ? features : [],
