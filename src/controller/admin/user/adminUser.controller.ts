@@ -19,6 +19,7 @@ import { PERMISSIONS } from "../../../constants/permission.js";
 
 import CustomErrorHandler from "../../../utils/customErrorHandler.js";
 import ResponseHandler from "../../../utils/responseHandler.js";
+import { sendAdminWelcomeEmail } from "../../../services/adminWelcomeEmail.service.js";
 
 // Ensure system tenant and head office exist
 async function getOrCreateSystemTenant() {
@@ -119,7 +120,14 @@ const adminUserController = {
             : [];
 
           const roleName = assignedRoles[0]?.name || assignedRoles[0]?.slug || "Advocate";
+          const roleSlug = assignedRoles[0]?.slug || "";
           const isSuperAdmin = assignedRoles.some((r) => r.slug === "super_admin");
+          const tenantSlug = scope?.tenant?.slug || "";
+          const isPanelAdmin =
+            isSuperAdmin ||
+            tenantSlug === "system" ||
+            roleSlug === "super_admin" ||
+            roleSlug === "platform_admin";
 
           // Load user direct permissions
           let userPermCodes: string[] = [];
@@ -141,10 +149,13 @@ const adminUserController = {
             phone: u.phone || undefined,
             status: u.isEmailVerified ? "active" : "inactive",
             roleName,
+            roleSlug,
             isSuperAdmin,
+            isPanelAdmin,
             permissions: userPermCodes,
             tenantName: scope?.tenant?.name || undefined,
             tenantId: scope?.tenantId || undefined,
+            tenantSlug,
             lastActiveAt: u.updatedAt ? new Date(u.updatedAt).toISOString() : undefined,
             createdAt: u.createdAt ? new Date(u.createdAt).toISOString() : new Date().toISOString(),
           };
@@ -244,9 +255,27 @@ const adminUserController = {
         return next(CustomErrorHandler.badRequest("Name, email, and password are required"));
       }
 
+      const trimmedEmail = email.toLowerCase().trim();
+      const sanitizedPhone =
+        phone && typeof phone === "string" && phone.trim().length > 0 ? phone.trim() : null;
+
+      if (sanitizedPhone) {
+        if (sanitizedPhone.length > 30) {
+          return next(CustomErrorHandler.badRequest("Phone number cannot exceed 30 characters"));
+        }
+
+        const existingPhone = await db.query.user.findFirst({
+          where: eq(user.phone, sanitizedPhone),
+        });
+
+        if (existingPhone) {
+          return next(CustomErrorHandler.badRequest("A user with this phone number already exists"));
+        }
+      }
+
       // Check if user already exists
       const existingUser = await db.query.user.findFirst({
-        where: eq(user.email, email.toLowerCase().trim()),
+        where: eq(user.email, trimmedEmail),
       });
 
       if (existingUser) {
@@ -265,8 +294,8 @@ const adminUserController = {
           .insert(user)
           .values({
             name: name.trim(),
-            email: email.toLowerCase().trim(),
-            phone: phone ? phone.trim() : null,
+            email: trimmedEmail,
+            phone: sanitizedPhone,
             password: hashedPassword,
             isEmailVerified: true,
             isPhoneVerified: true,
@@ -302,7 +331,8 @@ const adminUserController = {
                 ? "Super Administrator"
                 : (roleSlug ? roleSlug.replace(/_/g, " ").toUpperCase() : "Platform Administrator"),
               slug: roleSlug || "admin",
-              isSystemRole: isSuperAdminRequested,
+              isSystemRole: true,
+              tenantId: systemTenant.id,
             })
             .returning();
           role = newRole;
@@ -329,19 +359,42 @@ const adminUserController = {
           }
         }
 
-        return newUser;
+        return {
+          user: newUser,
+          roleName: role.name,
+          roleSlug: role.slug,
+        };
+      });
+
+      // Dispatch welcome email with credentials & role
+      sendAdminWelcomeEmail({
+        adminName: createdUser.user.name,
+        adminEmail: createdUser.user.email,
+        password,
+        roleName: createdUser.roleName,
+        roleSlug: createdUser.roleSlug || undefined,
+        grantedPermissions: Array.isArray(grantedCodes) ? grantedCodes : [],
+      }).catch((mailErr) => {
+        console.error("Non-blocking welcome email error:", mailErr);
       });
 
       return res.status(201).json(
         ResponseHandler(201, "Admin user created successfully with assigned permissions", {
-          id: createdUser.id,
-          name: createdUser.name,
-          email: createdUser.email,
+          id: createdUser.user.id,
+          name: createdUser.user.name,
+          email: createdUser.user.email,
+          role: createdUser.roleName,
         })
       );
-    } catch (error) {
+    } catch (error: any) {
       console.error("Admin create user error:", error);
-      return next(CustomErrorHandler.serverError());
+      if (error?.code === "23505") {
+        return next(CustomErrorHandler.badRequest("A user with this email or phone number already exists"));
+      }
+      if (error?.code === "22001") {
+        return next(CustomErrorHandler.badRequest("One of the provided fields exceeds the maximum allowed length"));
+      }
+      return next(CustomErrorHandler.serverError(error?.message || "Failed to create administrator"));
     }
   },
 

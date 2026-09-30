@@ -89,6 +89,7 @@ router.get("/audit-logs", adminAuth, adminPermissionGuard("admin.audit.read"), a
    BARE ACTS & LEGISLATION REPOSITORY (ADMIN CURATION & SEEDING)
    ========================================================================= */
 router.get("/bare-acts", adminAuth, adminPermissionGuard("admin.bare_acts.read"), adminBareActController.getActs);
+router.get("/bare-acts/meta/slugs", adminAuth, adminPermissionGuard("admin.bare_acts.read"), adminBareActController.getActSlugs);
 router.get("/bare-acts/:id", adminAuth, adminPermissionGuard("admin.bare_acts.read"), adminBareActController.getActById);
 router.post("/bare-acts", adminAuth, adminPermissionGuard("admin.bare_acts.manage"), adminBareActController.createAct);
 router.put("/bare-acts/:id", adminAuth, adminPermissionGuard("admin.bare_acts.manage"), adminBareActController.updateAct);

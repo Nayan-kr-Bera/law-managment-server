@@ -196,10 +196,36 @@ export const bareActController = {
   async previewIndiaCodeAct(req: Request, res: Response, next: NextFunction) {
     try {
       const { actSlug } = req.params;
-      const result = await indiaCodeService.getActOverview(actSlug);
+      const cleanSlug = (actSlug || "").trim();
+      const result = await indiaCodeService.getActOverview(cleanSlug);
+
+      const normalizedOverview = {
+        ...result,
+        id: result.act?.id || cleanSlug,
+        slug: result.act?.id || cleanSlug,
+        title: result.act?.short_title || result.act?.id || cleanSlug,
+        short_title: result.act?.short_title || result.act?.id || cleanSlug,
+        actNumber: result.act?.act_number || null,
+        act_number: result.act?.act_number || null,
+        actYear: result.act?.act_year || null,
+        act_year: result.act?.act_year || null,
+        longTitle: result.act?.long_title || null,
+        long_title: result.act?.long_title || null,
+        ministry: result.act?.ministry || null,
+        jurisdiction: result.act?.jurisdiction || "Central",
+        totalSections: result.act?.section_count || result.count || result.sections?.length || 0,
+        sections: (result.sections || []).map((sec: any) => ({
+          ...sec,
+          number: sec.number,
+          sectionNumber: sec.number,
+          title: sec.heading || sec.title || `Section ${sec.number}`,
+          heading: sec.heading || sec.title || `Section ${sec.number}`,
+        })),
+      };
+
       return res
         .status(200)
-        .json(ResponseHandler(200, "IndiaCode Act overview fetched successfully", result));
+        .json(ResponseHandler(200, "IndiaCode Act overview fetched successfully", normalizedOverview));
     } catch (error) {
       return next(error);
     }
@@ -208,14 +234,15 @@ export const bareActController = {
   // 11. 1-Click Import Act from IndiaCode
   async importFromIndiaCode(req: Request, res: Response, next: NextFunction) {
     try {
-      const { actSlug, category, maxSections, batchSize } = req.body;
-      if (!actSlug) {
+      const { actSlug, slug, id, category, maxSections, batchSize } = req.body;
+      const targetSlug = (actSlug || slug || id || "").toString().trim();
+      if (!targetSlug) {
         return res.status(400).json(ResponseHandler(400, "actSlug is required"));
       }
 
       const adminUserId = req.adminUser?.userId || req.user?.userId;
 
-      const result = await indiaCodeService.importActWithSections(actSlug, {
+      const result = await indiaCodeService.importActWithSections(targetSlug, {
         category,
         maxSections: maxSections ? Number(maxSections) : undefined,
         batchSize: batchSize ? Number(batchSize) : 5,

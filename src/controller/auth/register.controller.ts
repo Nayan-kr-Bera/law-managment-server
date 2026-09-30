@@ -99,19 +99,18 @@ const registerController = {
           })
           .returning();
 
-        // 4.2 FIND FREE TRIAL PLAN
-
+        // 4.2 FIND PUBLIC FREE TRIAL PLAN (Strictly the public 14-day trial pack, NEVER the secret internal plan)
         const freeTrialPlan = await tx.query.subscriptionPlans.findFirst({
           where: and(
             eq(subscriptionPlans.code, "free_trial"),
             eq(subscriptionPlans.isActive, true),
-            eq(subscriptionPlans.isInternal, true),
+            eq(subscriptionPlans.isInternal, false),
           ),
         });
 
         if (!freeTrialPlan) {
           throw CustomErrorHandler.serverError(
-            "Free trial subscription plan not found.",
+            "Free trial subscription plan ('free_trial') not found or inactive. Please contact system administrator.",
           );
         }
 

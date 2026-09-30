@@ -122,8 +122,8 @@ const loginController = {
       const isSystemTenant = tenant?.slug === "system";
       const isSuperAdmin = roleData.some((r) => r.slug === "super_admin");
 
-      // Only block pure platform super-admins on the system tenant from logging into tenant portal
-      if (isSystemTenant && isSuperAdmin) {
+      // Block ALL platform-level administration accounts (scoped to internal system tenant) from logging into tenant portal
+      if (isSystemTenant) {
         return next(
           CustomErrorHandler.unAuthorized(
             "Platform Administrator accounts must log in via the Admin Console."

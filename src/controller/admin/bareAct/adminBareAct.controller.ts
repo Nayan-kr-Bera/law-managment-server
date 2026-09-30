@@ -12,6 +12,9 @@ import {
   assignSectionsToChapterSchema,
   unassignSectionsSchema,
 } from "../../../validators/bareAct.validator.js";
+import { eq } from "drizzle-orm";
+import db from "../../../db/index.js";
+import { bareActs } from "../../../db/schema/index.js";
 import ResponseHandler from "../../../utils/responseHandler.js";
 
 export const adminBareActController = {
@@ -51,6 +54,17 @@ export const adminBareActController = {
       return res
         .status(200)
         .json(ResponseHandler(200, "Acts fetched for admin console", result));
+    } catch (error) {
+      return next(error);
+    }
+  },
+
+  // 1b. Get All Act Slugs (Lightweight lookup for admin portal)
+  async getActSlugs(req: Request, res: Response, next: NextFunction) {
+    try {
+      const rows = await db.select({ slug: bareActs.slug }).from(bareActs);
+      const slugs = rows.map((r) => r.slug).filter(Boolean);
+      return res.status(200).json(ResponseHandler(200, "Act slugs fetched", slugs));
     } catch (error) {
       return next(error);
     }
@@ -257,10 +271,80 @@ export const adminBareActController = {
   async previewIndiaCodeAct(req: Request, res: Response, next: NextFunction) {
     try {
       const { actSlug } = req.params;
-      const result = await indiaCodeService.getActOverview(actSlug);
+      const cleanSlug = (actSlug || "").trim();
+      if (!cleanSlug || cleanSlug === "undefined" || cleanSlug === "null") {
+        return res.status(400).json(ResponseHandler(400, "A valid actSlug is required to preview an enactment"));
+      }
+
+      let result: any;
+      try {
+        result = await indiaCodeService.getActOverview(cleanSlug);
+      } catch (err: any) {
+        // Fallback: check if act already exists in local DB
+        const dbAct = await db.query.bareActs.findFirst({
+          where: eq(bareActs.slug, cleanSlug),
+          with: {
+            sections: true,
+          },
+        });
+
+        if (dbAct) {
+          const sections = dbAct.sections || [];
+          return res.status(200).json(
+            ResponseHandler(200, "Act preview loaded from local database", {
+              id: dbAct.id,
+              slug: dbAct.slug,
+              title: dbAct.title,
+              short_title: dbAct.title,
+              actNumber: dbAct.actNumber || null,
+              act_number: dbAct.actNumber || null,
+              actYear: dbAct.actYear || null,
+              act_year: dbAct.actYear || null,
+              longTitle: dbAct.longTitle || dbAct.description || null,
+              long_title: dbAct.longTitle || dbAct.description || null,
+              ministry: dbAct.ministry || null,
+              jurisdiction: dbAct.jurisdiction || "Central",
+              totalSections: dbAct.totalSections || sections.length,
+              sections: sections.map((sec: any) => ({
+                number: sec.sectionNumber?.replace(/^(Section|Article)\s+/i, "") || sec.sectionNumber,
+                sectionNumber: sec.sectionNumber,
+                title: sec.title || `Section ${sec.sectionNumber}`,
+                heading: sec.title || `Section ${sec.sectionNumber}`,
+              })),
+            })
+          );
+        }
+
+        throw err;
+      }
+
+      const normalizedOverview = {
+        ...result,
+        id: result.act?.id || cleanSlug,
+        slug: result.act?.id || cleanSlug,
+        title: result.act?.short_title || result.act?.id || cleanSlug,
+        short_title: result.act?.short_title || result.act?.id || cleanSlug,
+        actNumber: result.act?.act_number || null,
+        act_number: result.act?.act_number || null,
+        actYear: result.act?.act_year || null,
+        act_year: result.act?.act_year || null,
+        longTitle: result.act?.long_title || null,
+        long_title: result.act?.long_title || null,
+        ministry: result.act?.ministry || null,
+        jurisdiction: result.act?.jurisdiction || "Central",
+        totalSections: result.act?.section_count || result.count || result.sections?.length || 0,
+        sections: (result.sections || []).map((sec: any) => ({
+          ...sec,
+          number: sec.number,
+          sectionNumber: sec.number,
+          title: sec.heading || sec.title || `Section ${sec.number}`,
+          heading: sec.heading || sec.title || `Section ${sec.number}`,
+        })),
+      };
+
       return res
         .status(200)
-        .json(ResponseHandler(200, "IndiaCode Act overview fetched successfully", result));
+        .json(ResponseHandler(200, "IndiaCode Act overview fetched successfully", normalizedOverview));
     } catch (error) {
       return next(error);
     }
@@ -269,13 +353,14 @@ export const adminBareActController = {
   // 16. Admin 1-Click Import from IndiaCode to Database
   async importFromIndiaCode(req: Request, res: Response, next: NextFunction) {
     try {
-      const { actSlug, category, maxSections, batchSize } = req.body;
-      if (!actSlug) {
+      const { actSlug, slug, id, category, maxSections, batchSize } = req.body;
+      const targetSlug = (actSlug || slug || id || "").toString().trim();
+      if (!targetSlug) {
         return res.status(400).json(ResponseHandler(400, "actSlug is required"));
       }
 
       const adminUserId = req.adminUser?.userId || req.user?.userId;
-      const result = await indiaCodeService.importActWithSections(actSlug, {
+      const result = await indiaCodeService.importActWithSections(targetSlug, {
         category,
         maxSections: maxSections ? Number(maxSections) : undefined,
         batchSize: batchSize ? Number(batchSize) : 5,

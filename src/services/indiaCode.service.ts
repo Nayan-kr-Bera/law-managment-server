@@ -13,13 +13,18 @@ const INDIA_CODE_BASE_URL = "https://indiacode.ecourtsindia.com/api/v1";
 
 export interface IIndiaCodeSearchResult {
   id: string;
+  slug?: string;
   short_title: string;
+  title?: string;
   act_number?: string;
+  actNumber?: string;
   act_year?: number;
+  actYear?: number;
   ministry?: string;
   jurisdiction?: string;
   unit?: string;
   section_count?: number;
+  totalSections?: number;
   in_force?: boolean;
   url?: string;
 }
@@ -97,6 +102,26 @@ export interface IIndiaCodeSectionDetail {
 
 class IndiaCodeService {
   /**
+   * Common slug aliases to map informal or legacy slugs to live eCourts IndiaCode IDs
+   */
+  public static readonly SLUG_ALIASES: Record<string, string> = {
+    "prevention-of-corruption-act-1988": "pc-act",
+    "prevention-of-corruption-act": "pc-act",
+    "prevention-of-corruption": "pc-act",
+    "specific-relief-act-1963": "specific-relief-act",
+    "limitation-act-1963": "limitation-act",
+    "sarfaesi-act-2002": "securitisation-reconstruction-financial-assets-enforcement-security-interest-act",
+    "sarfaesi-act": "securitisation-reconstruction-financial-assets-enforcement-security-interest-act",
+    "sarfaesi": "securitisation-reconstruction-financial-assets-enforcement-security-interest-act",
+    "recovery-of-debts-due-to-banks-act": "recovery-debts-bankruptcy-act-1993",
+    "transfer-of-property-act-1882": "tp-act",
+    "transfer-of-property-act": "tp-act",
+    "transfer-of-property": "tp-act",
+    "pocso": "pocso-act",
+    "protection-of-children-from-sexual-offences-act": "pocso-act",
+  };
+
+  /**
    * Search IndiaCode API for Acts by title, ministry, or jurisdiction
    */
   async searchActs(
@@ -123,14 +148,41 @@ class IndiaCodeService {
       throw new AppError(`IndiaCode API error: ${response.statusText}`, response.status);
     }
 
-    const data = await response.json();
-    return data as {
-      total: number;
-      count: number;
-      limit: number;
-      offset: number;
-      next: string | null;
-      acts: IIndiaCodeSearchResult[];
+    const data = (await response.json()) as any;
+    const rawActs = (data.acts || []) as any[];
+
+    // Normalize acts so both eCourts standard keys and frontend client keys are always present
+    const acts: IIndiaCodeSearchResult[] = rawActs.map((a) => {
+      const actId = a.id || a.slug || "";
+      const actTitle = a.short_title || a.title || "Statutory Act";
+      const actNum = a.act_number || a.actNumber || null;
+      const actYr = a.act_year || a.actYear || null;
+      const secCount = a.section_count ?? a.totalSections ?? 0;
+      return {
+        ...a,
+        id: actId,
+        slug: actId,
+        short_title: actTitle,
+        title: actTitle,
+        act_number: actNum,
+        actNumber: actNum,
+        act_year: actYr,
+        actYear: actYr,
+        section_count: secCount,
+        totalSections: secCount,
+        jurisdiction: a.jurisdiction || "Central",
+        ministry: a.ministry || null,
+        url: a.url || "",
+      };
+    });
+
+    return {
+      total: typeof data.total === "number" ? data.total : acts.length,
+      count: acts.length,
+      limit: Number(options?.limit || 20),
+      offset: Number(options?.offset || 0),
+      next: data.next || null,
+      acts,
     };
   }
 
@@ -138,9 +190,30 @@ class IndiaCodeService {
    * Get an Act's overview, all section headings, and schedules
    */
   async getActOverview(actSlug: string): Promise<IIndiaCodeActOverview> {
-    const cleanSlug = actSlug.toLowerCase().trim();
-    const url = `${INDIA_CODE_BASE_URL}/acts/${cleanSlug}`;
-    const response = await fetch(url);
+    if (!actSlug || typeof actSlug !== "string") {
+      throw new AppError("A valid actSlug is required", 400);
+    }
+    let cleanSlug = actSlug.toLowerCase().trim();
+    if (IndiaCodeService.SLUG_ALIASES[cleanSlug]) {
+      cleanSlug = IndiaCodeService.SLUG_ALIASES[cleanSlug];
+    }
+    let url = `${INDIA_CODE_BASE_URL}/acts/${cleanSlug}`;
+    let response = await fetch(url);
+
+    // Fallback: If 404, try searching for the slug as words in case an un-aliased name was passed
+    if (!response.ok && response.status === 404) {
+      const queryTerm = cleanSlug.replace(/[-_]/g, " ");
+      try {
+        const searchRes = await this.searchActs(queryTerm, { limit: 1 });
+        if (searchRes.acts && searchRes.acts.length > 0 && searchRes.acts[0].id) {
+          cleanSlug = searchRes.acts[0].id;
+          url = `${INDIA_CODE_BASE_URL}/acts/${cleanSlug}`;
+          response = await fetch(url);
+        }
+      } catch {
+        // Fall through to standard 404 handler
+      }
+    }
 
     if (!response.ok) {
       if (response.status === 404) {
@@ -156,11 +229,31 @@ class IndiaCodeService {
    * Get a single provision (section/article) with complete statutory text, classification, and judgments
    */
   async getSection(actSlug: string, sectionNumber: string): Promise<IIndiaCodeSectionDetail> {
-    const cleanSlug = actSlug.toLowerCase().trim();
+    if (!actSlug || !sectionNumber) {
+      throw new AppError("Both actSlug and sectionNumber are required", 400);
+    }
+    let cleanSlug = actSlug.toLowerCase().trim();
+    if (IndiaCodeService.SLUG_ALIASES[cleanSlug]) {
+      cleanSlug = IndiaCodeService.SLUG_ALIASES[cleanSlug];
+    }
     const cleanNumber = sectionNumber.trim();
     const url = `${INDIA_CODE_BASE_URL}/${cleanSlug}/section/${encodeURIComponent(cleanNumber)}`;
 
-    const response = await fetch(url, { redirect: "follow" });
+    let response = await fetch(url, { redirect: "follow" });
+    if (!response.ok && response.status === 404) {
+      // Check if overview points to a resolved canonical slug
+      try {
+        const overview = await this.getActOverview(actSlug);
+        if (overview.act?.id && overview.act.id !== cleanSlug) {
+          cleanSlug = overview.act.id;
+          const retryUrl = `${INDIA_CODE_BASE_URL}/${cleanSlug}/section/${encodeURIComponent(cleanNumber)}`;
+          response = await fetch(retryUrl, { redirect: "follow" });
+        }
+      } catch {
+        // Continue
+      }
+    }
+
     if (!response.ok) {
       if (response.status === 404) {
         throw new AppError(`Section '${sectionNumber}' of Act '${actSlug}' not found on IndiaCode`, 404);

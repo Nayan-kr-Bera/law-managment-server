@@ -1,4 +1,4 @@
-import { eq, ilike, or, and, count, inArray, SQL } from "drizzle-orm";
+import { eq, ne, ilike, or, and, count, inArray, SQL } from "drizzle-orm";
 import { NextFunction, Request, Response } from "express";
 
 import db from "../../../db/index.js";
@@ -38,7 +38,8 @@ const adminTenantController = {
         status?: string;
       };
 
-      const conditions: SQL[] = [];
+      // Always exclude internal platform management tenant
+      const conditions: SQL[] = [ne(tenants.slug, "system")];
 
       if (status && status.trim() !== "" && status !== "all") {
         conditions.push(eq(tenants.status, status as typeof tenants.$inferSelect.status));
@@ -352,8 +353,11 @@ const adminTenantController = {
     try {
       const { tenantId } = req.query as { tenantId?: string };
 
+      // Exclude internal platform system tenant from business customer organizations
       const allTenants = await db.query.tenants.findMany({
-        where: tenantId ? eq(tenants.id, tenantId) : undefined,
+        where: tenantId
+          ? eq(tenants.id, tenantId)
+          : ne(tenants.slug, "system"),
         orderBy: (t, { desc }) => [desc(t.createdAt)],
       });
 
@@ -641,40 +645,84 @@ const adminTenantController = {
         orderBy: (u, { desc }) => [desc(u.createdAt)],
       });
 
-      const customerSummaries = await Promise.all(
-        allUsers.map(async (u) => {
-          const scopes = await db.query.userScopes.findMany({
-            where: eq(userScopes.userId, u.id),
-            with: {
-              tenant: true,
-            },
-          });
+      const customerSummaries = (
+        await Promise.all(
+          allUsers.map(async (u) => {
+            const scopes = await db.query.userScopes.findMany({
+              where: eq(userScopes.userId, u.id),
+              with: {
+                tenant: true,
+              },
+            });
 
-          // Filter out internal system tenant if present
-          const validOrgs = scopes
-            .filter((s): s is typeof s & { tenant: NonNullable<typeof s.tenant> } => Boolean(s.tenant && s.tenant.slug !== "system"))
-            .map((s) => ({
-              tenantId: s.tenant.id,
-              name: s.tenant.name,
-              slug: s.tenant.slug,
-              status: s.tenant.status,
-              isDefault: s.isDefault,
-              createdAt: s.tenant.createdAt,
-            }));
+            // Retrieve roles assigned to the user across scopes
+            const assignedRoles = await db
+              .select({
+                slug: roles.slug,
+                name: roles.name,
+                isSystemRole: roles.isSystemRole,
+              })
+              .from(userRoles)
+              .innerJoin(roles, eq(userRoles.roleId, roles.id))
+              .innerJoin(userScopes, eq(userRoles.scopeId, userScopes.id))
+              .where(eq(userScopes.userId, u.id));
 
-          return {
-            id: u.id,
-            name: u.name,
-            email: u.email,
-            phone: u.phone || "—",
-            status: u.isEmailVerified ? "active" : "inactive",
-            createdAt: u.createdAt ? new Date(u.createdAt).toISOString() : new Date().toISOString(),
-            organizationsCount: validOrgs.length,
-            organizations: validOrgs,
-            isMultiOrg: validOrgs.length > 1,
-          };
-        })
-      );
+            const isSuperAdmin =
+              u.email?.toLowerCase().includes("superadmin") ||
+              assignedRoles.some((r) => r.slug === "super_admin");
+
+            const isPlatformRole = assignedRoles.some(
+              (r) =>
+                Boolean(
+                  r.slug &&
+                    [
+                      "super_admin",
+                      "platform_admin",
+                      "custom_admin",
+                      "support_admin",
+                      "compliance_admin",
+                      "billing_admin",
+                    ].includes(r.slug)
+                )
+            );
+
+            const isOnlySystemTenant =
+              scopes.length > 0 && scopes.every((s) => s.tenant?.slug === "system");
+
+            // Filter out internal system tenant if present
+            const validOrgs = scopes
+              .filter(
+                (s): s is typeof s & { tenant: NonNullable<typeof s.tenant> } =>
+                  Boolean(s.tenant && s.tenant.slug !== "system")
+              )
+              .map((s) => ({
+                tenantId: s.tenant.id,
+                name: s.tenant.name,
+                slug: s.tenant.slug,
+                status: s.tenant.status,
+                isDefault: s.isDefault,
+                createdAt: s.tenant.createdAt,
+              }));
+
+            // Exclude platform-side staff / superadmin and accounts without business tenant
+            if (isSuperAdmin || isPlatformRole || isOnlySystemTenant || validOrgs.length === 0) {
+              return null;
+            }
+
+            return {
+              id: u.id,
+              name: u.name,
+              email: u.email,
+              phone: u.phone || "—",
+              status: u.isEmailVerified ? "active" : "inactive",
+              createdAt: u.createdAt ? new Date(u.createdAt).toISOString() : new Date().toISOString(),
+              organizationsCount: validOrgs.length,
+              organizations: validOrgs,
+              isMultiOrg: validOrgs.length > 1,
+            };
+          })
+        )
+      ).filter((c): c is NonNullable<typeof c> => c !== null);
 
       let filtered = customerSummaries;
       if (search && search.trim() !== "") {
@@ -735,13 +783,52 @@ const adminTenantController = {
         return next(CustomErrorHandler.badRequest("Organization name is required"));
       }
 
-      // 1. Verify user exists
+      // 1. Verify user exists and is a business profile customer
       const targetUser = await db.query.user.findFirst({
         where: eq(user.id, userId),
       });
 
       if (!targetUser) {
         return next(CustomErrorHandler.notFound("Customer / User account not found"));
+      }
+
+      // Ensure target user is not a platform admin/superadmin
+      const userScopesList = await db.query.userScopes.findMany({
+        where: eq(userScopes.userId, targetUser.id),
+        with: { tenant: true },
+      });
+
+      const userRoleRecords = await db
+        .select({ slug: roles.slug })
+        .from(userRoles)
+        .innerJoin(roles, eq(userRoles.roleId, roles.id))
+        .innerJoin(userScopes, eq(userRoles.scopeId, userScopes.id))
+        .where(eq(userScopes.userId, targetUser.id));
+
+      const isPlatformUser =
+        targetUser.email?.toLowerCase().includes("superadmin") ||
+        userRoleRecords.some(
+          (r) =>
+            Boolean(
+              r.slug &&
+                [
+                  "super_admin",
+                  "platform_admin",
+                  "custom_admin",
+                  "support_admin",
+                  "compliance_admin",
+                  "billing_admin",
+                ].includes(r.slug)
+            )
+        ) ||
+        (userScopesList.length > 0 && userScopesList.every((s) => s.tenant?.slug === "system"));
+
+      if (isPlatformUser) {
+        return next(
+          CustomErrorHandler.badRequest(
+            "Organizations can only be provisioned for business profile customer accounts, not platform administrators."
+          )
+        );
       }
 
       // 2. Generate slug and ensure uniqueness
@@ -778,7 +865,7 @@ const adminTenantController = {
             slug: tenantSlug,
             organisationEmail: targetUser.email,
             timezone: timezone || "Asia/Kolkata",
-            status: "active",
+            status: "trial",
           })
           .returning();
 
@@ -854,88 +941,48 @@ const adminTenantController = {
           roleId: adminRole.id,
         });
 
-        // 4.7 Associate subscription plan if selected
+        // 4.7 Associate 2-Day Free Trial for the new organization
         let attachedPlan = null;
         let subscriptionRecord = null;
         let paymentRecord = null;
 
+        // Find trial plan or selected plan
+        let plan = null;
         if (planId) {
-          const plan = await tx.query.subscriptionPlans.findFirst({
+          plan = await tx.query.subscriptionPlans.findFirst({
             where: eq(subscriptionPlans.id, planId),
           });
+        }
+        if (!plan) {
+          plan = await tx.query.subscriptionPlans.findFirst({
+            where: eq(subscriptionPlans.code, "free_trial"),
+          });
+        }
+        if (!plan) {
+          plan = await tx.query.subscriptionPlans.findFirst();
+        }
 
-          if (plan) {
-            attachedPlan = plan;
-            const startDate = new Date();
-            const daysToAdd = normalizedBillingCycle === "annual" ? 365 : 30;
-            const nextBilling = new Date(startDate.getTime() + daysToAdd * 24 * 60 * 60 * 1000);
-            const standardPlanPrice =
-              normalizedBillingCycle === "annual" ? plan.annualPrice : plan.monthlyPrice;
-            const finalFee =
-              extraFeePaid !== undefined && extraFeePaid !== ""
-                ? Number(extraFeePaid)
-                : Number(standardPlanPrice || 0);
+        if (plan) {
+          attachedPlan = plan;
+          const startDate = new Date();
+          const trialDays = 2; // Exactly 2 days free trial for new organization
+          const trialEndsAt = new Date(startDate.getTime() + trialDays * 24 * 60 * 60 * 1000);
 
-            const [sub] = await tx
-              .insert(tenantSubscriptions)
-              .values({
-                tenantId: newTenant.id,
-                planId: plan.id,
-                status: "active",
-                billingCycle: normalizedBillingCycle,
-                amount: String(finalFee),
-                currency: currency || plan.currency || "INR",
-                startDate: startDate.toISOString().split("T")[0],
-                nextBillingDate: nextBilling.toISOString().split("T")[0],
-                autoRenew: true,
-              })
-              .returning();
-            subscriptionRecord = sub;
-
-            // Generate payment record
-            const invNum =
-              receiptRef?.trim() ||
-              `INV-ADDON-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
-
-            const [payment] = await tx
-              .insert(subscriptionPaymentHistory)
-              .values({
-                tenantId: newTenant.id,
-                invoiceNumber: invNum,
-                planId: plan.id,
-                planName: `${plan.name} (Additional Workspace Add-on)`,
-                amount: String(finalFee),
-                currency: currency || "INR",
-                status: "paid",
-                billingCycle: normalizedBillingCycle,
-                paymentMethod: paymentMethod || "manual_bank_transfer",
-                receiptUrl: receiptRef || null,
-                transactionDate: new Date(),
-              })
-              .returning();
-            paymentRecord = payment;
-          }
-        } else if (extraFeePaid && Number(extraFeePaid) > 0) {
-          const invNum =
-            receiptRef?.trim() ||
-            `INV-ADDON-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
-
-          const [payment] = await tx
-            .insert(subscriptionPaymentHistory)
+          const [sub] = await tx
+            .insert(tenantSubscriptions)
             .values({
               tenantId: newTenant.id,
-              invoiceNumber: invNum,
-              planName: "Additional Workspace Provisioning Surcharge",
-              amount: String(extraFeePaid),
-              currency: currency || "INR",
-              status: "paid",
+              planId: plan.id,
+              status: "trial",
               billingCycle: normalizedBillingCycle,
-              paymentMethod: paymentMethod || "manual_bank_transfer",
-              receiptUrl: receiptRef || null,
-              transactionDate: new Date(),
+              amount: "0.00",
+              currency: plan.currency || "INR",
+              startDate: startDate.toISOString().split("T")[0],
+              nextBillingDate: trialEndsAt.toISOString().split("T")[0],
+              autoRenew: false,
             })
             .returning();
-          paymentRecord = payment;
+          subscriptionRecord = sub;
         }
 
         return {

@@ -20,7 +20,7 @@ const users = pgTable("users", {
 
   email: varchar("email", { length: 255 }).notNull().unique(),
 
-  phone: varchar("phone", { length: 20 }).notNull().unique(),
+  phone: varchar("phone", { length: 35 }).unique(),
 
   password: varchar("password", { length: 255 }).notNull(),
 

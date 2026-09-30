@@ -1,14 +1,11 @@
-import { and, desc, eq, SQL, ilike, or } from "drizzle-orm";
+import { and, eq, SQL } from "drizzle-orm";
 import { NextFunction, Request, Response } from "express";
 
 import db from "../../../db/index.js";
 import {
   contactUsMessages,
-  supportTickets,
   supportTicketMessages,
-  tenants,
-  clients,
-  cases,
+  supportTickets
 } from "../../../db/schema/index.js";
 
 import CustomErrorHandler from "../../../utils/customErrorHandler.js";
@@ -55,8 +52,8 @@ const adminSupportController = {
         const latestMsg = t.messages?.[0];
         const clientName = t.client
           ? `${t.client.firstName || ""} ${t.client.lastName || ""}`.trim() ||
-            t.client.companyName ||
-            "Client"
+          t.client.companyName ||
+          "Client"
           : "Client User";
 
         return {
@@ -136,8 +133,8 @@ const adminSupportController = {
 
       const clientName = ticket.client
         ? `${ticket.client.firstName || ""} ${ticket.client.lastName || ""}`.trim() ||
-          ticket.client.companyName ||
-          "Client"
+        ticket.client.companyName ||
+        "Client"
         : "Client User";
 
       const formatted = {
