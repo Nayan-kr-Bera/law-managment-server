@@ -32,5 +32,6 @@ router.get("/:actSlugOrId/sections", bareActController.getActSections);
 
 // 6. Section Detail with Full Statutory Text, Explanations, Judgments & Cross-References
 router.get("/:actSlugOrId/sections/:sectionSlugOrNumber", bareActController.getSectionDetail);
+router.get("/:actSlugOrId/sections/:sectionSlugOrNumber/judgments", bareActController.getSectionJudgments);
 
 export default router;

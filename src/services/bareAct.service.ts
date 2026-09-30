@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ilike, inArray, or, sql, count, SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, lte, or, sql, count, SQL } from "drizzle-orm";
 import db from "../db/index.js";
 import {
   bareActs,
@@ -354,9 +354,13 @@ export class BareActService {
       throw new AppError("Bare Act not found", 404);
     }
 
-    // If Act exists in DB (from background search sync) but chapters haven't been fetched yet,
-    // fetch its structure on-demand from IndiaCode
-    if (!isUuid && (!act.chapters || act.chapters.length === 0)) {
+    // Only fetch on-demand from IndiaCode if the Act currently has 0 sections in DB
+    const [{ existingSectionsCount }] = await db
+      .select({ existingSectionsCount: count() })
+      .from(bareActSections)
+      .where(eq(bareActSections.actId, act.id));
+
+    if (!isUuid && Number(existingSectionsCount) === 0) {
       try {
         await indiaCodeService.importActWithSections(act.slug, { maxSections: 20, batchSize: 5 });
         const reloaded = await db.query.bareActs.findFirst({
@@ -1342,6 +1346,32 @@ export class BareActService {
       })
       .returning();
 
+    // If autoAssignByRange is requested and startSection & endSection are provided
+    if (data.autoAssignByRange && data.startSection && data.endSection) {
+      const startNum = this.parseNumeric(data.startSection);
+      const endNum = this.parseNumeric(data.endSection);
+      await db
+        .update(bareActSections)
+        .set({ chapterId: chapter.id })
+        .where(
+          and(
+            eq(bareActSections.actId, actId),
+            gte(bareActSections.sectionNumeric, startNum),
+            lte(bareActSections.sectionNumeric, endNum)
+          )
+        );
+    } else if (data.sectionIds && data.sectionIds.length > 0) {
+      await db
+        .update(bareActSections)
+        .set({ chapterId: chapter.id })
+        .where(
+          and(
+            eq(bareActSections.actId, actId),
+            inArray(bareActSections.id, data.sectionIds)
+          )
+        );
+    }
+
     // Increment act totalChapters count
     await db
       .update(bareActs)
@@ -1351,6 +1381,104 @@ export class BareActService {
       .where(eq(bareActs.id, actId));
 
     return chapter;
+  }
+
+  /**
+   * Helper to parse numeric values from section strings e.g. "14", "21A" -> 21.1
+   */
+  private parseNumeric(numStr: string): number {
+    const match = numStr.match(/^(\d+)([a-zA-Z])?/);
+    if (!match) return 0;
+    const base = parseInt(match[1], 10);
+    if (!match[2]) return base;
+    const letterCode = match[2].toUpperCase().charCodeAt(0) - 64; // A=1, B=2
+    return base + letterCode * 0.1;
+  }
+
+  /**
+   * Admin Assign Sections to Chapter
+   */
+  async assignSectionsToChapter(
+    chapterId: string,
+    data: {
+      sectionIds?: string[];
+      startSection?: string;
+      endSection?: string;
+    }
+  ) {
+    const chapter = await db.query.bareActChapters.findFirst({
+      where: eq(bareActChapters.id, chapterId),
+    });
+
+    if (!chapter) {
+      throw new AppError("Chapter not found", 404);
+    }
+
+    let updatedCount = 0;
+
+    if (data.sectionIds && data.sectionIds.length > 0) {
+      const result = await db
+        .update(bareActSections)
+        .set({ chapterId })
+        .where(
+          and(
+            eq(bareActSections.actId, chapter.actId),
+            inArray(bareActSections.id, data.sectionIds)
+          )
+        )
+        .returning({ id: bareActSections.id });
+      updatedCount = result.length;
+    } else if (data.startSection && data.endSection) {
+      const startNum = this.parseNumeric(data.startSection);
+      const endNum = this.parseNumeric(data.endSection);
+
+      const result = await db
+        .update(bareActSections)
+        .set({ chapterId })
+        .where(
+          and(
+            eq(bareActSections.actId, chapter.actId),
+            gte(bareActSections.sectionNumeric, startNum),
+            lte(bareActSections.sectionNumeric, endNum)
+          )
+        )
+        .returning({ id: bareActSections.id });
+      updatedCount = result.length;
+
+      // Update startSection and endSection on the chapter record
+      await db
+        .update(bareActChapters)
+        .set({
+          startSection: data.startSection,
+          endSection: data.endSection,
+          updatedAt: new Date(),
+        })
+        .where(eq(bareActChapters.id, chapterId));
+    }
+
+    return {
+      success: true,
+      message: `Assigned ${updatedCount} section(s) to ${chapter.title}`,
+      assignedCount: updatedCount,
+    };
+  }
+
+  /**
+   * Admin Unassign Sections from any Chapter
+   */
+  async unassignSections(sectionIds: string[]) {
+    if (!sectionIds || sectionIds.length === 0) return { success: true, message: "No sections to unassign", unassignedCount: 0 };
+    const result = await db
+      .update(bareActSections)
+      .set({ chapterId: null })
+      .where(inArray(bareActSections.id, sectionIds))
+      .returning({ id: bareActSections.id });
+
+    return {
+      success: true,
+      message: `Unassigned ${result.length} section(s)`,
+      unassignedCount: result.length,
+    };
   }
 
   /**
@@ -1671,6 +1799,90 @@ export class BareActService {
   async reseedLibrary() {
     await seedBareActs();
     return { success: true, message: "Indian Bare Acts library seeded successfully" };
+  }
+
+  /**
+   * Get enriched judgments for a section (with CNR, court order URL, ratio decidendi)
+   */
+  async getSectionJudgments(actSlugOrId: string, sectionSlugOrNumber: string) {
+    const act = await this.resolveActId(actSlugOrId);
+    const cleanNumber = sectionSlugOrNumber
+      .replace(/^(section|article)\s+/i, "")
+      .replace(new RegExp(`^${act.slug}-section-`, "i"), "")
+      .trim();
+
+    // 1. Fetch section from DB
+    const section = await db.query.bareActSections.findFirst({
+      where: and(
+        eq(bareActSections.actId, act.id),
+        or(
+          eq(bareActSections.slug, sectionSlugOrNumber),
+          eq(bareActSections.sectionNumber, `Section ${cleanNumber}`),
+          eq(bareActSections.sectionNumber, `Article ${cleanNumber}`),
+          eq(bareActSections.sectionNumber, cleanNumber)
+        )
+      ),
+    });
+
+    if (!section) {
+      throw new AppError("Section not found", 404);
+    }
+
+    const existingJudgments = ((section.crossReferences as any)?.landmarkJudgments || []) as any[];
+
+    // If existing judgments in DB already have CNR or official URL, return them directly
+    const hasDetailedJudgments = existingJudgments.some((j) => j.cnr || j.url);
+    if (hasDetailedJudgments) {
+      return existingJudgments;
+    }
+
+    // Otherwise, fetch on-demand from eCourts judgments endpoint
+    try {
+      const url = `https://indiacode.ecourtsindia.com/api/v1/judgments?act=${encodeURIComponent(
+        act.slug
+      )}&section=${encodeURIComponent(cleanNumber)}`;
+      const resp = await fetch(url, { redirect: "follow" });
+      if (resp.ok) {
+        const json = (await resp.json()) as any;
+        if (json.judgments && json.judgments.length > 0) {
+          const enrichedJudgments = json.judgments.map((j: any) => ({
+            title: j.title,
+            citation: j.citation,
+            cnr: j.cnr,
+            order: j.order,
+            court: j.court,
+            court_name: j.court_name,
+            date: j.date,
+            precedential_value: j.precedential_value,
+            court_marking: j.court_marking,
+            ratio_decidendi: j.ratio_decidendi,
+            applied_to_this_section: j.applied_to_this_section,
+            basis: j.basis,
+            url: j.url,
+            source:
+              json.source ||
+              "eCourts India. Reported judgments only; the holding is the ratio decidendi as extracted from the order, reproduced unaltered.",
+          }));
+
+          // Cache back into PostgreSQL DB!
+          await db
+            .update(bareActSections)
+            .set({
+              crossReferences: {
+                ...(section.crossReferences as any),
+                landmarkJudgments: enrichedJudgments,
+              },
+            })
+            .where(eq(bareActSections.id, section.id));
+
+          return enrichedJudgments;
+        }
+      }
+    } catch (err) {
+      console.warn("Could not fetch enriched judgments from eCourts:", err);
+    }
+
+    return existingJudgments;
   }
 
   /* =========================================================================

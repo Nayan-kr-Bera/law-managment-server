@@ -99,6 +99,22 @@ export const bareActController = {
     }
   },
 
+  // 4b. Get Enriched Judgments with CNR, Ratio Decidendi & PDF URL
+  async getSectionJudgments(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { actSlugOrId, sectionSlugOrNumber } = req.params;
+      const result = await bareActService.getSectionJudgments(
+        actSlugOrId,
+        sectionSlugOrNumber
+      );
+      return res
+        .status(200)
+        .json(ResponseHandler(200, "Section judgments fetched successfully", result));
+    } catch (error) {
+      return next(error);
+    }
+  },
+
   // 5. Instant Quick Section Lookup across all Bare Acts
   async quickLookup(req: Request, res: Response, next: NextFunction) {
     try {

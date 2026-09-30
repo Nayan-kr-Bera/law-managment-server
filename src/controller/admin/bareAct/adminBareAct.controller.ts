@@ -9,6 +9,8 @@ import {
   updateBareActSchema,
   updateChapterSchema,
   updateSectionSchema,
+  assignSectionsToChapterSchema,
+  unassignSectionsSchema,
 } from "../../../validators/bareAct.validator.js";
 import ResponseHandler from "../../../utils/responseHandler.js";
 
@@ -110,7 +112,7 @@ export const adminBareActController = {
   // 6. Create Chapter
   async createChapter(req: Request, res: Response, next: NextFunction) {
     try {
-      const { id } = req.params; // actId
+      const id = req.params.id as string;
       const validated = createChapterSchema.parse(req.body);
       const chapter = await bareActService.createChapter(id, validated);
       return res
@@ -124,7 +126,7 @@ export const adminBareActController = {
   // 7. Update Chapter
   async updateChapter(req: Request, res: Response, next: NextFunction) {
     try {
-      const { chapterId } = req.params;
+      const chapterId = req.params.chapterId as string;
       const validated = updateChapterSchema.parse(req.body);
       const updated = await bareActService.updateChapter(chapterId, validated);
       return res
@@ -138,9 +140,32 @@ export const adminBareActController = {
   // 8. Delete Chapter
   async deleteChapter(req: Request, res: Response, next: NextFunction) {
     try {
-      const { chapterId } = req.params;
+      const chapterId = req.params.chapterId as string;
       const result = await bareActService.deleteChapter(chapterId);
       return res.status(200).json(ResponseHandler(200, result.message));
+    } catch (error) {
+      return next(error);
+    }
+  },
+
+  // 8a. Assign Sections to Chapter (By list of IDs or by section range e.g. 1-10)
+  async assignSections(req: Request, res: Response, next: NextFunction) {
+    try {
+      const chapterId = req.params.chapterId as string;
+      const validated = assignSectionsToChapterSchema.parse(req.body);
+      const result = await bareActService.assignSectionsToChapter(chapterId, validated);
+      return res.status(200).json(ResponseHandler(200, result.message, result));
+    } catch (error) {
+      return next(error);
+    }
+  },
+
+  // 8b. Unassign Sections from Chapter
+  async unassignSections(req: Request, res: Response, next: NextFunction) {
+    try {
+      const validated = unassignSectionsSchema.parse(req.body);
+      const result = await bareActService.unassignSections(validated.sectionIds);
+      return res.status(200).json(ResponseHandler(200, result.message, result));
     } catch (error) {
       return next(error);
     }
@@ -149,7 +174,7 @@ export const adminBareActController = {
   // 9. Create Section
   async createSection(req: Request, res: Response, next: NextFunction) {
     try {
-      const { id } = req.params; // actId
+      const id = req.params.id as string;
       const validated = createSectionSchema.parse(req.body);
       const section = await bareActService.createSection(id, validated);
       return res
@@ -163,7 +188,7 @@ export const adminBareActController = {
   // 10. Update Section
   async updateSection(req: Request, res: Response, next: NextFunction) {
     try {
-      const { sectionId } = req.params;
+      const sectionId = req.params.sectionId as string;
       const validated = updateSectionSchema.parse(req.body);
       const updated = await bareActService.updateSection(sectionId, validated);
       return res
@@ -177,7 +202,7 @@ export const adminBareActController = {
   // 11. Delete Section
   async deleteSection(req: Request, res: Response, next: NextFunction) {
     try {
-      const { sectionId } = req.params;
+      const sectionId = req.params.sectionId as string;
       const result = await bareActService.deleteSection(sectionId);
       return res.status(200).json(ResponseHandler(200, result.message));
     } catch (error) {

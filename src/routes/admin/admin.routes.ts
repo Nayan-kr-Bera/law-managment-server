@@ -98,6 +98,8 @@ router.delete("/bare-acts/:id", adminAuth, adminPermissionGuard("admin.bare_acts
 router.post("/bare-acts/:id/chapters", adminAuth, adminPermissionGuard("admin.bare_acts.manage"), adminBareActController.createChapter);
 router.put("/bare-acts/chapters/:chapterId", adminAuth, adminPermissionGuard("admin.bare_acts.manage"), adminBareActController.updateChapter);
 router.delete("/bare-acts/chapters/:chapterId", adminAuth, adminPermissionGuard("admin.bare_acts.manage"), adminBareActController.deleteChapter);
+router.post("/bare-acts/chapters/:chapterId/assign-sections", adminAuth, adminPermissionGuard("admin.bare_acts.manage"), adminBareActController.assignSections);
+router.post("/bare-acts/sections/unassign-chapter", adminAuth, adminPermissionGuard("admin.bare_acts.manage"), adminBareActController.unassignSections);
 
 // Section routes
 router.post("/bare-acts/:id/sections", adminAuth, adminPermissionGuard("admin.bare_acts.manage"), adminBareActController.createSection);

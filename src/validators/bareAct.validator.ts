@@ -90,9 +90,21 @@ export const createChapterSchema = z.object({
   startSection: z.string().trim().max(50).optional(),
   endSection: z.string().trim().max(50).optional(),
   orderIndex: z.number().int().optional().default(0),
+  autoAssignByRange: z.boolean().optional(),
+  sectionIds: z.array(z.string().uuid()).optional(),
 });
 
 export const updateChapterSchema = createChapterSchema.partial();
+
+export const assignSectionsToChapterSchema = z.object({
+  sectionIds: z.array(z.string().uuid()).optional(),
+  startSection: z.string().trim().optional(),
+  endSection: z.string().trim().optional(),
+});
+
+export const unassignSectionsSchema = z.object({
+  sectionIds: z.array(z.string().uuid()).min(1, "At least one sectionId is required"),
+});
 
 // Section Validator
 export const createSectionSchema = z.object({
@@ -180,4 +192,6 @@ export type UpdateSectionInput = z.infer<typeof updateSectionSchema>;
 export type CreateScheduleInput = z.infer<typeof createScheduleSchema>;
 export type UpdateScheduleInput = z.infer<typeof updateScheduleSchema>;
 export type BulkImportBareActInput = z.infer<typeof bulkImportBareActSchema>;
+export type AssignSectionsToChapterInput = z.infer<typeof assignSectionsToChapterSchema>;
+export type UnassignSectionsInput = z.infer<typeof unassignSectionsSchema>;
 
