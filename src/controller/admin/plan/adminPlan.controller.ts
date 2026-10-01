@@ -154,6 +154,7 @@ const adminPlanController = {
         maxAdvocates,
         maxOffices,
         maxStorageGb,
+        monthlyOcrCredits,
         monthlyOcrPages,
         monthlyAiDrafts,
         features,
@@ -191,7 +192,18 @@ const adminPlanController = {
           maxUsers: maxUsers !== undefined ? Number(maxUsers) : maxAdvocates !== undefined ? Number(maxAdvocates) : 5,
           maxOffices: maxOffices !== undefined ? Number(maxOffices) : 1,
           maxStorageGb: maxStorageGb !== undefined ? Number(maxStorageGb) : 10,
-          monthlyOcrPages: monthlyOcrPages !== undefined ? Number(monthlyOcrPages) : 0,
+          monthlyOcrCredits:
+            monthlyOcrCredits !== undefined
+              ? Number(monthlyOcrCredits)
+              : monthlyOcrPages !== undefined
+              ? Number(monthlyOcrPages) * 10
+              : 0,
+          monthlyOcrPages:
+            monthlyOcrPages !== undefined
+              ? Number(monthlyOcrPages)
+              : monthlyOcrCredits !== undefined
+              ? Math.floor(Number(monthlyOcrCredits) / 10)
+              : 0,
           monthlyAiDrafts: monthlyAiDrafts !== undefined ? Number(monthlyAiDrafts) : 0,
           features: Array.isArray(features) ? features : [],
           badge: badge || null,
@@ -229,6 +241,7 @@ const adminPlanController = {
         maxOffices,
         maxStorageGb,
         maxStorageGB,
+        monthlyOcrCredits,
         monthlyOcrPages,
         monthlyAiDrafts,
         features,
@@ -271,9 +284,18 @@ const adminPlanController = {
             : maxStorageGB !== undefined
             ? { maxStorageGb: Number(maxStorageGB) }
             : {}),
-          ...(monthlyOcrPages !== undefined && {
-            monthlyOcrPages: Number(monthlyOcrPages),
-          }),
+          ...(monthlyOcrPages !== undefined || monthlyOcrCredits !== undefined
+            ? {
+                monthlyOcrPages:
+                  monthlyOcrPages !== undefined
+                    ? Number(monthlyOcrPages)
+                    : Math.floor(Number(monthlyOcrCredits) / 10),
+                monthlyOcrCredits:
+                  monthlyOcrCredits !== undefined
+                    ? Number(monthlyOcrCredits)
+                    : Number(monthlyOcrPages) * 10,
+              }
+            : {}),
           ...(monthlyAiDrafts !== undefined && {
             monthlyAiDrafts: Number(monthlyAiDrafts),
           }),
