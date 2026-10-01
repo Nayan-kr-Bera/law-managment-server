@@ -38,5 +38,6 @@ export { default as auditLogRoutes } from "./auditLog.route.js";
 export { default as notificationRoutes } from "./notification.route.js";
 export { default as adminRoutes } from "./admin/admin.routes.js";
 export { default as bareActRoutes } from "./bareAct.route.js";
+export { default as judgmentAiRoutes } from "./judgmentAi.route.js";
 
 

@@ -197,7 +197,11 @@ export const bareActController = {
     try {
       const { actSlug } = req.params;
       const cleanSlug = (actSlug || "").trim();
-      const result = await indiaCodeService.getActOverview(cleanSlug);
+      const result = (await indiaCodeService.getActOverview(cleanSlug)) as unknown as Record<string, unknown> & {
+        act?: Record<string, unknown>;
+        count?: number;
+        sections?: Record<string, unknown>[];
+      };
 
       const normalizedOverview = {
         ...result,
@@ -214,7 +218,7 @@ export const bareActController = {
         ministry: result.act?.ministry || null,
         jurisdiction: result.act?.jurisdiction || "Central",
         totalSections: result.act?.section_count || result.count || result.sections?.length || 0,
-        sections: (result.sections || []).map((sec: any) => ({
+        sections: (result.sections || []).map((sec) => ({
           ...sec,
           number: sec.number,
           sectionNumber: sec.number,

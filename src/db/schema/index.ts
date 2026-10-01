@@ -139,6 +139,7 @@ export {
   default as bareActSchedules,
   bareActSchedulesRelations,
 } from "./bareActs/bareActSchedules.js";
+export { default as courtJudgments } from "./bareActs/courtJudgments.js";
 
 
 

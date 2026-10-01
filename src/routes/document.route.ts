@@ -42,6 +42,30 @@ router.get(
   caseDocumentController.getOcrQuota,
 );
 
+// OCR credit packs & pricing (₹2.00 / credit)
+router.get(
+  "/ocr/credit-packs",
+  auth,
+  officeGuard,
+  caseDocumentController.getOcrCreditPacks,
+);
+
+// Create Razorpay payment order for OCR credit top-up
+router.post(
+  "/ocr/create-credit-order",
+  auth,
+  officeGuard,
+  caseDocumentController.createOcrCreditOrder,
+);
+
+// Verify Razorpay payment and add OCR credits to pool
+router.post(
+  "/ocr/verify-credit-payment",
+  auth,
+  officeGuard,
+  caseDocumentController.verifyOcrCreditPayment,
+);
+
 // OCR search across indexed document text in PostgreSQL (Permission required)
 router.get(
   "/ocr/search",

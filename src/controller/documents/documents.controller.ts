@@ -10,6 +10,7 @@ import {
   cases,
   caseClients,
   tenantSubscriptions,
+  subscriptionPaymentHistory,
 } from "../../db/schema/index.js";
 
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
@@ -21,6 +22,14 @@ import {
 } from "../../services/cloudinary.service.js";
 import ocrService from "../../services/ocr.service.js";
 import ocrQueueService from "../../services/ocrQueue.service.js";
+import razorpayService from "../../services/razorpay.service.js";
+import { config } from "../../config/index.js";
+import {
+  OCR_CREDIT_PACKS,
+  OCR_CREDIT_RATE_INR,
+  OCR_CREDITS_PER_PAGE,
+  OCR_CREDIT_GST_PERCENT,
+} from "../../constants/ocrCreditPacks.js";
 
 const caseDocumentController = {
   // UPLOAD DOCUMENT
@@ -489,7 +498,7 @@ const caseDocumentController = {
         return next(CustomErrorHandler.notFound("Document not found"));
       }
 
-      // Pre-check monthly OCR page limit from subscription
+      // Pre-check monthly and addon OCR credits from subscription
       const subscription = await db.query.tenantSubscriptions.findFirst({
         where: and(
           eq(tenantSubscriptions.tenantId, tenantId),
@@ -501,23 +510,24 @@ const caseDocumentController = {
       });
 
       const isInternal = subscription?.plan?.code === "internal";
-      const monthlyLimit = isInternal
-        ? 999999
-        : subscription?.plan?.monthlyOcrPages ?? 0;
-      const currentUsed = subscription?.ocrPagesUsedThisMonth ?? 0;
+      const monthlyCreditLimit = isInternal
+        ? 9999990
+        : (subscription?.plan?.monthlyOcrCredits ?? ((subscription?.plan?.monthlyOcrPages ?? 0) * OCR_CREDITS_PER_PAGE));
+      const monthlyPageLimit = Math.floor(monthlyCreditLimit / OCR_CREDITS_PER_PAGE);
+      const currentCreditsUsed = subscription?.ocrCreditsUsedThisMonth ?? ((subscription?.ocrPagesUsedThisMonth ?? 0) * OCR_CREDITS_PER_PAGE);
+      const currentPagesUsed = Math.floor(currentCreditsUsed / OCR_CREDITS_PER_PAGE);
+      const remainingMonthlyCredits = isInternal
+        ? 9999990
+        : Math.max(0, monthlyCreditLimit - currentCreditsUsed);
+      const addonCredits = subscription?.ocrAddonCredits ?? 0;
+      const totalAvailableCredits = isInternal
+        ? 9999990
+        : remainingMonthlyCredits + addonCredits;
 
-      if (!isInternal && monthlyLimit <= 0) {
+      if (!isInternal && totalAvailableCredits < OCR_CREDITS_PER_PAGE) {
         return next(
           CustomErrorHandler.forbidden(
-            "Your current subscription plan does not include OCR brief indexing. Upgrade to Professional (500 pages/mo) or Law Firm (1,500 pages/mo).",
-          ),
-        );
-      }
-
-      if (!isInternal && currentUsed >= monthlyLimit) {
-        return next(
-          CustomErrorHandler.forbidden(
-            `Monthly OCR page limit reached (${currentUsed}/${monthlyLimit} pages used). Please wait for next billing cycle or upgrade your plan.`,
+            `Insufficient OCR credits (${totalAvailableCredits} credits available). Each page requires ${OCR_CREDITS_PER_PAGE} credits. Please top up OCR credits (₹${OCR_CREDIT_RATE_INR}/credit) or upgrade your plan.`,
           ),
         );
       }
@@ -549,8 +559,11 @@ const caseDocumentController = {
           {
             documentId: id,
             ocrStatus: "pending",
-            monthlyLimit,
-            currentUsed,
+            monthlyLimit: monthlyPageLimit,
+            monthlyCreditLimit,
+            currentUsed: currentPagesUsed,
+            currentCreditsUsed,
+            totalAvailableCredits,
             queueStatus: ocrQueueService.getStatus(),
           },
         ),
@@ -561,7 +574,7 @@ const caseDocumentController = {
     }
   },
 
-  // GET TENANT OCR QUOTA & USAGE
+  // GET TENANT OCR QUOTA & USAGE (Credit basis: 10 credits / page)
   async getOcrQuota(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -582,19 +595,59 @@ const caseDocumentController = {
       });
 
       const isInternal = subscription?.plan?.code === "internal";
-      const monthlyLimit = isInternal
+      const monthlyCreditLimit = isInternal
+        ? 9999990
+        : (subscription?.plan?.monthlyOcrCredits ?? ((subscription?.plan?.monthlyOcrPages ?? 0) * OCR_CREDITS_PER_PAGE));
+      const monthlyPageLimit = Math.floor(monthlyCreditLimit / OCR_CREDITS_PER_PAGE);
+      let creditsUsed = subscription?.ocrCreditsUsedThisMonth ?? ((subscription?.ocrPagesUsedThisMonth ?? 0) * OCR_CREDITS_PER_PAGE);
+      let addonCredits = subscription?.ocrAddonCredits ?? 0;
+
+      // Check monthly cycle reset
+      if (subscription?.ocrCycleResetDate) {
+        const now = new Date();
+        const resetDate = new Date(subscription.ocrCycleResetDate);
+        if (now > resetDate) {
+          creditsUsed = 0;
+          addonCredits = 0;
+          const nextReset = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+          await db
+            .update(tenantSubscriptions)
+            .set({
+              ocrCreditsUsedThisMonth: 0,
+              ocrPagesUsedThisMonth: 0,
+              ocrAddonCredits: 0,
+              ocrCycleResetDate: nextReset.toISOString().split("T")[0],
+            })
+            .where(eq(tenantSubscriptions.id, subscription.id));
+        }
+      }
+
+      const pagesUsed = Math.floor(creditsUsed / OCR_CREDITS_PER_PAGE);
+      const remainingMonthlyCredits = isInternal
+        ? 9999990
+        : Math.max(0, monthlyCreditLimit - creditsUsed);
+      const totalAvailableCredits = isInternal
+        ? 9999990
+        : remainingMonthlyCredits + addonCredits;
+      const remainingPages = isInternal
         ? 999999
-        : subscription?.plan?.monthlyOcrPages ?? 0;
-      const pagesUsed = subscription?.ocrPagesUsedThisMonth ?? 0;
-      const remainingPages = Math.max(0, monthlyLimit - pagesUsed);
+        : Math.floor(totalAvailableCredits / OCR_CREDITS_PER_PAGE);
 
       return res.status(200).send(
         ResponseHandler(200, "OCR quota retrieved successfully", {
           planCode: subscription?.plan?.code || "none",
           planName: subscription?.plan?.name || "No Plan",
-          monthlyLimit,
+          monthlyLimit: monthlyPageLimit,
+          monthlyPageLimit,
+          monthlyCreditLimit,
           pagesUsed,
+          creditsUsed,
+          remainingMonthlyCredits,
+          addonCredits,
+          totalAvailableCredits,
           remainingPages,
+          ratePerCredit: OCR_CREDIT_RATE_INR,
+          creditsPerPage: OCR_CREDITS_PER_PAGE,
           resetDate:
             subscription?.ocrCycleResetDate ||
             subscription?.nextBillingDate ||
@@ -605,6 +658,167 @@ const caseDocumentController = {
     } catch (error) {
       console.error("Get OCR quota error:", error);
       return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  // GET OCR CREDIT PACKS & PRICING (₹2.00 / credit, 10 credits / page)
+  async getOcrCreditPacks(req: Request, res: Response, next: NextFunction) {
+    try {
+      return res.status(200).json({
+        success: true,
+        data: {
+          ratePerCredit: OCR_CREDIT_RATE_INR,
+          creditsPerPage: OCR_CREDITS_PER_PAGE,
+          gstPercent: OCR_CREDIT_GST_PERCENT,
+          packs: Object.values(OCR_CREDIT_PACKS),
+        },
+      });
+    } catch (err) {
+      console.error("[caseDocumentController.getOcrCreditPacks] Error:", err);
+      return next(CustomErrorHandler.serverError("Failed to fetch OCR credit packs"));
+    }
+  },
+
+  // CREATE RAZORPAY PAYMENT ORDER FOR OCR CREDITS
+  async createOcrCreditOrder(req: Request, res: Response, next: NextFunction) {
+    try {
+      const tenantId = req.user?.tenantId;
+      const userEmail = req.user?.email;
+
+      if (!tenantId) {
+        return next(CustomErrorHandler.unAuthorized("Tenant authentication missing"));
+      }
+
+      const { packId, customCredits } = req.body;
+      let credits = 0;
+      let baseAmount = 0;
+      let packName = "";
+
+      if (packId && OCR_CREDIT_PACKS[packId]) {
+        const pack = OCR_CREDIT_PACKS[packId];
+        credits = pack.credits;
+        baseAmount = pack.basePrice;
+        packName = pack.name;
+      } else if (customCredits && Number(customCredits) >= 10) {
+        credits = Math.round(Number(customCredits));
+        baseAmount = credits * OCR_CREDIT_RATE_INR;
+        packName = `Custom Pack (${credits} Credits / ${Math.floor(credits / OCR_CREDITS_PER_PAGE)} Pages)`;
+      } else {
+        return next(
+          CustomErrorHandler.badRequest(
+            "Please select a valid OCR credit pack or specify at least 10 credits.",
+          ),
+        );
+      }
+
+      const gstAmount = Math.round(baseAmount * (OCR_CREDIT_GST_PERCENT / 100) * 100) / 100;
+      const totalPayable = Math.round((baseAmount + gstAmount) * 100) / 100;
+      const amountInPaise = Math.round(totalPayable * 100);
+
+      const order = await razorpayService.createOrder({
+        amount: amountInPaise,
+        currency: "INR",
+        receipt: `ocr_cr_${Date.now().toString().slice(-8)}`,
+        notes: {
+          tenantId,
+          credits: credits.toString(),
+          type: "ocr_credit_addon",
+          userEmail: userEmail || "",
+        },
+      });
+
+      return res.status(200).send(
+        ResponseHandler(200, "OCR credit payment order created", {
+          orderId: order.id,
+          amount: totalPayable,
+          currency: "INR",
+          keyId: config.RAZORPAY_KEY_ID,
+          credits,
+          packName,
+          baseAmount,
+          gstAmount,
+        }),
+      );
+    } catch (err: unknown) {
+      console.error("[caseDocumentController.createOcrCreditOrder] Error:", err);
+      return next(CustomErrorHandler.serverError("Failed to initiate credit payment order"));
+    }
+  },
+
+  // VERIFY RAZORPAY PAYMENT FOR OCR CREDITS
+  async verifyOcrCreditPayment(req: Request, res: Response, next: NextFunction) {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return next(CustomErrorHandler.unAuthorized("Tenant ID missing"));
+      }
+
+      const {
+        razorpay_order_id,
+        razorpay_payment_id,
+        razorpay_signature,
+        credits,
+        amount,
+      } = req.body as {
+        razorpay_order_id: string;
+        razorpay_payment_id: string;
+        razorpay_signature: string;
+        credits: number;
+        amount: number;
+      };
+
+      if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !credits) {
+        return next(CustomErrorHandler.badRequest("Missing required payment verification fields"));
+      }
+
+      const isValid = razorpayService.verifyPayment({
+        razorpayOrderId: razorpay_order_id,
+        razorpayPaymentId: razorpay_payment_id,
+        razorpaySignature: razorpay_signature,
+      });
+
+      if (!isValid) {
+        return next(CustomErrorHandler.badRequest("Invalid payment signature verification"));
+      }
+
+      // Add credits to tenant subscription pool
+      await db
+        .update(tenantSubscriptions)
+        .set({
+          ocrAddonCredits: sql`${tenantSubscriptions.ocrAddonCredits} + ${credits}`,
+        })
+        .where(eq(tenantSubscriptions.tenantId, tenantId));
+
+      // Record in subscriptionPaymentHistory
+      const subtotal = Math.round(credits * OCR_CREDIT_RATE_INR * 100) / 100;
+      const gstAmount = Math.round(subtotal * (OCR_CREDIT_GST_PERCENT / 100) * 100) / 100;
+      const finalAmount = amount || Math.round((subtotal + gstAmount) * 100) / 100;
+      const pagesCount = Math.floor(credits / OCR_CREDITS_PER_PAGE);
+      const invoiceNumber = `INV-OCR-${Date.now().toString().slice(-8)}`;
+
+      await db.insert(subscriptionPaymentHistory).values({
+        tenantId,
+        invoiceNumber,
+        planId: null,
+        planName: `OCR Brief Addon: ${credits} Credits (${pagesCount} Pages) [+18% GST]`,
+        amount: finalAmount.toString(),
+        currency: "INR",
+        status: "paid",
+        paymentMethod: "razorpay",
+        receiptUrl: null,
+        transactionDate: new Date(),
+      });
+
+      return res.status(200).send(
+        ResponseHandler(200, `Successfully purchased ${credits} OCR credits (${pagesCount} Pages)!`, {
+          creditsAdded: credits,
+          pagesAdded: pagesCount,
+          invoiceNumber,
+        }),
+      );
+    } catch (err: unknown) {
+      console.error("[caseDocumentController.verifyOcrCreditPayment] Error:", err);
+      return next(CustomErrorHandler.serverError("Payment verification failed"));
     }
   },
 

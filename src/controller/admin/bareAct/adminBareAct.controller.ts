@@ -276,10 +276,14 @@ export const adminBareActController = {
         return res.status(400).json(ResponseHandler(400, "A valid actSlug is required to preview an enactment"));
       }
 
-      let result: any;
+      let result: Record<string, unknown> & {
+        act?: Record<string, unknown>;
+        count?: number;
+        sections?: Record<string, unknown>[];
+      };
       try {
-        result = await indiaCodeService.getActOverview(cleanSlug);
-      } catch (err: any) {
+        result = (await indiaCodeService.getActOverview(cleanSlug)) as unknown as typeof result;
+      } catch (err: unknown) {
         // Fallback: check if act already exists in local DB
         const dbAct = await db.query.bareActs.findFirst({
           where: eq(bareActs.slug, cleanSlug),
@@ -305,7 +309,7 @@ export const adminBareActController = {
               ministry: dbAct.ministry || null,
               jurisdiction: dbAct.jurisdiction || "Central",
               totalSections: dbAct.totalSections || sections.length,
-              sections: sections.map((sec: any) => ({
+              sections: sections.map((sec) => ({
                 number: sec.sectionNumber?.replace(/^(Section|Article)\s+/i, "") || sec.sectionNumber,
                 sectionNumber: sec.sectionNumber,
                 title: sec.title || `Section ${sec.sectionNumber}`,
@@ -333,7 +337,7 @@ export const adminBareActController = {
         ministry: result.act?.ministry || null,
         jurisdiction: result.act?.jurisdiction || "Central",
         totalSections: result.act?.section_count || result.count || result.sections?.length || 0,
-        sections: (result.sections || []).map((sec: any) => ({
+        sections: (result.sections || []).map((sec) => ({
           ...sec,
           number: sec.number,
           sectionNumber: sec.number,

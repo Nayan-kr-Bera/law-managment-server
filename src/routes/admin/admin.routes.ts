@@ -9,6 +9,7 @@ import {
   adminSupportController,
   adminAuditController,
   adminBareActController,
+  adminJudgmentController,
 } from "../../controller/admin/index.js";
 import adminAuth from "../../middleware/adminAuth.js";
 import { adminPermissionGuard } from "../../middleware/permission.js";
@@ -115,6 +116,16 @@ router.post("/bare-acts/seed-library", adminAuth, adminPermissionGuard("admin.ba
 router.get("/bare-acts/indiacode/search", adminAuth, adminPermissionGuard("admin.bare_acts.read"), adminBareActController.searchIndiaCode);
 router.get("/bare-acts/indiacode/preview/:actSlug", adminAuth, adminPermissionGuard("admin.bare_acts.read"), adminBareActController.previewIndiaCodeAct);
 router.post("/bare-acts/indiacode/import", adminAuth, adminPermissionGuard("admin.bare_acts.manage"), adminBareActController.importFromIndiaCode);
+
+/* =========================================================================
+   COURT JUDGMENTS MANAGEMENT & SEEDING
+   ========================================================================= */
+router.get("/judgments", adminAuth, adminPermissionGuard("admin.bare_acts.read"), adminJudgmentController.getJudgments);
+router.post("/judgments", adminAuth, adminPermissionGuard("admin.bare_acts.manage"), adminJudgmentController.createJudgment);
+router.put("/judgments/:id", adminAuth, adminPermissionGuard("admin.bare_acts.manage"), adminJudgmentController.updateJudgment);
+router.delete("/judgments/:id", adminAuth, adminPermissionGuard("admin.bare_acts.manage"), adminJudgmentController.deleteJudgment);
+router.post("/judgments/seed-landmark", adminAuth, adminPermissionGuard("admin.bare_acts.manage"), adminJudgmentController.seedLandmarkJudgments);
+router.post("/judgments/import-ecourts", adminAuth, adminPermissionGuard("admin.bare_acts.manage"), adminJudgmentController.importFromEcourts);
 
 export default router;
 

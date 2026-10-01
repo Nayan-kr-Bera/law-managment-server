@@ -65,7 +65,8 @@ CRITICAL DRAFTING REQUIREMENTS:
    - Do NOT invent false names, dates, or FIR numbers. If a specific detail is omitted in the prompt, use standard legal brackets like "[Date of Incident]" or "[Police Station Name]".
 
 4. **OUTPUT FORMAT**:
-   - Provide the clean, formatted legal document directly.
+   - Provide the clean, formatted legal document directly without raw markdown asterisks (do NOT write **word** or ***). 
+   - Use standard Indian Court pleading conventions: UPPERCASE for main court titles, party headings, and prayer clauses; clean numbered paragraphs (1., 2., 3.); and clear line breaks.
    - Do not include conversational filler like "Sure, here is your draft" before or after the text.`;
   }
 

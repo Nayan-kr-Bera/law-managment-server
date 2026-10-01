@@ -235,7 +235,7 @@ const adminSupportController = {
         return next(CustomErrorHandler.notFound("Support ticket not found"));
       }
 
-      const adminUser = (req as any).user;
+      const adminUser = (req as Request & { user?: { id?: string; name?: string } }).user;
       const senderName = adminUser?.name || "Support Specialist";
 
       // 1. Insert reply message

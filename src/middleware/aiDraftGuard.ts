@@ -18,6 +18,8 @@ declare global {
   }
 }
 
+export const CREDITS_PER_AI_DRAFT = 10;
+
 export const aiDraftGuard = async (
   req: Request,
   res: Response,
@@ -64,21 +66,25 @@ export const aiDraftGuard = async (
           .update(tenantSubscriptions)
           .set({
             aiDraftsUsedThisMonth: 0,
+            aiDraftAddonCredits: 0,
             aiDraftCycleResetDate: nextReset.toISOString().split("T")[0],
           })
           .where(eq(tenantSubscriptions.id, subscription.id));
 
         currentUsed = 0;
+        if (req.user) {
+          (req as Request & { addonCredits?: number }).addonCredits = 0;
+        }
       }
     }
 
     const remainingMonthly = Math.max(0, monthlyLimit - currentUsed);
     const totalRemaining = isInternal ? 999999 : remainingMonthly + addonCredits;
 
-    if (!isInternal && totalRemaining <= 0) {
+    if (!isInternal && totalRemaining < CREDITS_PER_AI_DRAFT) {
       return next(
         CustomErrorHandler.forbidden(
-          `You have exhausted your AI Draft quota (${currentUsed}/${monthlyLimit} used, 0 add-on credits). Purchase an add-on pack or upgrade your plan to continue drafting.`,
+          `You need at least ${CREDITS_PER_AI_DRAFT} AI credits to generate a draft (${totalRemaining} remaining). Purchase an add-on pack or upgrade your plan to continue drafting.`,
         ),
       );
     }

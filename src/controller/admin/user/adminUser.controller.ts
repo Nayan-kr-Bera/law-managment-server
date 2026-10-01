@@ -344,7 +344,7 @@ const adminUserController = {
         });
 
         // 5. User Permissions
-        const currentAdminId = (req as any).user?.id || null;
+        const currentAdminId = (req as Request & { user?: { id?: string } }).user?.id || null;
         if (!isSuperAdminRequested && Array.isArray(grantedCodes) && grantedCodes.length > 0) {
           const dbPerms = await tx.query.permissions.findMany({
             where: inArray(permissions.code, grantedCodes),
@@ -386,15 +386,16 @@ const adminUserController = {
           role: createdUser.roleName,
         })
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Admin create user error:", error);
-      if (error?.code === "23505") {
+      const err = error as { code?: string; message?: string };
+      if (err?.code === "23505") {
         return next(CustomErrorHandler.badRequest("A user with this email or phone number already exists"));
       }
-      if (error?.code === "22001") {
+      if (err?.code === "22001") {
         return next(CustomErrorHandler.badRequest("One of the provided fields exceeds the maximum allowed length"));
       }
-      return next(CustomErrorHandler.serverError(error?.message || "Failed to create administrator"));
+      return next(CustomErrorHandler.serverError(err?.message || "Failed to create administrator"));
     }
   },
 
@@ -426,7 +427,7 @@ const adminUserController = {
       }
 
       await ensureAdminPermissionsInDb();
-      const currentAdminId = (req as any).user?.id || null;
+      const currentAdminId = (req as Request & { user?: { id?: string } }).user?.id || null;
       const isSuperAdminRequested = roleSlug === "super_admin";
 
       await db.transaction(async (tx) => {

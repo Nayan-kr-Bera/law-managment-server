@@ -7,6 +7,7 @@ import {
 } from "../db/schema/index.js";
 import ocrService from "./ocr.service.js";
 import ocrEmailService from "./ocrEmail.service.js";
+import { OCR_CREDITS_PER_PAGE } from "../constants/ocrCreditPacks.js";
 
 export interface OcrJobPayload {
   documentId: string;
@@ -92,7 +93,7 @@ class OcrQueueService {
       })
       .where(eq(caseDocuments.id, documentId));
 
-    // Step 3: Fetch active subscription and verify page limit
+    // Step 3: Fetch active subscription and verify credit limit
     const subscription = await db.query.tenantSubscriptions.findFirst({
       where: and(
         eq(tenantSubscriptions.tenantId, tenantId),
@@ -104,37 +105,47 @@ class OcrQueueService {
     });
 
     const isInternal = subscription?.plan?.code === "internal";
-    const monthlyLimit = isInternal
-      ? 999999
-      : subscription?.plan?.monthlyOcrPages ?? 0;
+    const monthlyCreditLimit = isInternal
+      ? 9999990
+      : (subscription?.plan?.monthlyOcrCredits ?? ((subscription?.plan?.monthlyOcrPages ?? 0) * OCR_CREDITS_PER_PAGE));
+    const monthlyPageLimit = Math.floor(monthlyCreditLimit / OCR_CREDITS_PER_PAGE);
 
-    let currentUsed = subscription?.ocrPagesUsedThisMonth ?? 0;
+    let currentCreditsUsed = subscription?.ocrCreditsUsedThisMonth ?? ((subscription?.ocrPagesUsedThisMonth ?? 0) * OCR_CREDITS_PER_PAGE);
 
     // Check if monthly cycle reset is needed
     if (subscription?.ocrCycleResetDate) {
       const now = new Date();
       const resetDate = new Date(subscription.ocrCycleResetDate);
       if (now > resetDate) {
-        currentUsed = 0;
+        currentCreditsUsed = 0;
         // Next reset date: 30 days from now
         const nextReset = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
         await db
           .update(tenantSubscriptions)
           .set({
+            ocrCreditsUsedThisMonth: 0,
             ocrPagesUsedThisMonth: 0,
+            ocrAddonCredits: 0,
             ocrCycleResetDate: nextReset.toISOString().split("T")[0],
           })
           .where(eq(tenantSubscriptions.id, subscription.id));
       }
     }
 
-    const remainingPages = isInternal
-      ? 999999
-      : Math.max(0, monthlyLimit - currentUsed);
+    const remainingMonthlyCredits = isInternal
+      ? 9999990
+      : Math.max(0, monthlyCreditLimit - currentCreditsUsed);
+    const addonCredits = subscription?.ocrAddonCredits ?? 0;
+    const totalAvailableCredits = isInternal
+      ? 9999990
+      : remainingMonthlyCredits + addonCredits;
+    const maxPagesAllowed = isInternal
+      ? undefined
+      : Math.floor(totalAvailableCredits / OCR_CREDITS_PER_PAGE);
 
-    // Quick limit check before heavy processing
-    if (!isInternal && remainingPages <= 0) {
-      const errorMsg = `Monthly OCR page limit reached (${currentUsed}/${monthlyLimit} pages used). Upgrade your plan to index more pages.`;
+    // Limit check: must have at least 10 credits (for 1 page)
+    if (!isInternal && (totalAvailableCredits < OCR_CREDITS_PER_PAGE || (maxPagesAllowed ?? 0) <= 0)) {
+      const errorMsg = `Insufficient OCR credits (${totalAvailableCredits} credits available). Each page requires ${OCR_CREDITS_PER_PAGE} OCR credits. Please top up your OCR credits.`;
       console.warn(`[ocrQueue] Quota exceeded for tenant ${tenantId}: ${errorMsg}`);
       
       await db
@@ -156,20 +167,24 @@ class OcrQueueService {
       return;
     }
 
-    // Step 4: Perform OCR extraction up to remaining monthly pages quota
+    // Step 4: Perform OCR extraction up to allowed pages
     try {
       const result = await ocrService.processDocument({
         fileUrl: doc.fileUrl,
         fileName: doc.originalName || doc.fileName,
         mimeType: doc.mimeType,
         language,
-        maxPages: isInternal ? undefined : remainingPages,
+        maxPages: isInternal ? undefined : maxPagesAllowed,
       });
 
       const totalDocPages = result.totalPages || 1;
       const pagesProcessed = result.pagesProcessed || 1;
       const pagesSkipped = result.pagesSkipped || 0;
-      const warningMessage = result.warning || null;
+      const creditsCost = pagesProcessed * OCR_CREDITS_PER_PAGE;
+      const warningMessage =
+        pagesSkipped > 0
+          ? `Processed first ${pagesProcessed} of ${totalDocPages} pages (${creditsCost} OCR credits used). Last ${pagesSkipped} pages were skipped due to available credit limit.`
+          : (result.warning || null);
 
       // Step 5: Update document record with extracted text, page count & warning if partial
       await db
@@ -185,19 +200,28 @@ class OcrQueueService {
         })
         .where(eq(caseDocuments.id, documentId));
 
-      // Step 6: Deduct only pagesProcessed from subscription usage
+      // Step 6: Deduct credits: First from monthly quota, then from addon credits
       if (subscription && !isInternal) {
+        const fromMonthlyCredits = Math.min(remainingMonthlyCredits, creditsCost);
+        const fromAddonCredits = creditsCost - fromMonthlyCredits;
+        const pagesToAddToMonthly = Math.ceil(fromMonthlyCredits / OCR_CREDITS_PER_PAGE);
+
         await db
           .update(tenantSubscriptions)
           .set({
-            ocrPagesUsedThisMonth: sql`${tenantSubscriptions.ocrPagesUsedThisMonth} + ${pagesProcessed}`,
+            ocrCreditsUsedThisMonth: sql`${tenantSubscriptions.ocrCreditsUsedThisMonth} + ${fromMonthlyCredits}`,
+            ocrPagesUsedThisMonth: sql`${tenantSubscriptions.ocrPagesUsedThisMonth} + ${pagesToAddToMonthly}`,
+            ...(fromAddonCredits > 0
+              ? {
+                  ocrAddonCredits: sql`GREATEST(0, ${tenantSubscriptions.ocrAddonCredits} - ${fromAddonCredits})`,
+                }
+              : {}),
           })
           .where(eq(tenantSubscriptions.id, subscription.id));
       }
 
-      const updatedUsed = currentUsed + pagesProcessed;
       console.log(
-        `[ocrQueue] OCR completed for ${doc.fileName}: ${pagesProcessed} of ${totalDocPages} pages processed (${pagesSkipped} skipped). Quota: ${updatedUsed}/${monthlyLimit}`,
+        `[ocrQueue] OCR completed for ${doc.fileName}: ${pagesProcessed} of ${totalDocPages} pages (${creditsCost} credits consumed).`,
       );
 
       // Step 7: Send completion email to user (includes partial warning if any pages were skipped)
@@ -210,8 +234,8 @@ class OcrQueueService {
           totalPages: totalDocPages,
           pagesSkipped,
           charCount: result.charCount,
-          monthlyPagesUsed: updatedUsed,
-          monthlyPagesLimit: monthlyLimit,
+          monthlyPagesUsed: Math.floor(currentCreditsUsed / OCR_CREDITS_PER_PAGE) + pagesProcessed,
+          monthlyPagesLimit: monthlyPageLimit,
           previewText: result.text,
           documentUrl: doc.fileUrl,
           warning: warningMessage || undefined,

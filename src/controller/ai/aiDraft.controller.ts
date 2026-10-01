@@ -121,24 +121,36 @@ const aiDraftController = {
         additionalInstructions,
       });
 
-      // Deduct quota
+      // Deduct quota (10 credits per draft)
+      const DRAFT_CREDIT_COST = 10;
       const quota = req.aiDraftQuota;
       if (quota && !quota.isInternal) {
         const remainingMonthly = Math.max(0, quota.monthlyLimit - quota.currentUsed);
-        if (remainingMonthly > 0) {
-          // Use from monthly quota
+        if (remainingMonthly >= DRAFT_CREDIT_COST) {
+          // Deduct full 10 credits from monthly quota
           await db
             .update(tenantSubscriptions)
             .set({
-              aiDraftsUsedThisMonth: sql`${tenantSubscriptions.aiDraftsUsedThisMonth} + 1`,
+              aiDraftsUsedThisMonth: sql`${tenantSubscriptions.aiDraftsUsedThisMonth} + ${DRAFT_CREDIT_COST}`,
             })
             .where(eq(tenantSubscriptions.id, quota.subscriptionId));
-        } else if (quota.addonCredits > 0) {
-          // Use from add-on credit pack
+        } else if (remainingMonthly > 0) {
+          // Partial from monthly, remainder from addon credits
+          const fromMonthly = remainingMonthly;
+          const fromAddon = DRAFT_CREDIT_COST - fromMonthly;
           await db
             .update(tenantSubscriptions)
             .set({
-              aiDraftAddonCredits: sql`GREATEST(0, ${tenantSubscriptions.aiDraftAddonCredits} - 1)`,
+              aiDraftsUsedThisMonth: sql`${tenantSubscriptions.aiDraftsUsedThisMonth} + ${fromMonthly}`,
+              aiDraftAddonCredits: sql`GREATEST(0, ${tenantSubscriptions.aiDraftAddonCredits} - ${fromAddon})`,
+            })
+            .where(eq(tenantSubscriptions.id, quota.subscriptionId));
+        } else {
+          // Deduct full 10 credits from addon credits
+          await db
+            .update(tenantSubscriptions)
+            .set({
+              aiDraftAddonCredits: sql`GREATEST(0, ${tenantSubscriptions.aiDraftAddonCredits} - ${DRAFT_CREDIT_COST})`,
             })
             .where(eq(tenantSubscriptions.id, quota.subscriptionId));
         }
@@ -198,8 +210,31 @@ const aiDraftController = {
 
       const isInternal = subscription?.plan?.code === "internal";
       const monthlyLimit = isInternal ? 999999 : (subscription?.plan?.monthlyAiDrafts ?? 0);
-      const usedThisMonth = subscription?.aiDraftsUsedThisMonth ?? 0;
-      const addonCredits = subscription?.aiDraftAddonCredits ?? 0;
+      let usedThisMonth = subscription?.aiDraftsUsedThisMonth ?? 0;
+      let addonCredits = subscription?.aiDraftAddonCredits ?? 0;
+
+      // Check monthly cycle reset
+      if (subscription?.aiDraftCycleResetDate) {
+        const resetDate = new Date(subscription.aiDraftCycleResetDate);
+        const now = new Date();
+        if (now >= resetDate) {
+          const nextReset = new Date(now);
+          nextReset.setMonth(nextReset.getMonth() + 1);
+
+          await db
+            .update(tenantSubscriptions)
+            .set({
+              aiDraftsUsedThisMonth: 0,
+              aiDraftAddonCredits: 0,
+              aiDraftCycleResetDate: nextReset.toISOString().split("T")[0],
+            })
+            .where(eq(tenantSubscriptions.id, subscription.id));
+
+          usedThisMonth = 0;
+          addonCredits = 0;
+        }
+      }
+
       const remainingMonthly = Math.max(0, monthlyLimit - usedThisMonth);
       const totalRemaining = isInternal ? 999999 : remainingMonthly + addonCredits;
 

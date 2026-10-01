@@ -45,7 +45,8 @@ const subscriptionPlans = pgTable("subscription_plans", {
 
   maxStorageGb: integer("max_storage_gb").notNull(),
 
-  monthlyOcrPages: integer("monthly_ocr_pages").notNull().default(0),
+  monthlyOcrCredits: integer("monthly_ocr_credits").notNull().default(0),
+  monthlyOcrPages: integer("monthly_ocr_pages").default(0),
 
   monthlyAiDrafts: integer("monthly_ai_drafts").notNull().default(0),
 

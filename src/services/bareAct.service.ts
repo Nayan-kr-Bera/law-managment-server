@@ -5,6 +5,7 @@ import {
   bareActChapters,
   bareActSections,
   bareActSchedules,
+  type ICrossReferenceInfo,
 } from "../db/schema/index.js";
 import {
   bareActCategoryEnum,
@@ -1828,10 +1829,10 @@ export class BareActService {
       throw new AppError("Section not found", 404);
     }
 
-    const existingJudgments = ((section.crossReferences as any)?.landmarkJudgments || []) as any[];
+    const existingJudgments = (((section.crossReferences as Record<string, unknown> | null)?.landmarkJudgments || []) as Record<string, unknown>[]);
 
     // If existing judgments in DB already have CNR or official URL, return them directly
-    const hasDetailedJudgments = existingJudgments.some((j) => j.cnr || j.url);
+    const hasDetailedJudgments = existingJudgments.some((j) => Boolean(j.cnr || j.url));
     if (hasDetailedJudgments) {
       return existingJudgments;
     }
@@ -1843,9 +1844,9 @@ export class BareActService {
       )}&section=${encodeURIComponent(cleanNumber)}`;
       const resp = await fetch(url, { redirect: "follow" });
       if (resp.ok) {
-        const json = (await resp.json()) as any;
+        const json = (await resp.json()) as { judgments?: Record<string, unknown>[]; source?: string };
         if (json.judgments && json.judgments.length > 0) {
-          const enrichedJudgments = json.judgments.map((j: any) => ({
+          const enrichedJudgments = json.judgments.map((j) => ({
             title: j.title,
             citation: j.citation,
             cnr: j.cnr,
@@ -1869,8 +1870,8 @@ export class BareActService {
             .update(bareActSections)
             .set({
               crossReferences: {
-                ...(section.crossReferences as any),
-                landmarkJudgments: enrichedJudgments,
+                ...((section.crossReferences as Record<string, unknown>) || {}),
+                landmarkJudgments: enrichedJudgments as unknown as ICrossReferenceInfo["landmarkJudgments"],
               },
             })
             .where(eq(bareActSections.id, section.id));

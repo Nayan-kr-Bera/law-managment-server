@@ -148,18 +148,21 @@ class IndiaCodeService {
       throw new AppError(`IndiaCode API error: ${response.statusText}`, response.status);
     }
 
-    const data = (await response.json()) as any;
-    const rawActs = (data.acts || []) as any[];
+    const data = (await response.json()) as {
+      acts?: Array<Record<string, unknown>>;
+      total?: number;
+      next?: string | null;
+    };
+    const rawActs = data.acts || [];
 
     // Normalize acts so both eCourts standard keys and frontend client keys are always present
     const acts: IIndiaCodeSearchResult[] = rawActs.map((a) => {
-      const actId = a.id || a.slug || "";
-      const actTitle = a.short_title || a.title || "Statutory Act";
-      const actNum = a.act_number || a.actNumber || null;
-      const actYr = a.act_year || a.actYear || null;
-      const secCount = a.section_count ?? a.totalSections ?? 0;
+      const actId = String(a.id || a.slug || "");
+      const actTitle = String(a.short_title || a.title || "Statutory Act");
+      const actNum = a.act_number ? String(a.act_number) : (a.actNumber ? String(a.actNumber) : undefined);
+      const actYr = typeof a.act_year === "number" ? a.act_year : (typeof a.actYear === "number" ? a.actYear : undefined);
+      const secCount = Number(a.section_count ?? a.totalSections ?? 0);
       return {
-        ...a,
         id: actId,
         slug: actId,
         short_title: actTitle,
@@ -170,9 +173,9 @@ class IndiaCodeService {
         actYear: actYr,
         section_count: secCount,
         totalSections: secCount,
-        jurisdiction: a.jurisdiction || "Central",
-        ministry: a.ministry || null,
-        url: a.url || "",
+        jurisdiction: a.jurisdiction ? String(a.jurisdiction) : "Central",
+        ministry: a.ministry ? String(a.ministry) : undefined,
+        url: a.url ? String(a.url) : "",
       };
     });
 

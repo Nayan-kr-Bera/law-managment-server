@@ -883,7 +883,7 @@ const adminTenantController = {
             email: officeEmail || targetUser.email || null,
             isHeadOffice: true,
             isActive: true,
-            createdBy: (req as any).user?.id || targetUser.id,
+            createdBy: (req as Request & { user?: { id?: string } }).user?.id || targetUser.id,
           })
           .returning();
 
@@ -901,7 +901,7 @@ const adminTenantController = {
             userId: targetUser.id,
             tenantId: newTenant.id,
             isDefault,
-            createdBy: (req as any).user?.id || null,
+            createdBy: (req as Request & { user?: { id?: string } }).user?.id || null,
           })
           .returning();
 
@@ -909,7 +909,7 @@ const adminTenantController = {
         await tx.insert(userScopeOffices).values({
           userScopeId: newScope.id,
           officeId: newOffice.id,
-          createdBy: (req as any).user?.id || null,
+          createdBy: (req as Request & { user?: { id?: string } }).user?.id || null,
         });
 
         // 4.6 Assign tenant_admin role to user for this workspace
@@ -1000,7 +1000,7 @@ const adminTenantController = {
       await auditLogService.record({
         tenantId: transactionResult.tenant.id,
         officeId: transactionResult.office.id,
-        userId: (req as any).user?.id || null,
+        userId: (req as Request & { user?: { id?: string } }).user?.id || null,
         entity: "Tenants",
         entityId: transactionResult.tenant.id,
         action: "PROVISION_CUSTOMER_ORGANIZATION",

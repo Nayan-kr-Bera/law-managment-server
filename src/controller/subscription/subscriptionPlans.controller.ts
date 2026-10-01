@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { NextFunction, Request, Response } from "express";
 import db from "../../db/index.js";
 import { subscriptionPlans } from "../../db/schema/index.js";
@@ -9,11 +9,18 @@ const subscriptionPlanController = {
   // GET ALL PLANS
   async getPlans(req: Request, res: Response, next: NextFunction) {
     try {
-      const { all, includeInternal } = req.query;
+      const { all, includeInternal, includeTrial } = req.query;
       const showAll = all === "true" || includeInternal === "true";
+      const allowTrial = showAll || includeTrial === "true";
 
       const plans = await db.query.subscriptionPlans.findMany({
-        where: showAll ? undefined : eq(subscriptionPlans.isInternal, false),
+        where: showAll
+          ? undefined
+          : and(
+              eq(subscriptionPlans.isActive, true),
+              eq(subscriptionPlans.isInternal, false),
+              ne(subscriptionPlans.code, "free_trial")
+            ),
 
         orderBy: (subscriptionPlans, { asc }) => [
           asc(subscriptionPlans.monthlyPrice),
@@ -21,7 +28,9 @@ const subscriptionPlanController = {
         ],
       });
 
-      const formattedPlans = plans.map((p) => ({
+      const formattedPlans = plans
+        .filter((p) => (allowTrial ? true : p.isActive && p.code !== "free_trial" && !p.code.toLowerCase().includes("trial")))
+        .map((p) => ({
         ...p,
         monthlyPrice: Number(p.monthlyPrice || 0),
         annualPrice: Number(p.annualPrice || 0),
@@ -29,14 +38,16 @@ const subscriptionPlanController = {
         maxUsers: p.maxUsers,
         maxOffices: p.maxOffices,
         maxStorageGb: p.maxStorageGb,
-        monthlyOcrPages: p.monthlyOcrPages ?? 0,
+        monthlyOcrCredits: p.monthlyOcrCredits ?? (p.monthlyOcrPages ? p.monthlyOcrPages * 10 : 0),
+        monthlyOcrPages: p.monthlyOcrPages ?? Math.floor((p.monthlyOcrCredits ?? 0) / 10),
         monthlyAiDrafts: p.monthlyAiDrafts ?? 0,
         limits: {
           maxOffices: p.maxOffices || 1,
           maxAdvocates: p.maxUsers || 5,
           maxCases: 500,
           maxStorageGB: p.maxStorageGb || 10,
-          monthlyOcrPages: p.monthlyOcrPages ?? 0,
+          monthlyOcrCredits: p.monthlyOcrCredits ?? (p.monthlyOcrPages ? p.monthlyOcrPages * 10 : 0),
+          monthlyOcrPages: p.monthlyOcrPages ?? Math.floor((p.monthlyOcrCredits ?? 0) / 10),
           monthlyAiDrafts: p.monthlyAiDrafts ?? 0,
           aiDraftsPerMonth: p.monthlyAiDrafts ?? 0,
         },
@@ -101,6 +112,7 @@ const subscriptionPlanController = {
         maxAdvocates,
         maxOffices,
         maxStorageGb,
+        monthlyOcrCredits,
         monthlyOcrPages,
         monthlyAiDrafts,
         features,
@@ -181,7 +193,12 @@ const subscriptionPlanController = {
 
           maxStorageGb: Number(maxStorageGb),
 
-          monthlyOcrPages: Number(monthlyOcrPages ?? 0),
+          monthlyOcrCredits: Number(
+            monthlyOcrCredits ?? (monthlyOcrPages ? Number(monthlyOcrPages) * 10 : 0),
+          ),
+          monthlyOcrPages: Number(
+            monthlyOcrPages ?? (monthlyOcrCredits ? Math.floor(Number(monthlyOcrCredits) / 10) : 0),
+          ),
 
           monthlyAiDrafts: Number(monthlyAiDrafts ?? 0),
 
@@ -240,6 +257,7 @@ const subscriptionPlanController = {
         maxOffices,
         maxStorageGb,
         maxStorageGB,
+        monthlyOcrCredits,
         monthlyOcrPages,
         monthlyAiDrafts,
         features,
@@ -276,8 +294,13 @@ const subscriptionPlanController = {
             : maxStorageGB !== undefined
             ? { maxStorageGb: Number(maxStorageGB) }
             : {}),
-          ...(monthlyOcrPages !== undefined && {
+          ...(monthlyOcrCredits !== undefined && {
+            monthlyOcrCredits: Number(monthlyOcrCredits),
+            monthlyOcrPages: Math.floor(Number(monthlyOcrCredits) / 10),
+          }),
+          ...(monthlyOcrPages !== undefined && monthlyOcrCredits === undefined && {
             monthlyOcrPages: Number(monthlyOcrPages),
+            monthlyOcrCredits: Number(monthlyOcrPages) * 10,
           }),
           ...(monthlyAiDrafts !== undefined && {
             monthlyAiDrafts: Number(monthlyAiDrafts),

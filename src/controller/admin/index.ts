@@ -7,4 +7,5 @@ export { default as adminUserController } from "./user/adminUser.controller.js";
 export { default as adminSupportController } from "./support/adminSupport.controller.js";
 export { default as adminAuditController } from "./audit/adminAudit.controller.js";
 export { default as adminBareActController } from "./bareAct/adminBareAct.controller.js";
+export { default as adminJudgmentController } from "./judgment/adminJudgment.controller.js";
 

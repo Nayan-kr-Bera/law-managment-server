@@ -59,9 +59,16 @@ const tenantSubscriptions = pgTable(
 
     autoRenew: boolean("auto_renew").notNull().default(true),
 
-    // OCR MONTHLY USAGE (Page based)
+    // OCR MONTHLY USAGE & CREDITS (10 credits per page)
+
+    ocrCreditsUsedThisMonth: integer("ocr_credits_used_this_month")
+      .notNull()
+      .default(0),
 
     ocrPagesUsedThisMonth: integer("ocr_pages_used_this_month")
+      .default(0),
+
+    ocrAddonCredits: integer("ocr_addon_credits")
       .notNull()
       .default(0),
 

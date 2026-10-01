@@ -45,6 +45,7 @@ import {
   notificationRoutes,
   adminRoutes,
   bareActRoutes,
+  judgmentAiRoutes,
 } from "./routes/index.js";
 
 const app = express();
@@ -122,7 +123,6 @@ app.use("/api/system", systemAlartsRoutes);
 app.use("/api/subscriptionPayment", subscriptionPaymentRoutes);
 app.use("/api/subscription-payments", subscriptionPaymentRoutes);
 app.use("/api/subscriptions", subscriptionPlanRoutes);
-app.use("/api/subscription-plans", subscriptionPlanRoutes);
 app.use("/api/tenantsubscription", tenantsubscriptionRoutes);
 app.use("/api/tenant-subscription", tenantsubscriptionRoutes);
 app.use("/api/document", documentsRoutes);
@@ -136,6 +136,7 @@ app.use("/api/ai", aiDraftRoutes);
 app.use("/api/audit-logs", auditLogRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/bare-acts", bareActRoutes);
+app.use("/api/judgment-ai", judgmentAiRoutes);
 
 /* ---------- Admin Portal Routes ---------- */
 
