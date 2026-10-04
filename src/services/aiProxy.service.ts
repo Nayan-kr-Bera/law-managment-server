@@ -27,7 +27,7 @@ export interface StreamChatParams {
 }
 
 export class AiProxyService {
-  private getClient(): OpenAI | null {
+  public getClient(): OpenAI | null {
     const apiKey = config.OPENAI_API_KEY || (config.OPENAI_BASE_URL ? "ollama" : "");
     if (!apiKey || apiKey.trim() === "") {
       return null;

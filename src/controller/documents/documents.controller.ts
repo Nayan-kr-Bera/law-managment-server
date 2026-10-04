@@ -922,6 +922,46 @@ const caseDocumentController = {
       return next(CustomErrorHandler.serverError());
     }
   },
+
+  // GET DOCUMENT BY ID (with OCR text & Case context)
+  async getDocumentById(req: Request, res: Response, next: NextFunction) {
+    try {
+      const tenantId = req.user?.tenantId || null;
+      const { id } = req.params;
+
+      if (!id) {
+        return next(CustomErrorHandler.badRequest("Document ID is required"));
+      }
+
+      const doc = await db.query.caseDocuments.findFirst({
+        where: and(
+          eq(caseDocuments.id, id),
+          tenantId ? eq(caseDocuments.tenantId, tenantId) : undefined,
+        ),
+        with: {
+          case: {
+            columns: {
+              id: true,
+              caseNumber: true,
+              title: true,
+              courtId: true,
+            },
+          },
+        },
+      });
+
+      if (!doc) {
+        return next(CustomErrorHandler.notFound("Document not found"));
+      }
+
+      return res.status(200).send(
+        ResponseHandler(200, "Document fetched successfully", doc),
+      );
+    } catch (error) {
+      console.error("Get document by ID error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
 };
 
 export default caseDocumentController;

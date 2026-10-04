@@ -6,6 +6,7 @@ import {
   boolean,
   timestamp,
   text,
+  jsonb,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -84,6 +85,8 @@ const caseDocuments = pgTable("case_documents", {
   ocrError: varchar("ocr_error", {
     length: 500,
   }),
+
+  intelligenceData: jsonb("intelligence_data"),
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
