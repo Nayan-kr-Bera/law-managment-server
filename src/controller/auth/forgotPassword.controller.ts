@@ -68,9 +68,9 @@ const forgotPasswordController = {
     if (!parsed.success) {
       return next(parsed.error);
     }
-    const userId = req.user.userId;
+    const userId = req.user?.userId;
     if (!userId) {
-      return res.status(404).send(ResponseHandler(404, "User Id not found"));
+      return res.status(401).send(ResponseHandler(401, "User session not authenticated"));
     }
     const { current_password, password } = req.body;
     try {
@@ -89,8 +89,8 @@ const forgotPasswordController = {
       );
       if (!isMatch) {
         return res
-          .status(200)
-          .send(ResponseHandler(200, "Incorrect current password"));
+          .status(400)
+          .send(ResponseHandler(400, "Incorrect current password"));
       }
 
       // Hash the new password

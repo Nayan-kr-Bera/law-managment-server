@@ -235,6 +235,7 @@ const loginController = {
             email: clientUser.email,
             email_verified: clientUser.isEmailVerified,
             phone_verified: clientUser.isPhoneVerified,
+            avatar: clientUser.avatar || null,
             isTenantAdmin,
           },
           roles: roleData,

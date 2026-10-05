@@ -106,9 +106,9 @@ const advocatesController = {
           role:
             scope.roles.length > 0
               ? {
-                  id: scope.roles[0].role.id,
-                  name: scope.roles[0].role.name,
-                }
+                id: scope.roles[0].role.id,
+                name: scope.roles[0].role.name,
+              }
               : null,
 
           offices: scope.offices.map((item) => ({
@@ -893,7 +893,7 @@ const advocatesController = {
           id: advocates.id,
           name: users.name,
           email: users.email,
-          userId:advocates.userId,
+          userId: advocates.userId,
           practiceArea: advocates.practiceArea,
           designation: advocates.designation,
         })
@@ -1033,17 +1033,17 @@ const advocatesController = {
       const rolePermissionsData =
         roleIds.length > 0
           ? await db
-              .select({
-                id: permissions.id,
-                code: permissions.code,
-                description: permissions.description,
-              })
-              .from(rolePermissions)
-              .innerJoin(
-                permissions,
-                eq(rolePermissions.permissionId, permissions.id),
-              )
-              .where(inArray(rolePermissions.roleId, roleIds))
+            .select({
+              id: permissions.id,
+              code: permissions.code,
+              description: permissions.description,
+            })
+            .from(rolePermissions)
+            .innerJoin(
+              permissions,
+              eq(rolePermissions.permissionId, permissions.id),
+            )
+            .where(inArray(rolePermissions.roleId, roleIds))
           : [];
 
       // 5. Get all available system permissions
@@ -1168,15 +1168,15 @@ const advocatesController = {
       const rolePermissionsData =
         roleIds.length > 0
           ? await db
-              .select({
-                code: permissions.code,
-              })
-              .from(rolePermissions)
-              .innerJoin(
-                permissions,
-                eq(rolePermissions.permissionId, permissions.id),
-              )
-              .where(inArray(rolePermissions.roleId, roleIds))
+            .select({
+              code: permissions.code,
+            })
+            .from(rolePermissions)
+            .innerJoin(
+              permissions,
+              eq(rolePermissions.permissionId, permissions.id),
+            )
+            .where(inArray(rolePermissions.roleId, roleIds))
           : [];
 
       const rolePermissionSet = new Set(rolePermissionsData.map((p) => p.code));
@@ -1190,15 +1190,15 @@ const advocatesController = {
       const validPermissionRecords =
         userSpecificCodes.length > 0
           ? await db
-              .select({
-                id: permissions.id,
-                code: permissions.code,
-              })
-              .from(permissions)
-              .where(inArray(permissions.code, userSpecificCodes))
+            .select({
+              id: permissions.id,
+              code: permissions.code,
+            })
+            .from(permissions)
+            .where(inArray(permissions.code, userSpecificCodes))
           : [];
 
-      const currentUserId = req.user?.userId || req.user?.id;
+      const currentUserId = req.user?.userId;
 
       // 4. Update direct user_permissions in a transaction
       await db.transaction(async (tx) => {

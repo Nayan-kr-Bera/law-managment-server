@@ -8,7 +8,7 @@ import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import ResponseHandler from "../../utils/responseHandler.js";
 
 const documentFolderController = {
-    
+
   // CREATE FOLDER
   async createFolder(
     req: Request,

@@ -1,6 +1,5 @@
 export interface IUserJwtPayload {
   userId: string;
-  id?: string;
   tenantId: string;
   scopeId: string;
   email: string;

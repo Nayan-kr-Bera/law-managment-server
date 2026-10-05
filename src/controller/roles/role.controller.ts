@@ -133,7 +133,7 @@ const roleController = {
         permissions: permissionCodes,
         tenantId,
       } = req.body;
-      const userId = req.user.id;
+      const userId = req.user.userId;
       if (!name) {
         return next(CustomErrorHandler.badRequest("Role name is required"));
       }

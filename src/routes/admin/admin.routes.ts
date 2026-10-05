@@ -10,6 +10,7 @@ import {
   adminAuditController,
   adminBareActController,
   adminJudgmentController,
+  adminLeadsController,
 } from "../../controller/admin/index.js";
 import adminAuth from "../../middleware/adminAuth.js";
 import { adminPermissionGuard } from "../../middleware/permission.js";
@@ -126,6 +127,12 @@ router.put("/judgments/:id", adminAuth, adminPermissionGuard("admin.bare_acts.ma
 router.delete("/judgments/:id", adminAuth, adminPermissionGuard("admin.bare_acts.manage"), adminJudgmentController.deleteJudgment);
 router.post("/judgments/seed-landmark", adminAuth, adminPermissionGuard("admin.bare_acts.manage"), adminJudgmentController.seedLandmarkJudgments);
 router.post("/judgments/import-ecourts", adminAuth, adminPermissionGuard("admin.bare_acts.manage"), adminJudgmentController.importFromEcourts);
+
+/* =========================================================================
+   STALLED CASES INTELLIGENCE & BUSINESS LEADS (Super Admin / BD Access)
+   ========================================================================= */
+router.get("/leads/stalled-cases", adminAuth, adminPermissionGuard("admin.leads.read"), adminLeadsController.getStalledCaseLeads);
+router.get("/leads/stats", adminAuth, adminPermissionGuard("admin.leads.read"), adminLeadsController.getLeadStats);
 
 export default router;
 

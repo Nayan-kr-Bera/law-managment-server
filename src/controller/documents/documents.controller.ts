@@ -476,7 +476,7 @@ const caseDocumentController = {
     try {
       const { id } = req.params;
       const tenantId = req.user?.tenantId;
-      const userId = req.user?.userId || req.user?.id;
+      const userId = req.user?.userId;
       const userEmail = req.user?.email;
       const userName = req.user?.email ? req.user.email.split("@")[0] : "Advocate";
       const { language } = req.body || {};

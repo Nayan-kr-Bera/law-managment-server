@@ -8,4 +8,5 @@ export { default as adminSupportController } from "./support/adminSupport.contro
 export { default as adminAuditController } from "./audit/adminAudit.controller.js";
 export { default as adminBareActController } from "./bareAct/adminBareAct.controller.js";
 export { default as adminJudgmentController } from "./judgment/adminJudgment.controller.js";
+export { default as adminLeadsController } from "./leads/adminLeads.controller.js";
 

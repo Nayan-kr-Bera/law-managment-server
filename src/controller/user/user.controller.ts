@@ -114,61 +114,61 @@ const userController = {
 
       let avatarUrl: string | undefined;
 
-      // 2. Handle avata
+      // 2. Handle avatar if uploaded
       if (req.file) {
         // 3. Delete old avatar if it exists
         if (existingUser.avatar) {
-          await deleteFileFromCloudinary(existingUser.avatar, "image");
-
-          // 4. Upload new avatar
-          const uploadedFile = await uploadFileToCloudinary({
-            buffer: req.file.buffer,
-            originalName: req.file.originalname,
-            mimetype: req.file.mimetype,
-            folder: "mi_law_practice",
-          });
-
-          avatarUrl = uploadedFile.secureUrl;
-
-          // 5. Update databas
-          const [updatedUser] = await db
-            .update(users)
-            .set({
-              ...(name !== undefined && { name }),
-              ...(email !== undefined && { email }),
-              ...(phone !== undefined && { phone }),
-
-              ...(avatarUrl !== undefined && {
-                avatar: avatarUrl,
-              }),
-
-              updatedBy: req.user?.userId,
-              updatedAt: new Date(),
-            })
-            .where(and(eq(users.id, id), isNull(users.deletedAt)))
-            .returning({
-              id: users.id,
-              name: users.name,
-              email: users.email,
-              phone: users.phone,
-              avatar: users.avatar,
-              status: users.status,
-              updatedAt: users.updatedAt,
-            });
-
-          console.log("Updated user:", updatedUser);
-
-          if (!updatedUser) {
-            return next(CustomErrorHandler.notFound("User not found"));
+          try {
+            await deleteFileFromCloudinary(existingUser.avatar, "image");
+          } catch (deleteError) {
+            console.error("Failed to delete old avatar from Cloudinary:", deleteError);
           }
-
-          return res.status(200).json({
-            success: true,
-            message: "User updated successfully",
-            data: updatedUser,
-          });
         }
+
+        // 4. Upload new avatar
+        const uploadedFile = await uploadFileToCloudinary({
+          buffer: req.file.buffer,
+          originalName: req.file.originalname,
+          mimetype: req.file.mimetype,
+          folder: "mi_law_practice",
+        });
+
+        avatarUrl = uploadedFile.secureUrl;
       }
+
+      // 5. Update database
+      const [updatedUser] = await db
+        .update(users)
+        .set({
+          ...(name !== undefined && { name }),
+          ...(email !== undefined && { email }),
+          ...(phone !== undefined && { phone }),
+          ...(avatarUrl !== undefined && {
+            avatar: avatarUrl,
+          }),
+          updatedBy: req.user?.userId,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(users.id, id), isNull(users.deletedAt)))
+        .returning({
+          id: users.id,
+          name: users.name,
+          email: users.email,
+          phone: users.phone,
+          avatar: users.avatar,
+          status: users.status,
+          updatedAt: users.updatedAt,
+        });
+
+      if (!updatedUser) {
+        return next(CustomErrorHandler.notFound("User not found"));
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "User updated successfully",
+        data: updatedUser,
+      });
     } catch (error) {
       next(error);
     }

@@ -201,6 +201,7 @@ const adminAuthController = {
             email: adminUser.email,
             email_verified: adminUser.isEmailVerified,
             phone_verified: adminUser.isPhoneVerified,
+            avatar: adminUser.avatar || null,
             isSuperAdmin,
           },
           role: singleRole,

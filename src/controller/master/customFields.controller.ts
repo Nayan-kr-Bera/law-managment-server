@@ -15,7 +15,7 @@ class CustomFieldController {
   async createCustomField(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user.tenantId;
-      const userId = req.user.id;
+      const userId = req.user.userId;
 
       const {
         officeId,
@@ -25,7 +25,7 @@ class CustomFieldController {
         sortOrder,
         options = [],
       } = req.body;
-      
+
       const fieldKey = slugify(label, {
         lower: true,
         strict: true,

@@ -253,4 +253,8 @@ export const PERMISSIONS: PermissionDefinition[] = [
   // Admin Platform Settings
   { code: "admin.settings.read", description: "View global platform runtime settings", isAdminPortal: true },
   { code: "admin.settings.update", description: "Update master architecture and maintenance mode", isAdminPortal: true },
+
+  // Admin Stalled Cases & Business Opportunities Leads (Super Admin / BD Access)
+  { code: "admin.leads.read", description: "Access platform-wide stalled cases (>1yr) intelligence and business opportunity leads", isAdminPortal: true },
+  { code: "admin.leads.manage", description: "Update lead qualification, notes, and export opportunity dockets", isAdminPortal: true },
 ];

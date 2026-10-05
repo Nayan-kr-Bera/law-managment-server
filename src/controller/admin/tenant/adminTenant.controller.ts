@@ -1,5 +1,7 @@
 import { eq, ne, ilike, or, and, count, inArray, SQL } from "drizzle-orm";
 import { NextFunction, Request, Response } from "express";
+import bcrypt from "bcrypt";
+import slugify from "slugify";
 
 import db from "../../../db/index.js";
 import {
@@ -26,6 +28,7 @@ import {
   uploadFileToCloudinary,
 } from "../../../services/cloudinary.service.js";
 import auditLogService from "../../../services/auditLog.service.js";
+import { sendLawFirmWelcomeEmail } from "../../../services/lawFirmWelcomeEmail.service.js";
 
 const adminTenantController = {
   // =========================================================================
@@ -64,7 +67,7 @@ const adminTenantController = {
         orderBy: (t, { desc }) => [desc(t.createdAt)],
       });
 
-      // Enhance with usersCount, officesCount, and activePlan
+      // Enhance with real owner details, usersCount, officesCount, and activePlan
       const enrichedTenants = await Promise.all(
         tenantList.map(async (t) => {
           const [usersRes] = await db
@@ -89,6 +92,20 @@ const adminTenantController = {
             .from(cases)
             .where(eq(cases.tenantId, t.id));
 
+          // Fetch the real primary / managing partner user for this tenant
+          const primaryScope = await db.query.userScopes.findFirst({
+            where: eq(userScopes.tenantId, t.id),
+            with: {
+              user: true,
+            },
+            orderBy: (s, { desc }) => [desc(s.isDefault), desc(s.createdAt)],
+          });
+
+          const realUser = primaryScope?.user;
+          const ownerName = realUser?.name || (t.name ? `${t.name} Admin` : "Law Firm Admin");
+          const ownerEmail = realUser?.email || t.organisationEmail || undefined;
+          const ownerPhone = realUser?.phone || undefined;
+
           return {
             id: t.id,
             name: t.name,
@@ -98,8 +115,10 @@ const adminTenantController = {
             status: t.status || "active",
             createdAt: t.createdAt ? new Date(t.createdAt).toISOString() : new Date().toISOString(),
             updatedAt: t.updatedAt ? new Date(t.updatedAt).toISOString() : undefined,
-            ownerName: t.name ? `${t.name} Admin` : "Law Firm Admin",
-            ownerEmail: t.organisationEmail || undefined,
+            ownerName,
+            ownerEmail,
+            ownerPhone,
+            ownerId: realUser?.id || undefined,
             usersCount: usersRes?.count || 1,
             officesCount: officesRes?.count || 1,
             casesCount: casesRes?.count || 0,
@@ -163,6 +182,20 @@ const adminTenantController = {
         },
       });
 
+      // Fetch the real primary / managing partner user for this tenant
+      const primaryScope = await db.query.userScopes.findFirst({
+        where: eq(userScopes.tenantId, tenant.id),
+        with: {
+          user: true,
+        },
+        orderBy: (s, { desc }) => [desc(s.isDefault), desc(s.createdAt)],
+      });
+
+      const realUser = primaryScope?.user;
+      const ownerName = realUser?.name || `${tenant.name} Owner`;
+      const ownerEmail = realUser?.email || tenant.organisationEmail || undefined;
+      const ownerPhone = realUser?.phone || undefined;
+
       const formattedTenant = {
         id: tenant.id,
         name: tenant.name,
@@ -172,8 +205,10 @@ const adminTenantController = {
         status: tenant.status || "active",
         createdAt: tenant.createdAt ? new Date(tenant.createdAt).toISOString() : new Date().toISOString(),
         updatedAt: tenant.updatedAt ? new Date(tenant.updatedAt).toISOString() : undefined,
-        ownerName: `${tenant.name} Owner`,
-        ownerEmail: tenant.organisationEmail || undefined,
+        ownerName,
+        ownerEmail,
+        ownerPhone,
+        ownerId: realUser?.id || undefined,
         usersCount: usersRes?.count || 1,
         officesCount: officesRes?.count || 1,
         activePlan: sub?.plan
@@ -199,67 +234,265 @@ const adminTenantController = {
   },
 
   // =========================================================================
-  // CREATE TENANT
+  // ONBOARD LAW FIRM USER & PRACTICE (Admin Console)
   // =========================================================================
   async createTenant(req: Request, res: Response, next: NextFunction) {
     try {
       const {
         name,
+        firmName,
         slug,
         ownerEmail,
+        email,
         ownerName,
+        userName,
+        ownerPhone,
+        phone,
+        password,
         timezone,
         status,
         initialPlanId,
+        planId,
+        officeName,
+        city,
       } = req.body;
 
-      if (!name) {
-        return next(CustomErrorHandler.badRequest("Tenant name is required"));
+      const effectiveFirmName = (firmName || name || "").trim();
+      const effectiveOwnerName = (ownerName || userName || "").trim();
+      const effectiveEmail = (ownerEmail || email || "").toLowerCase().trim();
+      const effectivePhone = (ownerPhone || phone || "").trim() || null;
+      const chosenPlanId = initialPlanId || planId;
+
+      if (!effectiveFirmName && !effectiveOwnerName) {
+        return next(CustomErrorHandler.badRequest("Law firm or managing partner name is required"));
       }
 
-      const tenantSlug = slug || name.toLowerCase().replace(/[^a-z0-9]/g, "-");
+      const finalFirmName = effectiveFirmName || (effectiveOwnerName ? `${effectiveOwnerName}'s Practice` : "Law Firm Practice");
+      const finalOwnerName = effectiveOwnerName || `${finalFirmName} Admin`;
 
-      const [newTenant] = await db
-        .insert(tenants)
-        .values({
-          name,
-          slug: tenantSlug,
-          organisationEmail: ownerEmail || null,
-          timezone: timezone || "Asia/Kolkata",
-          status: status || "active",
-        })
-        .returning();
+      if (!effectiveEmail) {
+        return next(CustomErrorHandler.badRequest("Managing partner email address is required"));
+      }
 
-      // If initial plan selected, associate subscription
-      if (initialPlanId) {
-        const plan = await db.query.subscriptionPlans.findFirst({
-          where: eq(subscriptionPlans.id, initialPlanId),
+      if (effectivePhone && effectivePhone.length > 30) {
+        return next(CustomErrorHandler.badRequest("Phone number cannot exceed 30 characters"));
+      }
+
+      // Password generation or validation
+      const rawPassword =
+        password && password.trim().length >= 6
+          ? password.trim()
+          : `Lawyer@${Math.floor(100000 + Math.random() * 900000)}`;
+
+      const hashedPassword = await bcrypt.hash(rawPassword, 10);
+
+      // Generate unique tenant slug
+      const rawSlug = slug || finalFirmName;
+      let baseSlug = slugify(rawSlug, { lower: true, strict: true });
+      if (!baseSlug) {
+        baseSlug = `firm-${Date.now().toString().slice(-6)}`;
+      }
+
+      let tenantSlug = baseSlug;
+      let slugCount = 1;
+      while (await db.query.tenants.findFirst({ where: eq(tenants.slug, tenantSlug) })) {
+        tenantSlug = `${baseSlug}-${slugCount++}`;
+      }
+
+      // Execute creation in atomic transaction
+      const result = await db.transaction(async (tx) => {
+        // 1. Check or create User
+        let targetUser = await tx.query.user.findFirst({
+          where: eq(user.email, effectiveEmail),
         });
 
-        if (plan) {
-          const startDate = new Date();
-          const nextBilling = new Date(startDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+        let isNewUser = false;
+        if (!targetUser) {
+          if (effectivePhone) {
+            const existingPhone = await tx.query.user.findFirst({
+              where: eq(user.phone, effectivePhone),
+            });
+            if (existingPhone) {
+              throw CustomErrorHandler.badRequest("A user with this phone number already exists");
+            }
+          }
 
-          await db.insert(tenantSubscriptions).values({
+          const [createdUser] = await tx
+            .insert(user)
+            .values({
+              name: finalOwnerName,
+              email: effectiveEmail,
+              phone: effectivePhone,
+              password: hashedPassword,
+              isEmailVerified: true,
+              isPhoneVerified: true,
+              status: "active",
+            })
+            .returning();
+          targetUser = createdUser;
+          isNewUser = true;
+        }
+
+        // 2. Create Tenant Practice
+        const [newTenant] = await tx
+          .insert(tenants)
+          .values({
+            name: finalFirmName,
+            slug: tenantSlug,
+            organisationEmail: effectiveEmail,
+            timezone: timezone || "Asia/Kolkata",
+            status: status || "active",
+          })
+          .returning();
+
+        // 3. Create Head Office
+        const [headOffice] = await tx
+          .insert(offices)
+          .values({
             tenantId: newTenant.id,
-            planId: plan.id,
-            status: "active",
-            billingCycle: "monthly",
-            amount: String(plan.monthlyPrice || 0),
-            currency: plan.currency || "INR",
-            startDate: startDate.toISOString().split("T")[0],
-            nextBillingDate: nextBilling.toISOString().split("T")[0],
-            autoRenew: true,
+            name: officeName?.trim() || "Head Office",
+            city: city?.trim() || null,
+            email: effectiveEmail,
+            phone: effectivePhone,
+            isHeadOffice: true,
+            isActive: true,
+          })
+          .returning();
+
+        // 4. Create User Scope
+        const existingScopes = await tx.query.userScopes.findMany({
+          where: eq(userScopes.userId, targetUser.id),
+        });
+        const isDefault = existingScopes.length === 0;
+
+        const [scope] = await tx
+          .insert(userScopes)
+          .values({
+            userId: targetUser.id,
+            tenantId: newTenant.id,
+            isDefault,
+          })
+          .returning();
+
+        // 5. Connect User Scope to Head Office
+        await tx.insert(userScopeOffices).values({
+          userScopeId: scope.id,
+          officeId: headOffice.id,
+        });
+
+        // 6. Assign Tenant Admin Role
+        let adminRole = await tx.query.roles.findFirst({
+          where: eq(roles.slug, "tenant_admin"),
+        });
+
+        if (!adminRole) {
+          adminRole = await tx.query.roles.findFirst({
+            where: eq(roles.slug, "admin"),
           });
         }
-      }
+
+        if (!adminRole) {
+          const [newRole] = await tx
+            .insert(roles)
+            .values({
+              name: "Managing Partner",
+              slug: "tenant_admin",
+              isSystemRole: true,
+              description: "Managing partner and tenant administrator",
+            })
+            .returning();
+          adminRole = newRole;
+        }
+
+        await tx.insert(userRoles).values({
+          scopeId: scope.id,
+          roleId: adminRole.id,
+        });
+
+        // 7. Associate Subscription Plan (Custom chosen or 14-day free trial default)
+        let plan = null;
+        if (chosenPlanId) {
+          plan = await tx.query.subscriptionPlans.findFirst({
+            where: eq(subscriptionPlans.id, chosenPlanId),
+          });
+        }
+
+        if (!plan) {
+          plan = await tx.query.subscriptionPlans.findFirst({
+            where: and(
+              eq(subscriptionPlans.code, "free_trial"),
+              eq(subscriptionPlans.isActive, true)
+            ),
+          });
+        }
+
+        let subscription = null;
+        if (plan) {
+          const isTrial = plan.code === "free_trial" || Number(plan.monthlyPrice) === 0;
+          const durationDays = isTrial ? 14 : 30;
+          const startDate = new Date();
+          const nextBilling = new Date(startDate.getTime() + durationDays * 24 * 60 * 60 * 1000);
+
+          const [createdSub] = await tx
+            .insert(tenantSubscriptions)
+            .values({
+              tenantId: newTenant.id,
+              planId: plan.id,
+              status: isTrial ? "trial" : "active",
+              billingCycle: "monthly",
+              amount: String(plan.monthlyPrice || "0.00"),
+              currency: plan.currency || "INR",
+              startDate: startDate.toISOString().split("T")[0],
+              nextBillingDate: nextBilling.toISOString().split("T")[0],
+              autoRenew: !isTrial,
+            })
+            .returning();
+          subscription = createdSub;
+        }
+
+        return {
+          tenant: newTenant,
+          user: targetUser,
+          isNewUser,
+          rawPassword: isNewUser ? rawPassword : null,
+          office: headOffice,
+          plan,
+          subscription,
+        };
+      });
+
+      // Dispatch welcome email with credentials & password change advisory asynchronously
+      sendLawFirmWelcomeEmail({
+        lawyerName: result.user.name,
+        lawyerEmail: result.user.email,
+        password: result.rawPassword || undefined,
+        firmName: result.tenant.name,
+        workspaceSlug: result.tenant.slug,
+        planName: result.plan?.name || "14-Day Free Trial",
+      }).catch((emailErr) => {
+        console.error("Async law firm welcome email send error:", emailErr);
+      });
 
       return res.status(201).json(
-        ResponseHandler(201, "Tenant created successfully", newTenant)
+        ResponseHandler(201, "Law firm user and practice registered successfully", {
+          ...result.tenant,
+          ownerName: result.user.name,
+          ownerEmail: result.user.email,
+          ownerPhone: result.user.phone,
+          ownerId: result.user.id,
+          isNewUser: result.isNewUser,
+          temporaryPassword: result.rawPassword,
+          credentials: {
+            email: result.user.email,
+            password: result.rawPassword,
+            practiceName: result.tenant.name,
+            workspaceUrl: `/${result.tenant.slug}`,
+          },
+        })
       );
     } catch (error) {
-      console.error("Admin create tenant error:", error);
-      return next(CustomErrorHandler.serverError());
+      console.error("Admin create tenant user error:", error);
+      return next(error);
     }
   },
 
