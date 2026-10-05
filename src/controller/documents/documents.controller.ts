@@ -1,35 +1,33 @@
-import { and, count, eq, isNull, sql, ilike, inArray, SQL } from "drizzle-orm";
-import { Request, Response, NextFunction } from "express";
+import { and, count, eq, ilike, inArray, isNull, sql, SQL } from "drizzle-orm";
+import { NextFunction, Request, Response } from "express";
 
 import db from "../../db/index.js";
 import {
-  caseDocuments,
-  documentFolders,
-  tenants,
-  clients,
-  cases,
   caseClients,
-  tenantSubscriptions,
+  caseDocuments,
+  cases,
+  documentFolders,
   subscriptionPaymentHistory,
+  tenants,
+  tenantSubscriptions
 } from "../../db/schema/index.js";
 
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import ResponseHandler from "../../utils/responseHandler.js";
 
+import { config } from "../../config/index.js";
+import {
+  OCR_CREDIT_GST_PERCENT,
+  OCR_CREDIT_PACKS,
+  OCR_CREDIT_RATE_INR,
+  OCR_CREDITS_PER_PAGE,
+} from "../../constants/ocrCreditPacks.js";
 import {
   deleteCloudinaryDocumentFile,
   uploadFileToCloudinary,
 } from "../../services/cloudinary.service.js";
-import ocrService from "../../services/ocr.service.js";
 import ocrQueueService from "../../services/ocrQueue.service.js";
 import razorpayService from "../../services/razorpay.service.js";
-import { config } from "../../config/index.js";
-import {
-  OCR_CREDIT_PACKS,
-  OCR_CREDIT_RATE_INR,
-  OCR_CREDITS_PER_PAGE,
-  OCR_CREDIT_GST_PERCENT,
-} from "../../constants/ocrCreditPacks.js";
 
 const caseDocumentController = {
   // UPLOAD DOCUMENT
