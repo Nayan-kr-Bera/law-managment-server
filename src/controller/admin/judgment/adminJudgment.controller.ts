@@ -465,14 +465,56 @@ function parseEcourtsJudgmentItem(
     ? `https://ecourtsindia.com/cnr/${j.cnr}`
     : null;
 
+  // Extract or detect Neutral Citation vs Traditional Citation
+  let neutralCitation: string | null = null;
+  let equivalentCitations: string | null = null;
+
+  if (j.neutral_citation) {
+    neutralCitation = String(j.neutral_citation).trim();
+  } else if (j.neutralCitation) {
+    neutralCitation = String(j.neutralCitation).trim();
+  }
+
+  const rawCit = j.citation ? String(j.citation).trim() : "";
+  const ncMatch = rawCit.match(/\b(\d{4}\s+(?:INSC|[A-Z]{2,5}HC|[A-Z]{3,4})\s+\d+)\b/i);
+  if (ncMatch && !neutralCitation) {
+    neutralCitation = ncMatch[1].toUpperCase();
+  }
+
+  if (j.equivalent_citations) {
+    equivalentCitations = String(j.equivalent_citations).trim();
+  } else if (rawCit && neutralCitation && rawCit !== neutralCitation) {
+    equivalentCitations = rawCit;
+  }
+
+  // Bench strength estimation
+  let benchStrength: number | null = null;
+  if (bench) {
+    const judges = bench.split(/,|&|and/i).filter((s) => s.trim().length > 0);
+    benchStrength = judges.length > 0 ? judges.length : null;
+  }
+
+  // Standardize decision date YYYY-MM-DD if possible
+  let decisionDate: string | null = null;
+  if (dateStr) {
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      decisionDate = d.toISOString().split("T")[0];
+    }
+  }
+
   return {
     title,
-    citation: j.citation ? String(j.citation).trim() : null,
+    citation: rawCit || neutralCitation || null,
+    neutralCitation: neutralCitation || null,
+    equivalentCitations: equivalentCitations || null,
     court: rawCourt,
     courtLevel,
     date: dateStr,
+    decisionDate,
     year,
     bench,
+    benchStrength,
     petitioner,
     respondent,
     actSection,

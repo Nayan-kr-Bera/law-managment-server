@@ -19,6 +19,13 @@ router.get(
   judgmentAiController.getJudgments,
 );
 
+// 2b. Fast Neutral Citation & Cross-Reference Lookup (Zero heavy load)
+router.get(
+  "/lookup",
+  auth,
+  judgmentAiController.lookupCitation,
+);
+
 // 3. Stream Judgment Briefing or Q&A (Credit Guarded: 15 Credits per Report)
 router.post(
   "/chat",

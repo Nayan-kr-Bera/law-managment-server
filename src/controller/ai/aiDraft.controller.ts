@@ -5,6 +5,7 @@ import {
   aiDrafts,
   cases,
   caseDocuments,
+  casePrecedents,
   courts,
   policeStations,
   underSections,
@@ -13,7 +14,7 @@ import {
 } from "../../db/schema/index.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import ResponseHandler from "../../utils/responseHandler.js";
-import aiDrafterService from "../../services/aiDrafter.service.js";
+import aiDrafterService, { CasePrecedentDraftContext } from "../../services/aiDrafter.service.js";
 import razorpayService from "../../services/razorpay.service.js";
 import { AI_CREDIT_PACKS } from "../../constants/aiCreditPacks.js";
 import { config } from "../../config/index.js";
@@ -36,6 +37,7 @@ const aiDraftController = {
         language = "English",
         facts,
         referenceDocumentIds = [],
+        selectedPrecedentIds = [],
         additionalInstructions,
       } = req.body;
 
@@ -111,6 +113,54 @@ const aiDraftController = {
           .filter(Boolean);
       }
 
+      // Load Pinned / Selected Case Precedents for Pleadings
+      let precedentsList: CasePrecedentDraftContext[] = [];
+      if (Array.isArray(selectedPrecedentIds) && selectedPrecedentIds.length > 0) {
+        precedentsList = await db
+          .select({
+            id: casePrecedents.id,
+            title: casePrecedents.title,
+            citation: casePrecedents.citation,
+            neutralCitation: casePrecedents.neutralCitation,
+            equivalentCitations: casePrecedents.equivalentCitations,
+            court: casePrecedents.court,
+            bench: casePrecedents.bench,
+            ratioDecidendi: casePrecedents.ratioDecidendi,
+            relevanceTag: casePrecedents.relevanceTag,
+            notes: casePrecedents.notes,
+          })
+          .from(casePrecedents)
+          .where(
+            and(
+              inArray(casePrecedents.id, selectedPrecedentIds),
+              eq(casePrecedents.tenantId, tenantId),
+            ),
+          );
+      } else if (caseId) {
+        // Default to loading all precedents pinned for AI pleadings drafting under this case
+        precedentsList = await db
+          .select({
+            id: casePrecedents.id,
+            title: casePrecedents.title,
+            citation: casePrecedents.citation,
+            neutralCitation: casePrecedents.neutralCitation,
+            equivalentCitations: casePrecedents.equivalentCitations,
+            court: casePrecedents.court,
+            bench: casePrecedents.bench,
+            ratioDecidendi: casePrecedents.ratioDecidendi,
+            relevanceTag: casePrecedents.relevanceTag,
+            notes: casePrecedents.notes,
+          })
+          .from(casePrecedents)
+          .where(
+            and(
+              eq(casePrecedents.caseId, caseId),
+              eq(casePrecedents.pinnedInPleadings, true),
+              eq(casePrecedents.tenantId, tenantId),
+            ),
+          );
+      }
+
       // Call AI Service
       const draftResult = await aiDrafterService.generateDraft({
         caseDetails,
@@ -118,6 +168,7 @@ const aiDraftController = {
         language,
         facts,
         referenceDocumentsText,
+        precedents: precedentsList,
         additionalInstructions,
       });
 

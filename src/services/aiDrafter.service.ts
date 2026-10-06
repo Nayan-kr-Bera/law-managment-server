@@ -1,6 +1,18 @@
 import OpenAI from "openai";
 import { config } from "../config/index.js";
 
+export interface CasePrecedentDraftContext {
+  title: string;
+  citation?: string | null;
+  neutralCitation?: string | null;
+  equivalentCitations?: string | null;
+  court?: string | null;
+  bench?: string | null;
+  ratioDecidendi?: string | null;
+  relevanceTag?: string | null;
+  notes?: string | null;
+}
+
 export interface GenerateDraftParams {
   caseDetails?: {
     caseNumber?: string | null;
@@ -16,6 +28,7 @@ export interface GenerateDraftParams {
   language: string; // "English" | "Hindi" | "Bengali"
   facts: string;
   referenceDocumentsText?: string[];
+  precedents?: CasePrecedentDraftContext[];
   additionalInstructions?: string;
 }
 
@@ -64,7 +77,11 @@ CRITICAL DRAFTING REQUIREMENTS:
    - If reference document extracts are provided (e.g., from FIR, agreement, previous orders), cross-reference relevant dates, terms, and clauses faithfully.
    - Do NOT invent false names, dates, or FIR numbers. If a specific detail is omitted in the prompt, use standard legal brackets like "[Date of Incident]" or "[Police Station Name]".
 
-4. **OUTPUT FORMAT**:
+4. **JUDICIAL PRECEDENTS & STATUTORY AUTHORITIES**:
+   - If authoritative case precedents or neutral citations are provided, actively cite them under the Grounds, Submissions, or Arguments section.
+   - Clearly state the Case Title, Citation / Neutral Citation, Court, and apply its legal ratio/holding to justify granting the prayer.
+
+5. **OUTPUT FORMAT**:
    - Provide the clean, formatted legal document directly without raw markdown asterisks (do NOT write **word** or ***). 
    - Use standard Indian Court pleading conventions: UPPERCASE for main court titles, party headings, and prayer clauses; clean numbered paragraphs (1., 2., 3.); and clear line breaks.
    - Do not include conversational filler like "Sure, here is your draft" before or after the text.`;
@@ -79,7 +96,15 @@ CRITICAL DRAFTING REQUIREMENTS:
     isAiGenerated: boolean;
   }> {
     const openai = this.getClient();
-    const { caseDetails, documentType, language, facts, referenceDocumentsText, additionalInstructions } = params;
+    const {
+      caseDetails,
+      documentType,
+      language,
+      facts,
+      referenceDocumentsText,
+      precedents,
+      additionalInstructions,
+    } = params;
 
     const userPromptParts: string[] = [];
 
@@ -105,6 +130,23 @@ CRITICAL DRAFTING REQUIREMENTS:
         // Cap each doc text to ~3000 chars to avoid token overflow
         const truncated = docText.slice(0, 3000);
         userPromptParts.push(`--- Reference Document #${idx + 1} ---\n${truncated}\n`);
+      });
+    }
+
+    if (precedents && precedents.length > 0) {
+      userPromptParts.push(`\nPINNED JUDICIAL PRECEDENTS & AUTHORITATIVE CITATIONS TO WEAVE INTO DRAFT:`);
+      precedents.forEach((p, idx) => {
+        const citationStr = p.neutralCitation ? `Neutral Citation: ${p.neutralCitation}` : (p.citation ? `Citation: ${p.citation}` : "");
+        const courtStr = p.court ? `Court: ${p.court}` : "";
+        const tagStr = p.relevanceTag ? `Relevance: ${p.relevanceTag}` : "";
+        const details = [citationStr, courtStr, tagStr].filter(Boolean).join(" | ");
+        userPromptParts.push(`[Precedent #${idx + 1}] "${p.title}" ${details ? `(${details})` : ""}`);
+        if (p.ratioDecidendi) {
+          userPromptParts.push(`   - Binding Legal Principle / Ratio: ${p.ratioDecidendi}`);
+        }
+        if (p.notes) {
+          userPromptParts.push(`   - Advocate's Note: ${p.notes}`);
+        }
       });
     }
 
@@ -183,7 +225,17 @@ ${facts.trim()}
 
 3. That the Applicant has not filed any other similar application before this Hon'ble Court or any other Court seeking the same relief.
 
-4. That the present application is preferred bona fide and in the interest of justice.
+4. That the present application is preferred bona fide and in the interest of justice.${
+  params.precedents && params.precedents.length > 0
+    ? `\n\n5. That the Applicant respectfully places reliance upon the following binding judicial precedent(s) in support of the prayers made herein:\n` +
+      params.precedents
+        .map(
+          (p, idx) =>
+            `   (${String.fromCharCode(97 + idx)}) "${p.title}" ${p.neutralCitation ? `(${p.neutralCitation})` : p.citation ? `(${p.citation})` : ""}${p.court ? ` [${p.court}]` : ""}${p.ratioDecidendi ? ` - Holding: "${p.ratioDecidendi}"` : ""}`
+        )
+        .join("\n")
+    : ""
+}
 
 PRAYER:
 Wherefore, in the facts and circumstances stated hereinabove, it is most respectfully prayed that this Hon'ble Court may graciously be pleased to:

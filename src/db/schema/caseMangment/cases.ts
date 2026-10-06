@@ -28,6 +28,7 @@ import users from "../users.js";
 import caseAdvocates from "./caseAdvocates.js";
 import tasks from "../task/tasks.js";
 import caseLinks from "./caseLinks.js";
+import casePrecedents from "./casePrecedents.js";
 import caseTags from "./caseTags.js";
 import caseDecisions from "./caseDecision.js";
 import caseCustomFieldValues from "./caseCustomFieldValues.js";
@@ -189,4 +190,7 @@ export const caseRelation = relations(cases, ({ one, many }) => ({
   }),
   decisions: many(caseDecisions),
   customFields: many(caseCustomFieldValues),
+  precedents: many(casePrecedents, {
+    relationName: "casePrecedents",
+  }),
 }));

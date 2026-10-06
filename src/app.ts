@@ -46,6 +46,7 @@ import {
   adminRoutes,
   bareActRoutes,
   judgmentAiRoutes,
+  casePrecedentRoutes,
 } from "./routes/index.js";
 
 const app = express();
@@ -137,6 +138,7 @@ app.use("/api/audit-logs", auditLogRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/bare-acts", bareActRoutes);
 app.use("/api/judgment-ai", judgmentAiRoutes);
+app.use("/api/case-precedents", casePrecedentRoutes);
 
 /* ---------- Admin Portal Routes ---------- */
 

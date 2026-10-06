@@ -116,7 +116,9 @@ const judgmentAiController = {
         conditions.push(
           or(
             ilike(courtJudgments.title, pattern),
+            ilike(courtJudgments.neutralCitation, pattern),
             ilike(courtJudgments.citation, pattern),
+            ilike(courtJudgments.equivalentCitations, pattern),
             ilike(courtJudgments.actSection, pattern),
             ilike(courtJudgments.court, pattern),
             ilike(courtJudgments.summary, pattern)
@@ -400,6 +402,65 @@ const judgmentAiController = {
     } catch (err: unknown) {
       console.error("[judgmentAiController.verifyCreditPayment] Error:", err);
       return next(CustomErrorHandler.serverError("Payment verification failed"));
+    }
+  },
+
+  /**
+   * 7. GET /api/judgment-ai/lookup
+   * Fast Neutral Citation resolver and cross-reference matcher (ultra lightweight)
+   */
+  async lookupCitation(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { q } = req.query as { q?: string };
+      if (!q || !q.trim()) {
+        return res.status(200).json(
+          ResponseHandler(200, "Query required", { results: [] })
+        );
+      }
+
+      const cleanQuery = q.trim();
+      const pattern = `%${cleanQuery}%`;
+
+      const results = await db
+        .select({
+          id: courtJudgments.id,
+          title: courtJudgments.title,
+          citation: courtJudgments.citation,
+          neutralCitation: courtJudgments.neutralCitation,
+          equivalentCitations: courtJudgments.equivalentCitations,
+          court: courtJudgments.court,
+          courtLevel: courtJudgments.courtLevel,
+          date: courtJudgments.date,
+          decisionDate: courtJudgments.decisionDate,
+          year: courtJudgments.year,
+          bench: courtJudgments.bench,
+          benchStrength: courtJudgments.benchStrength,
+          actSection: courtJudgments.actSection,
+          ratioDecidendi: courtJudgments.ratioDecidendi,
+          url: courtJudgments.url,
+          isFeatured: courtJudgments.isFeatured,
+        })
+        .from(courtJudgments)
+        .where(
+          or(
+            ilike(courtJudgments.neutralCitation, pattern),
+            ilike(courtJudgments.citation, pattern),
+            ilike(courtJudgments.equivalentCitations, pattern),
+            ilike(courtJudgments.title, pattern)
+          )
+        )
+        .orderBy(desc(courtJudgments.year))
+        .limit(8);
+
+      return res.status(200).json(
+        ResponseHandler(200, "Citation lookup successful", {
+          results,
+          query: cleanQuery,
+        })
+      );
+    } catch (err) {
+      console.error("[judgmentAiController.lookupCitation] Error:", err);
+      return next(CustomErrorHandler.serverError("Citation lookup failed"));
     }
   },
 };

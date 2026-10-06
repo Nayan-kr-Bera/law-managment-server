@@ -39,7 +39,8 @@ export { caseTimelineRelation } from "./caseMangment/caseTimelines.js";
 export { caseStatusHistoryRelation } from "./caseMangment/caseStatusHistory.js";
 export { caseCustomFieldValueRelation } from "./caseMangment/caseCustomFieldValues.js";
 export { caseLinksRelations } from "./caseMangment/caseLinks.js";
-export {caseDecisionRelations}from "./caseMangment/caseDecision.js"
+export { caseDecisionRelations } from "./caseMangment/caseDecision.js";
+export { casePrecedentsRelations } from "./caseMangment/casePrecedents.js";
 // Documents
 export { documentFolderRelation } from "./documents/documentFolders.js";
 export { caseDocumentRelation } from "./documents/caseDocuments.js";
