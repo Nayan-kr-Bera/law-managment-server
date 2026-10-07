@@ -34,6 +34,7 @@ router.post("/auth/refresh-token", clientPortalController.refreshToken);
 
 router.get("/cases", clientAuth, clientPortalController.getCases);
 router.get("/cases/:caseId", clientAuth, clientPortalController.getCaseById);
+router.get("/cases/:caseId/remarks", clientAuth, clientPortalController.getCaseRemarks);
 router.post("/cases/:caseId/remarks", clientAuth, clientPortalController.addCaseRemark);
 
 router.get("/documents", clientAuth, clientPortalController.getDocuments);

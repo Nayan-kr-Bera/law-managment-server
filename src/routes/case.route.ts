@@ -59,5 +59,7 @@ router.get(
 );
 router.get("/forfrom", auth, officeGuard, caseController.getCasesForFrom);
 router.get("/:id/edit", auth, officeGuard, caseController.getCaseForUpdate);
+router.get("/:caseId/remarks", auth, officeGuard, caseController.getCaseRemarks);
+router.post("/:caseId/remarks", auth, officeGuard, caseController.addCaseRemark);
 router.get("/:id", auth, officeGuard, caseController.getCaseById);
 export default router;

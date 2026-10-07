@@ -25,13 +25,15 @@ import {
   caseTags,
   courts,
   documentFolders,
-  hearings
+  hearings,
+  caseNotes
 } from "../../db/schema/index.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import { getDateRange } from "../../utils/dateRange.js";
 import { endOfMonth, format, startOfMonth } from "date-fns";
 import ResponseHandler from "../../utils/responseHandler.js";
 import { createCaseSchema } from "../../validators/case.validator.js";
+import { formatCaseRemarks } from "../../services/caseRemarks.service.js";
 
 const caseController = {
   async createCase(req: Request, res: Response, next: NextFunction) {
@@ -289,10 +291,19 @@ const caseController = {
             .filter((a) => Boolean(a.advocateId)) || [],
       };
 
+      const notes = await db.query.caseNotes.findMany({
+        where: eq(caseNotes.caseId, id),
+        orderBy: [desc(caseNotes.createdAt)],
+      });
+      const formattedRemarks = await formatCaseRemarks(notes);
+
       return res.status(200).json({
         success: true,
         message: "Case fetched successfully",
-        data: formattedCase,
+        data: {
+          ...formattedCase,
+          remarksList: formattedRemarks,
+        },
       });
     } catch (error) {
       console.error("getCaseById error:", error);
@@ -1788,6 +1799,87 @@ const caseController = {
     } catch (error) {
       console.error("getMonthlyCourtStats error:", error);
 
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  // GET CASE REMARKS
+  async getCaseRemarks(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { caseId } = req.params;
+      const notes = await db.query.caseNotes.findMany({
+        where: eq(caseNotes.caseId, caseId),
+        orderBy: [desc(caseNotes.createdAt)],
+      });
+      const formatted = await formatCaseRemarks(notes);
+
+      if (formatted.length === 0) {
+        const caseRecord = await db.query.cases.findFirst({
+          where: eq(cases.id, caseId),
+          columns: { remarks: true, createdAt: true },
+        });
+        if (caseRecord?.remarks && caseRecord.remarks.trim()) {
+          formatted.push({
+            id: `initial-${caseId}`,
+            caseId,
+            authorName: "Case Note",
+            authorRole: "advocate",
+            content: caseRecord.remarks.trim(),
+            note: caseRecord.remarks.trim(),
+            isPrivate: false,
+            createdAt: caseRecord.createdAt ? caseRecord.createdAt.toISOString() : new Date().toISOString(),
+          });
+        }
+      }
+
+      return res.status(200).json(
+        ResponseHandler(200, "Case remarks fetched successfully", formatted)
+      );
+    } catch (error) {
+      console.error("getCaseRemarks error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  // ADD CASE REMARK (ADVOGATE / STAFF)
+  async addCaseRemark(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { caseId } = req.params;
+      const { content, isPrivate } = req.body;
+      const userId = req.user?.userId;
+
+      if (!content || !content.trim()) {
+        return next(CustomErrorHandler.badRequest("Remark content is required"));
+      }
+
+      const caseExists = await db.query.cases.findFirst({
+        where: eq(cases.id, caseId),
+      });
+
+      if (!caseExists) {
+        return next(CustomErrorHandler.notFound("Case not found"));
+      }
+
+      const [newNote] = await db
+        .insert(caseNotes)
+        .values({
+          caseId,
+          createdBy: userId,
+          note: content.trim(),
+          isPrivate: Boolean(isPrivate),
+        })
+        .returning();
+
+      const [formattedRemark] = await formatCaseRemarks([newNote]);
+
+      return res.status(201).json(
+        ResponseHandler(201, "Case remark posted successfully", {
+          remark: formattedRemark,
+          data: formattedRemark,
+        })
+      );
+    } catch (error) {
+      console.error("addCaseRemark error:", error);
       return next(CustomErrorHandler.serverError());
     }
   },

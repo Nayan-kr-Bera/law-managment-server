@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import { eq, and, inArray, desc, asc } from "drizzle-orm";
+import { eq, and, inArray, desc, asc, sql } from "drizzle-orm";
 import db from "../../db/index.js";
 import clients from "../../db/schema/clients/clients.js";
 import tenants from "../../db/schema/tenants.js";
@@ -23,6 +23,7 @@ import { config } from "../../config/index.js";
 import { IClientJwtPayload } from "../../@types/payload.types.js";
 import { notificationEvents } from "../../services/notification.service.js";
 import bcrypt from "bcrypt";
+import { formatCaseRemarks } from "../../services/caseRemarks.service.js";
 
 const clientPortalController = {
   // CLIENT REFRESH TOKEN — verifies client JWT payload and issues scoped token via clientProfiles
@@ -147,36 +148,72 @@ const clientPortalController = {
         }
       }
 
-      const formattedCases = matchedCases.map((c) => ({
-        id: c.id,
-        caseNumber: c.caseNumber || c.id,
-        cnrNumber: c.cnrNumber || undefined,
-        referenceNumber: c.referenceNumber || undefined,
-        fileNumber: c.fileNumber || undefined,
-        firNumber: c.firNumber || undefined,
-        title: c.title,
-        courtName: c.court?.name || undefined,
-        courtNumber: c.courtNumber || undefined,
-        judgeName: c.judgeName || undefined,
-        status: c.status || "active",
-        stage: c.stage || undefined,
-        firstParty: c.firstParty || undefined,
-        oppositeParty: c.oppositeParty || undefined,
-        nextHearingDate: c.nextHearingDate || undefined,
-        filingDate: c.filingDate || undefined,
-        registrationDate: c.registrationDate || undefined,
-        caseTypeName: c.caseType?.name || undefined,
-        policeStationName: c.policeStation?.name || undefined,
-        underSectionName: c.underSection
-          ? `${c.underSection.actName || ""} ${c.underSection.section || ""}`.trim()
-          : undefined,
-        description: c.description || undefined,
-        remarks: c.remarks || undefined,
-        officeId: c.officeId || undefined,
-        officeName: c.office?.name || undefined,
-        tenantId: c.tenantId || undefined,
-        firmName: c.tenant?.name || undefined,
-      }));
+      const matchedCaseIds = matchedCases.map((c) => c.id);
+      const noteCountMap = new Map<string, number>();
+
+      if (matchedCaseIds.length > 0) {
+        try {
+          const counts = await db
+            .select({
+              caseId: caseNotes.caseId,
+              count: sql<number>`count(*)::int`,
+            })
+            .from(caseNotes)
+            .where(
+              and(
+                inArray(caseNotes.caseId, matchedCaseIds),
+                eq(caseNotes.isPrivate, false)
+              )
+            )
+            .groupBy(caseNotes.caseId);
+
+          for (const record of counts) {
+            if (record.caseId) {
+              noteCountMap.set(record.caseId, Number(record.count) || 0);
+            }
+          }
+        } catch (e) {
+          console.error("Error calculating case remarks counts:", e);
+        }
+      }
+
+      const formattedCases = matchedCases.map((c) => {
+        const countFromNotes = noteCountMap.get(c.id) || 0;
+        const initialRemarkCount = c.remarks && c.remarks.trim() ? 1 : 0;
+        const totalRemarks = countFromNotes > 0 ? countFromNotes : initialRemarkCount;
+
+        return {
+          id: c.id,
+          caseNumber: c.caseNumber || c.id,
+          cnrNumber: c.cnrNumber || undefined,
+          referenceNumber: c.referenceNumber || undefined,
+          fileNumber: c.fileNumber || undefined,
+          firNumber: c.firNumber || undefined,
+          title: c.title,
+          courtName: c.court?.name || undefined,
+          courtNumber: c.courtNumber || undefined,
+          judgeName: c.judgeName || undefined,
+          status: c.status || "active",
+          stage: c.stage || undefined,
+          firstParty: c.firstParty || undefined,
+          oppositeParty: c.oppositeParty || undefined,
+          nextHearingDate: c.nextHearingDate || undefined,
+          filingDate: c.filingDate || undefined,
+          registrationDate: c.registrationDate || undefined,
+          caseTypeName: c.caseType?.name || undefined,
+          policeStationName: c.policeStation?.name || undefined,
+          underSectionName: c.underSection
+            ? `${c.underSection.actName || ""} ${c.underSection.section || ""}`.trim()
+            : undefined,
+          description: c.description || undefined,
+          remarks: c.remarks || undefined,
+          remarksCount: totalRemarks,
+          officeId: c.officeId || undefined,
+          officeName: c.office?.name || undefined,
+          tenantId: c.tenantId || undefined,
+          firmName: c.tenant?.name || undefined,
+        };
+      });
 
       return res.status(200).json(
         ResponseHandler(200, "Client cases fetched successfully", formattedCases)
@@ -192,6 +229,11 @@ const clientPortalController = {
     try {
       const { caseId } = req.params;
       const clientId = req.clientUser?.clientId;
+
+      const isValidUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(caseId);
+      if (!isValidUuid) {
+        return next(CustomErrorHandler.notFound("Case record not found"));
+      }
 
       // Verify client has access to this case
       if (clientId) {
@@ -231,6 +273,8 @@ const clientPortalController = {
         orderBy: [desc(caseNotes.createdAt)],
       });
 
+      const formattedRemarks = await formatCaseRemarks(notes);
+
       const formattedCase = {
         id: caseRecord.id,
         caseNumber: caseRecord.caseNumber || caseRecord.id,
@@ -256,6 +300,7 @@ const clientPortalController = {
           : undefined,
         description: caseRecord.description || undefined,
         remarks: caseRecord.remarks || undefined,
+        remarksCount: formattedRemarks.length > 0 ? formattedRemarks.length : (caseRecord.remarks && caseRecord.remarks.trim() ? 1 : 0),
         officeId: caseRecord.officeId || undefined,
         officeName: caseRecord.office?.name || undefined,
         tenantId: caseRecord.tenantId || undefined,
@@ -267,7 +312,7 @@ const clientPortalController = {
           ...formattedCase,
           data: formattedCase,
           hearings: hearingRecords,
-          remarks: notes,
+          remarks: formattedRemarks,
         })
       );
     } catch (error) {
@@ -283,8 +328,13 @@ const clientPortalController = {
       const { content } = req.body;
       const clientId = req.clientUser?.clientId;
 
-      if (!content) {
+      if (!content || !content.trim()) {
         return next(CustomErrorHandler.badRequest("Remark content is required"));
+      }
+
+      const isValidUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(caseId);
+      if (!isValidUuid) {
+        return next(CustomErrorHandler.notFound("Case not found"));
       }
 
       // Verify client actually belongs to this case
@@ -313,18 +363,67 @@ const clientPortalController = {
         .values({
           caseId,
           createdBy: clientId || undefined,
-          note: content,
+          note: content.trim(),
           isPrivate: false,
         })
         .returning();
 
+      const [formattedRemark] = await formatCaseRemarks([newNote]);
+
       return res.status(201).json(
         ResponseHandler(201, "Case remark posted successfully", {
-          remark: newNote,
+          remark: formattedRemark,
+          data: formattedRemark,
         })
       );
     } catch (error) {
       console.error("Add case remark error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  // GET CASE REMARKS LIST
+  async getCaseRemarks(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { caseId } = req.params;
+
+      const isValidUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(caseId);
+      if (!isValidUuid) {
+        return res.status(200).json(
+          ResponseHandler(200, "Case remarks fetched successfully", [])
+        );
+      }
+
+      const notes = await db.query.caseNotes.findMany({
+        where: and(eq(caseNotes.caseId, caseId), eq(caseNotes.isPrivate, false)),
+        orderBy: [desc(caseNotes.createdAt)],
+      });
+      const formatted = await formatCaseRemarks(notes);
+
+      if (formatted.length === 0) {
+        const caseRecord = await db.query.cases.findFirst({
+          where: eq(cases.id, caseId),
+          columns: { remarks: true, createdAt: true },
+        });
+        if (caseRecord?.remarks && caseRecord.remarks.trim()) {
+          formatted.push({
+            id: `initial-${caseId}`,
+            caseId,
+            authorName: "Case Note",
+            authorRole: "advocate",
+            content: caseRecord.remarks.trim(),
+            note: caseRecord.remarks.trim(),
+            isPrivate: false,
+            createdAt: caseRecord.createdAt ? caseRecord.createdAt.toISOString() : new Date().toISOString(),
+          });
+        }
+      }
+
+      return res.status(200).json(
+        ResponseHandler(200, "Case remarks fetched successfully", formatted)
+      );
+    } catch (error) {
+      console.error("Get case remarks error:", error);
       return next(CustomErrorHandler.serverError());
     }
   },
@@ -354,6 +453,10 @@ const clientPortalController = {
           office?: { name: string } | null;
           tenant?: { name: string } | null;
         } | null;
+        uploader?: {
+          id: string;
+          name: string;
+        } | null;
       })[] = [];
       if (matchedCaseIds.length > 0) {
         docs = await db.query.caseDocuments.findMany({
@@ -368,13 +471,21 @@ const clientPortalController = {
               columns: { id: true, caseNumber: true, title: true },
               with: { office: true, tenant: true },
             },
+            uploader: {
+              columns: { id: true, name: true },
+            },
           },
+          orderBy: [desc(caseDocuments.createdAt)],
           limit: 100,
         });
       }
 
       const formattedDocs = docs.map((d) => ({
         ...d,
+        uploadedAt: d.createdAt ? d.createdAt.toISOString() : new Date().toISOString(),
+        createdAt: d.createdAt ? d.createdAt.toISOString() : new Date().toISOString(),
+        uploadedBy: d.uploader?.name || "Advocate Chamber",
+        uploadedByName: d.uploader?.name || undefined,
         caseNumber: d.case?.caseNumber || undefined,
         caseTitle: d.case?.title || undefined,
         officeName: d.case?.office?.name || undefined,
@@ -990,6 +1101,14 @@ const clientPortalController = {
 
       if (!ticket) {
         return next(CustomErrorHandler.notFound("Support ticket not found"));
+      }
+
+      if (ticket.status === "closed") {
+        return next(
+          CustomErrorHandler.badRequest(
+            "This support ticket is closed. Sending messages to a closed ticket is not permitted."
+          )
+        );
       }
 
       if (req.clientUser?.clientId && ticket.clientId !== req.clientUser.clientId) {

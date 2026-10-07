@@ -330,6 +330,14 @@ const supportTicketController = {
         return next(CustomErrorHandler.notFound("Support ticket not found"));
       }
 
+      if (ticketRecord.status === "closed" && (req.clientUser || !req.user?.userId)) {
+        return next(
+          CustomErrorHandler.badRequest(
+            "This support ticket is closed. Sending messages to a closed ticket is not permitted."
+          )
+        );
+      }
+
       let senderType = "client";
       let senderName = "Client User";
 
