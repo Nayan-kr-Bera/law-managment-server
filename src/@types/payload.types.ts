@@ -17,6 +17,7 @@ export interface IAdminJwtPayload {
   userId: string;
   adminId?: string;
   email: string;
+  name?: string;
   role: "admin" | "super_admin" | string;
   roleId?: string;
   permissions: string[];

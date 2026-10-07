@@ -81,6 +81,7 @@ router.patch("/support/tickets/:id/status", adminAuth, adminPermissionGuard("adm
 router.post("/support/tickets/:id/reply", adminAuth, adminPermissionGuard("admin.support.update"), adminSupportController.replyTicket);
 router.get("/support/inquiries", adminAuth, adminPermissionGuard("admin.support.read"), adminSupportController.getContactInquiries);
 router.patch("/support/inquiries/:id/status", adminAuth, adminPermissionGuard("admin.support.update"), adminSupportController.updateContactInquiryStatus);
+router.post("/support/inquiries/:id/reply", adminAuth, adminPermissionGuard("admin.support.update"), adminSupportController.replyContactInquiry);
 
 /* =========================================================================
    AUDIT LOGS

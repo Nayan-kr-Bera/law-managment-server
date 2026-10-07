@@ -10,6 +10,7 @@ import {
 
 import CustomErrorHandler from "../../../utils/customErrorHandler.js";
 import ResponseHandler from "../../../utils/responseHandler.js";
+import { sendContactInquiryReplyEmail } from "../../../services/contactInquiryReplyEmail.service.js";
 
 const adminSupportController = {
   // =========================================================================
@@ -389,6 +390,80 @@ const adminSupportController = {
       );
     } catch (error) {
       console.error("Admin update inquiry error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  // =========================================================================
+  // REPLY TO CONTACT INQUIRY VIA EMAIL
+  // =========================================================================
+  async replyContactInquiry(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const { subject, message, nextStatus } = req.body;
+
+      if (!message || message.trim() === "") {
+        return next(CustomErrorHandler.badRequest("Reply message cannot be empty"));
+      }
+
+      const existing = await db.query.contactUsMessages.findFirst({
+        where: eq(contactUsMessages.id, id),
+      });
+
+      if (!existing) {
+        return next(CustomErrorHandler.notFound("Contact inquiry not found"));
+      }
+
+      const adminUser = req.adminUser || (req as Request & { user?: { name?: string } }).user;
+      const adminName = adminUser?.name || "MI Law Support Specialist";
+
+      const mailSubject = subject?.trim() || `Re: ${existing.subject || "MI Law Inquiry"}`;
+
+      // 1. Dispatch email
+      const emailSent = await sendContactInquiryReplyEmail({
+        recipientName: existing.fullName,
+        recipientEmail: existing.email,
+        subject: mailSubject,
+        replyMessage: message.trim(),
+        originalMessage: existing.message,
+        originalSubject: existing.subject,
+        adminName,
+      });
+
+      // 2. Prepare timestamped note
+      const dateStr = new Date().toLocaleDateString("en-IN", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      const noteAppend = `[Email Sent on ${dateStr} by ${adminName}]: "${message.trim()}"`;
+      const updatedNotes = existing.adminNotes
+        ? `${existing.adminNotes}\n\n${noteAppend}`
+        : noteAppend;
+
+      const targetStatus = nextStatus || "contacted";
+
+      // 3. Update database record
+      const [updated] = await db
+        .update(contactUsMessages)
+        .set({
+          status: targetStatus,
+          adminNotes: updatedNotes,
+          updatedAt: new Date(),
+        })
+        .where(eq(contactUsMessages.id, id))
+        .returning();
+
+      return res.status(200).json(
+        ResponseHandler(200, "Email reply sent successfully", {
+          inquiry: updated,
+          emailSent,
+        })
+      );
+    } catch (error) {
+      console.error("Admin reply contact inquiry error:", error);
       return next(CustomErrorHandler.serverError());
     }
   },
