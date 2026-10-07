@@ -1,4 +1,4 @@
-import { and, eq, SQL } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, or, SQL } from "drizzle-orm";
 import { NextFunction, Request, Response } from "express";
 import db from "../../db/index.js";
 import clients from "../../db/schema/clients/clients.js";
@@ -76,7 +76,12 @@ const supportTicketController = {
         return next(CustomErrorHandler.unAuthorized("Tenant ID missing"));
       }
 
-      const { status, category, caseId } = req.query;
+      const { status, category, caseId, scope } = req.query as {
+        status?: string;
+        category?: string;
+        caseId?: string;
+        scope?: "platform" | "clients";
+      };
 
       let conditions: SQL[] = [eq(supportTickets.tenantId, tenantId)];
       if (status) {
@@ -87,6 +92,23 @@ const supportTicketController = {
       }
       if (caseId) {
         conditions.push(eq(supportTickets.caseId, caseId as string));
+      }
+      if (scope === "platform") {
+        // Tickets raised to MI Law Platform Super Admin (no legal case, no client)
+        conditions.push(
+          isNull(supportTickets.caseId),
+          isNull(supportTickets.clientId),
+          isNull(supportTickets.clientUserId)
+        );
+      } else if (scope === "clients") {
+        // Inquiries from chamber clients
+        conditions.push(
+          or(
+            isNotNull(supportTickets.caseId),
+            isNotNull(supportTickets.clientId),
+            isNotNull(supportTickets.clientUserId)
+          )!
+        );
       }
 
       const ticketRecords = await db.query.supportTickets.findMany({
@@ -196,6 +218,14 @@ const supportTicketController = {
         return next(CustomErrorHandler.badRequest("Subject and initial message are required"));
       }
 
+      if (req.clientUser && !caseId) {
+        return next(
+          CustomErrorHandler.badRequest(
+            "Please select a legal case. Chamber inquiries must be linked to a specific case."
+          )
+        );
+      }
+
       let tenantId: string | null = req.user?.tenantId || null;
       let officeId: string | null = req.officeId || null;
       let clientId = req.clientUser?.clientId || null;
@@ -212,7 +242,11 @@ const supportTicketController = {
 
       if (req.user?.userId) {
         senderType = "advocate";
-        senderName = "Legal Desk Team";
+        senderName =
+          req.body.senderName ||
+          req.user.name ||
+          req.user.email ||
+          "Advocate Law Firm";
       } else if (req.clientUser?.email) {
         senderName = `Client (${req.clientUser.email})`;
       }

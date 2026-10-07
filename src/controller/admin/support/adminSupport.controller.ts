@@ -1,4 +1,4 @@
-import { and, eq, SQL } from "drizzle-orm";
+import { and, eq, isNull, SQL } from "drizzle-orm";
 import { NextFunction, Request, Response } from "express";
 
 import db from "../../../db/index.js";
@@ -14,6 +14,7 @@ import ResponseHandler from "../../../utils/responseHandler.js";
 const adminSupportController = {
   // =========================================================================
   // GET ALL SUPPORT TICKETS (With Stage & Category Filtering)
+  // Excludes private chamber case inquiries so they stay strictly within chamber desks
   // =========================================================================
   async getSupportTickets(req: Request, res: Response, next: NextFunction) {
     try {
@@ -24,7 +25,11 @@ const adminSupportController = {
         search?: string;
       };
 
-      const conditions: SQL[] = [];
+      const conditions: SQL[] = [
+        isNull(supportTickets.caseId),
+        isNull(supportTickets.clientId),
+        isNull(supportTickets.clientUserId),
+      ];
       if (status && status !== "all") {
         conditions.push(eq(supportTickets.status, status));
       }
@@ -36,11 +41,10 @@ const adminSupportController = {
       }
 
       const tickets = await db.query.supportTickets.findMany({
-        where: conditions.length > 0 ? and(...conditions) : undefined,
+        where: and(...conditions),
         with: {
           tenant: true,
-          client: true,
-          case: true,
+          office: true,
           messages: {
             orderBy: (m, { desc }) => [desc(m.createdAt)],
           },
@@ -50,11 +54,7 @@ const adminSupportController = {
 
       let formattedTickets = tickets.map((t) => {
         const latestMsg = t.messages?.[0];
-        const clientName = t.client
-          ? `${t.client.firstName || ""} ${t.client.lastName || ""}`.trim() ||
-          t.client.companyName ||
-          "Client"
-          : "Client User";
+        const advocateFirmName = t.tenant?.name || "Advocate Law Firm";
 
         return {
           id: t.id,
@@ -64,19 +64,19 @@ const adminSupportController = {
           priority: t.priority || "medium",
           status: t.status || "open", // stages: open, in_progress, waiting_client, resolved, closed
           description: latestMsg?.message || t.subject,
-          senderName: latestMsg?.senderName || clientName,
-          senderEmail: t.client?.email || "user@firm.com",
-          senderPhone: t.client?.phone || undefined,
+          senderName: t.tenant?.name || latestMsg?.senderName || advocateFirmName,
+          senderEmail: t.tenant?.organisationEmail || undefined,
+          senderPhone: t.tenant?.organisationPhone || undefined,
           tenantId: t.tenantId || undefined,
           tenantName: t.tenant?.name || undefined,
-          caseId: t.caseId || undefined,
-          caseNumber: t.case?.caseNumber || undefined,
-          caseTitle: t.case?.title || undefined,
+          caseId: undefined,
+          caseNumber: undefined,
+          caseTitle: undefined,
           messagesCount: t.messages?.length || 0,
           latestReplyAt: latestMsg?.createdAt
             ? new Date(latestMsg.createdAt).toISOString()
             : undefined,
-          latestSenderType: latestMsg?.senderType || "client",
+          latestSenderType: latestMsg?.senderType || "advocate",
           createdAt: t.createdAt
             ? new Date(t.createdAt).toISOString()
             : new Date().toISOString(),
@@ -92,8 +92,9 @@ const adminSupportController = {
           (t) =>
             t.ticketNumber.toLowerCase().includes(q) ||
             t.subject.toLowerCase().includes(q) ||
-            t.senderName.toLowerCase().includes(q) ||
-            t.senderEmail.toLowerCase().includes(q) ||
+            t.description.toLowerCase().includes(q) ||
+            (t.senderName && t.senderName.toLowerCase().includes(q)) ||
+            (t.senderEmail && t.senderEmail.toLowerCase().includes(q)) ||
             (t.tenantName && t.tenantName.toLowerCase().includes(q))
         );
       }
@@ -115,11 +116,14 @@ const adminSupportController = {
       const { id } = req.params;
 
       const ticket = await db.query.supportTickets.findFirst({
-        where: eq(supportTickets.id, id),
+        where: and(
+          eq(supportTickets.id, id),
+          isNull(supportTickets.caseId),
+          isNull(supportTickets.clientId),
+          isNull(supportTickets.clientUserId)
+        ),
         with: {
           tenant: true,
-          client: true,
-          case: true,
           office: true,
           messages: {
             orderBy: (m, { asc }) => [asc(m.createdAt)],
@@ -131,11 +135,7 @@ const adminSupportController = {
         return next(CustomErrorHandler.notFound("Support ticket not found"));
       }
 
-      const clientName = ticket.client
-        ? `${ticket.client.firstName || ""} ${ticket.client.lastName || ""}`.trim() ||
-        ticket.client.companyName ||
-        "Client"
-        : "Client User";
+      const advocateFirmName = ticket.tenant?.name || "Advocate Law Firm";
 
       const formatted = {
         id: ticket.id,
@@ -146,12 +146,12 @@ const adminSupportController = {
         status: ticket.status || "open",
         tenantId: ticket.tenantId,
         tenantName: ticket.tenant?.name,
-        clientName,
-        clientEmail: ticket.client?.email,
-        clientPhone: ticket.client?.phone,
+        clientName: advocateFirmName,
+        clientEmail: ticket.tenant?.organisationEmail,
+        clientPhone: ticket.tenant?.organisationPhone,
         officeName: ticket.office?.name,
-        caseNumber: ticket.case?.caseNumber,
-        caseTitle: ticket.case?.title,
+        caseNumber: undefined,
+        caseTitle: undefined,
         createdAt: ticket.createdAt
           ? new Date(ticket.createdAt).toISOString()
           : new Date().toISOString(),
@@ -277,6 +277,11 @@ const adminSupportController = {
   async getSupportStats(req: Request, res: Response, next: NextFunction) {
     try {
       const allTickets = await db.query.supportTickets.findMany({
+        where: and(
+          isNull(supportTickets.caseId),
+          isNull(supportTickets.clientId),
+          isNull(supportTickets.clientUserId)
+        ),
         orderBy: (t, { desc }) => [desc(t.updatedAt)],
       });
 
@@ -334,6 +339,7 @@ const adminSupportController = {
         email: c.email,
         phone: c.phone || undefined,
         organization: c.firmName || undefined,
+        role: c.role || undefined,
         subject: c.subject,
         message: c.message,
         status: c.status || "pending",

@@ -906,43 +906,37 @@ const clientPortalController = {
         return next(CustomErrorHandler.badRequest("Subject and initial message are required"));
       }
 
-      let tenantId = req.clientUser?.tenantId ?? req.tenantId ?? null;
-      let officeId = req.clientUser?.officeId ?? req.officeId ?? null;
+      if (!caseId) {
+        return next(
+          CustomErrorHandler.badRequest(
+            "Please select an associated legal case. Chamber inquiries must be linked to a specific case."
+          )
+        );
+      }
 
-      // If caseId is provided, verify client has access to this case and inherit tenant & office
-      if (caseId) {
-        if (clientId) {
-          const clientAccess = await db.query.caseClients.findFirst({
-            where: and(
-              eq(caseClients.caseId, caseId),
-              eq(caseClients.clientId, clientId)
-            ),
-          });
-          if (!clientAccess) {
-            return next(CustomErrorHandler.badRequest("You do not have access to this case"));
-          }
-        }
-
-        const caseRecord = await db.query.cases.findFirst({
-          where: eq(cases.id, caseId),
-          columns: { tenantId: true, officeId: true },
+      // Verify client has access to this case and inherit tenant & office directly from case
+      if (clientId) {
+        const clientAccess = await db.query.caseClients.findFirst({
+          where: and(
+            eq(caseClients.caseId, caseId),
+            eq(caseClients.clientId, clientId)
+          ),
         });
-        if (caseRecord) {
-          tenantId = caseRecord.tenantId;
-          officeId = caseRecord.officeId;
+        if (!clientAccess) {
+          return next(CustomErrorHandler.badRequest("You do not have access to this case"));
         }
       }
 
-      // Fallback: client's first active profile
-      if (!tenantId && clientId) {
-        const profile = await db.query.clientProfiles.findFirst({
-          where: eq(clientProfiles.identityId, clientId),
-        });
-        if (profile) {
-          tenantId = profile.tenantId;
-          officeId = officeId || profile.officeId;
-        }
+      const caseRecord = await db.query.cases.findFirst({
+        where: eq(cases.id, caseId),
+        columns: { tenantId: true, officeId: true },
+      });
+      if (!caseRecord) {
+        return next(CustomErrorHandler.notFound("Selected case not found"));
       }
+
+      const tenantId = caseRecord.tenantId;
+      const officeId = caseRecord.officeId;
 
       const ticketNumber = `TKT-${Math.floor(100000 + Math.random() * 900000)}`;
 

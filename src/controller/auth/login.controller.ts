@@ -233,6 +233,7 @@ const loginController = {
             id: clientUser.id,
             name: clientUser.name,
             email: clientUser.email,
+            phone: clientUser.phone || null,
             email_verified: clientUser.isEmailVerified,
             phone_verified: clientUser.isPhoneVerified,
             avatar: clientUser.avatar || null,

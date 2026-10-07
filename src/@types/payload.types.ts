@@ -3,6 +3,7 @@ export interface IUserJwtPayload {
   tenantId: string;
   scopeId: string;
   email: string;
+  name?: string;
   role?: string;
   roleIds: string[];
   permissions: string[];

@@ -4,7 +4,6 @@ import clientPortalController from "../controller/clientPortal/clientPortal.cont
 import clientAuth from "../middleware/clientAuth.js";
 import { upload } from "../middleware/upload.js";
 import caseDocumentController from "../controller/documents/documents.controller.js";
-import supportTicketController from "../controller/support/supportTicket.controller.js";
 
 const router = Router();
 
@@ -50,9 +49,9 @@ router.get("/billing/ledger", clientAuth, clientPortalController.getClientLedger
 router.post("/billing/invoices/:invoiceId/create-order", clientAuth, clientPortalController.createInvoiceRazorpayOrder);
 router.post("/billing/invoices/:invoiceId/pay", clientAuth, clientPortalController.payInvoice);
 
-router.get("/support/tickets", clientAuth, supportTicketController.getClientTickets);
-router.post("/support/tickets", clientAuth, supportTicketController.createTicket);
-router.post("/support/tickets/:ticketId/reply", clientAuth, supportTicketController.replyTicket);
+router.get("/support/tickets", clientAuth, clientPortalController.getSupportTickets);
+router.post("/support/tickets", clientAuth, clientPortalController.createSupportTicket);
+router.post("/support/tickets/:ticketId/reply", clientAuth, clientPortalController.replySupportTicket);
 
 router.get("/profile", clientAuth, clientPortalController.getProfile);
 router.put("/profile", clientAuth, clientPortalController.updateProfile);

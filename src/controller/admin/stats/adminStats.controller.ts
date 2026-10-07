@@ -1,4 +1,4 @@
-import { count, eq, ne, and, sql } from "drizzle-orm";
+import { count, eq, ne, and, sql, isNull } from "drizzle-orm";
 import { NextFunction, Request, Response } from "express";
 
 import db from "../../../db/index.js";
@@ -73,26 +73,35 @@ const adminStatsController = {
         .where(ne(tenants.slug, "system"));
       const totalOffices = totalOfficesRes?.count || 0;
 
-      // 4. Support Tickets & Problem Solving Metrics
-      const [totalTicketsRes] = await db.select({ count: count() }).from(supportTickets);
+      // 4. Support Tickets & Problem Solving Metrics (Platform level only - Advocate to Admin)
+      const platformTicketCondition = and(
+        isNull(supportTickets.caseId),
+        isNull(supportTickets.clientId),
+        isNull(supportTickets.clientUserId)
+      );
+
+      const [totalTicketsRes] = await db
+        .select({ count: count() })
+        .from(supportTickets)
+        .where(platformTicketCondition);
       const totalTickets = totalTicketsRes?.count || 0;
 
       const [openTicketsRes] = await db
         .select({ count: count() })
         .from(supportTickets)
-        .where(eq(supportTickets.status, "open"));
+        .where(and(eq(supportTickets.status, "open"), platformTicketCondition));
       const openSupportTickets = openTicketsRes?.count || 0;
 
       const [inProgressTicketsRes] = await db
         .select({ count: count() })
         .from(supportTickets)
-        .where(eq(supportTickets.status, "in_progress"));
+        .where(and(eq(supportTickets.status, "in_progress"), platformTicketCondition));
       const inProgressTickets = inProgressTicketsRes?.count || 0;
 
       const [resolvedTicketsRes] = await db
         .select({ count: count() })
         .from(supportTickets)
-        .where(sql`${supportTickets.status} IN ('resolved', 'closed')`);
+        .where(and(sql`${supportTickets.status} IN ('resolved', 'closed')`, platformTicketCondition));
       const resolvedTickets = resolvedTicketsRes?.count || 0;
 
       const resolutionRate =
@@ -104,6 +113,7 @@ const adminStatsController = {
           count: count(),
         })
         .from(supportTickets)
+        .where(platformTicketCondition)
         .groupBy(supportTickets.category);
 
       const categoryLabelMap: Record<string, string> = {
