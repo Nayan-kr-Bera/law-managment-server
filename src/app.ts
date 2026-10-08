@@ -58,6 +58,11 @@ app.use(express.json());
 app.use(
   cors({
     origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps, curl, server-to-server) or in development mode
+      if (!origin || config.NODE_ENV === "development") {
+        return callback(null, true);
+      }
+
       const allowedOrigins = [
         config.ORIGIN_FRONTEND,
         config.ORIGIN_CLIENT,
@@ -65,9 +70,12 @@ app.use(
       ].filter(Boolean) as string[];
 
       const isAllowed =
-        !origin ||
         origin.startsWith("http://localhost:") ||
         origin.startsWith("http://127.0.0.1:") ||
+        origin.startsWith("http://10.0.2.2:") ||
+        origin.startsWith("http://192.168.") ||
+        origin.startsWith("http://10.") ||
+        origin.startsWith("exp://") ||
         origin.endsWith(".vercel.app") ||
         allowedOrigins.includes(origin) ||
         (process.env.ALLOWED_ORIGINS &&
@@ -76,7 +84,7 @@ app.use(
       if (isAllowed) {
         callback(null, true);
       } else {
-        callback(new Error(`Not allowed by CORS: ${origin}`));
+        callback(null, false);
       }
     },
     credentials: true,

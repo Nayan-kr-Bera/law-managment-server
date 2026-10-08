@@ -646,10 +646,6 @@ const clientPortalController = {
         return next(CustomErrorHandler.notFound("Invoice not found or access denied"));
       }
 
-      if (invoiceRecord.status === "paid") {
-        return next(CustomErrorHandler.badRequest("This invoice has already been settled and paid in full"));
-      }
-
       const totalNum = Number(invoiceRecord.total) || 0;
       const existingPaid = (invoiceRecord.payments || []).reduce(
         (sum, p) => sum + (Number(p.amount) || 0),
@@ -658,7 +654,18 @@ const clientPortalController = {
       const remainingDue = Math.max(0, totalNum - existingPaid);
 
       if (remainingDue <= 0) {
-        return next(CustomErrorHandler.badRequest("No balance remaining on this invoice"));
+        return next(CustomErrorHandler.badRequest("This invoice has already been settled and paid in full"));
+      }
+
+      // If the invoice was marked "paid" but now has remaining balance (e.g. items were added),
+      // self-heal the invoice status to "partially_paid" in the database
+      if (invoiceRecord.status === "paid" && remainingDue > 0) {
+        const correctedStatus = existingPaid > 0 ? "partially_paid" : "sent";
+        await db
+          .update(invoices)
+          .set({ status: correctedStatus })
+          .where(eq(invoices.id, invoiceRecord.id));
+        invoiceRecord.status = correctedStatus;
       }
 
       // If client chose a partial amount for hearing/milestone, validate and clamp it
@@ -750,10 +757,6 @@ const clientPortalController = {
         return next(CustomErrorHandler.notFound("Invoice not found or access denied"));
       }
 
-      if (invoiceRecord.status === "paid") {
-        return next(CustomErrorHandler.badRequest("This invoice has already been settled and paid in full"));
-      }
-
       const totalNum = Number(invoiceRecord.total) || 0;
       const existingPaid = (invoiceRecord.payments || []).reduce(
         (sum, p) => sum + (Number(p.amount) || 0),
@@ -762,7 +765,7 @@ const clientPortalController = {
       const remainingDue = Math.max(0, totalNum - existingPaid);
 
       if (remainingDue <= 0) {
-        return next(CustomErrorHandler.badRequest("No balance remaining on this invoice"));
+        return next(CustomErrorHandler.badRequest("This invoice has already been settled and paid in full"));
       }
 
       let payAmount = remainingDue;
@@ -829,9 +832,14 @@ const clientPortalController = {
           status: newStatus,
         })
       );
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Pay invoice error:", error);
-      return next(CustomErrorHandler.serverError());
+      return next(
+        new CustomErrorHandler(
+          500,
+          error instanceof Error ? error.message : "Failed to record invoice payment"
+        )
+      );
     }
   },
 
@@ -928,6 +936,28 @@ const clientPortalController = {
       const clientName = clientRecord?.companyName || `${clientRecord?.firstName || ""} ${clientRecord?.lastName || ""}`.trim() || "Valued Client";
       const firmName = tenantRecord?.name || "Advocate Legal Chambers";
 
+      const search = ((req.query.search || req.query.q) as string)?.trim().toLowerCase();
+      const page = req.query.page ? Math.max(1, parseInt(req.query.page as string, 10)) : undefined;
+      const limit = req.query.limit ? Math.max(1, parseInt(req.query.limit as string, 10)) : undefined;
+
+      let filteredEntries = formattedEntries;
+      if (search) {
+        filteredEntries = formattedEntries.filter((entry) => {
+          return (
+            (entry.description && entry.description.toLowerCase().includes(search)) ||
+            (entry.caseNumber && entry.caseNumber.toLowerCase().includes(search)) ||
+            (entry.caseTitle && entry.caseTitle.toLowerCase().includes(search)) ||
+            (entry.invoiceNumber && entry.invoiceNumber.toLowerCase().includes(search)) ||
+            (entry.paymentMethod && entry.paymentMethod.toLowerCase().includes(search))
+          );
+        });
+      }
+
+      const total = filteredEntries.length;
+      const paginatedEntries = (page && limit)
+        ? filteredEntries.slice((page - 1) * limit, page * limit)
+        : filteredEntries;
+
       return res.status(200).json(
         ResponseHandler(200, "Client ledger fetched successfully", {
           summary: {
@@ -937,7 +967,13 @@ const clientPortalController = {
           },
           clientName,
           firmName,
-          entries: formattedEntries,
+          pagination: (page && limit) ? {
+            page,
+            limit,
+            total,
+            totalPages: Math.ceil(total / limit) || 1,
+          } : undefined,
+          entries: paginatedEntries,
         })
       );
     } catch (error) {

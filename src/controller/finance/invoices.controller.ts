@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import db from "../../db/index.js";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import invoices from "../../db/schema/finance/invoices.js";
 import invoiceItems from "../../db/schema/finance/invoiceItems.js";
 import payments from "../../db/schema/finance/payments.js";
@@ -279,11 +279,23 @@ export const invoicesController = {
       if (caseId !== undefined) {
         updateData.caseId = targetCaseId;
       }
-      if (status) {
-        const validStatuses = ["draft", "sent", "partially_paid", "paid", "overdue", "cancelled"];
-        if (validStatuses.includes(status)) {
-          updateData.status = status as typeof invoices.$inferSelect.status;
-        }
+      // Recalculate status based on actual payments vs updated total
+      const existingPayments = await db.query.payments.findMany({
+        where: eq(payments.invoiceId, id),
+      });
+      const totalPaid = existingPayments.reduce(
+        (sum, p) => sum + (Number(p.amount) || 0),
+        0,
+      );
+
+      if (status === "cancelled" || status === "draft") {
+        updateData.status = status;
+      } else if (totalPaid >= finalTotal - 0.01 && finalTotal > 0) {
+        updateData.status = "paid";
+      } else if (totalPaid > 0) {
+        updateData.status = "partially_paid";
+      } else {
+        updateData.status = status && ["draft", "sent", "overdue"].includes(status) ? (status as typeof invoices.$inferSelect.status) : "sent";
       }
 
       const [updatedInvoice] = await db
@@ -355,6 +367,10 @@ export const invoicesController = {
       const { id } = req.params;
       const tenantId = req.user?.tenantId;
 
+      if (!tenantId) {
+        return next(CustomErrorHandler.badRequest("Tenant context missing"));
+      }
+
       const inv = await db.query.invoices.findFirst({
         where: and(eq(invoices.id, id), eq(invoices.tenantId, tenantId)),
       });
@@ -363,17 +379,49 @@ export const invoicesController = {
         return next(CustomErrorHandler.notFound("Invoice not found"));
       }
 
-      await db.delete(invoiceItems).where(eq(invoiceItems.invoiceId, id));
-      await db.delete(payments).where(eq(payments.invoiceId, id));
-      await db.delete(clientLedger).where(eq(clientLedger.invoiceId, id));
-      await db.delete(invoices).where(eq(invoices.id, id));
+      await db.transaction(async (tx) => {
+        // 1. Fetch all payment IDs linked to this invoice
+        const invoicePayments = await tx
+          .select({ id: payments.id })
+          .from(payments)
+          .where(eq(payments.invoiceId, id));
+        const paymentIds = invoicePayments.map((p) => p.id);
+
+        // 2. Delete client ledger records referencing those payments
+        if (paymentIds.length > 0) {
+          await tx
+            .delete(clientLedger)
+            .where(inArray(clientLedger.paymentId, paymentIds));
+        }
+
+        // 3. Delete client ledger records referencing this invoice directly (e.g. invoice debit)
+        await tx
+          .delete(clientLedger)
+          .where(eq(clientLedger.invoiceId, id));
+
+        // 4. Delete payments referencing this invoice
+        await tx
+          .delete(payments)
+          .where(eq(payments.invoiceId, id));
+
+        // 5. Delete line items referencing this invoice
+        await tx
+          .delete(invoiceItems)
+          .where(eq(invoiceItems.invoiceId, id));
+
+        // 6. Delete invoice record itself
+        await tx
+          .delete(invoices)
+          .where(eq(invoices.id, id));
+      });
 
       return res.status(200).json(
         ResponseHandler(200, "Invoice deleted successfully", null),
       );
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Delete invoice error:", error);
-      return next(CustomErrorHandler.serverError());
+      const message = error instanceof Error ? error.message : "Failed to delete invoice";
+      return next(CustomErrorHandler.serverError(message));
     }
   },
 
