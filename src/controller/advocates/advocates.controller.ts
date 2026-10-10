@@ -24,6 +24,11 @@ import {
 } from "../../validators/advocate.validator.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import advocateEmailService from "../../services/advocateEmail.service.js";
+import {
+  notifyAdvocateCasesAssigned,
+  notifyAdvocateCasesRevoked,
+  notifyCasesReassigned,
+} from "../../services/caseAssignmentNotification.service.js";
 const advocatesController = {
   async getadvocates(req: Request, res: Response, next: NextFunction) {
     try {
@@ -550,6 +555,9 @@ const advocatesController = {
         }
       }
 
+      let insertedCaseIds: string[] = [];
+      let removedCaseIds: string[] = [];
+
       await db.transaction(async (tx) => {
         // Current assignments
         const existingAssignments = await tx
@@ -575,6 +583,9 @@ const advocatesController = {
           (id) => !incomingCaseIds.has(id),
         );
 
+        insertedCaseIds = toInsert.map((item) => item.caseId);
+        removedCaseIds = toRemove;
+
         if (toInsert.length) {
           await tx.insert(caseAdvocates).values(
             toInsert.map((item) => ({
@@ -596,6 +607,23 @@ const advocatesController = {
             );
         }
       });
+
+      if (insertedCaseIds.length > 0) {
+        notifyAdvocateCasesAssigned(
+          advocateId,
+          tenantId,
+          insertedCaseIds
+        ).catch((err) =>
+          console.error("Error notifying advocate on case assignments:", err)
+        );
+      }
+
+      if (removedCaseIds.length > 0) {
+        notifyAdvocateCasesRevoked(advocateId, tenantId, removedCaseIds).catch(
+          (err) =>
+            console.error("Error notifying advocate on case revocations:", err)
+        );
+      }
 
       return res.status(200).json({
         success: true,
@@ -717,6 +745,15 @@ const advocatesController = {
           })),
         );
       });
+
+      notifyCasesReassigned(
+        fromAdvocateId,
+        toAdvocateId,
+        tenantId,
+        caseIds
+      ).catch((err) =>
+        console.error("Error notifying advocates on case reassignment:", err)
+      );
 
       return res.status(200).json({
         success: true,

@@ -34,6 +34,10 @@ import { endOfMonth, format, startOfMonth } from "date-fns";
 import ResponseHandler from "../../utils/responseHandler.js";
 import { createCaseSchema } from "../../validators/case.validator.js";
 import { formatCaseRemarks } from "../../services/caseRemarks.service.js";
+import {
+  notifyAdvocatesOnCaseCreation,
+  notifyClientsOnCaseCreation,
+} from "../../services/caseAssignmentNotification.service.js";
 
 const caseController = {
   async createCase(req: Request, res: Response, next: NextFunction) {
@@ -187,6 +191,28 @@ const caseController = {
 
         return newCase;
       });
+
+      // Asynchronously trigger advocate & client notifications and email alerts
+      const newCaseId = createdCase.id;
+      if (Array.isArray(advocates) && advocates.length > 0) {
+        const advocateIds = advocates
+          .map((a: { advocateId: string }) => a.advocateId)
+          .filter(Boolean);
+        notifyAdvocatesOnCaseCreation(newCaseId, tenantId, advocateIds).catch(
+          (err) =>
+            console.error("Error sending advocate case creation alerts:", err)
+        );
+      }
+
+      if (Array.isArray(clients) && clients.length > 0) {
+        const clientIds = clients
+          .map((c: { clientId: string }) => c.clientId)
+          .filter(Boolean);
+        notifyClientsOnCaseCreation(newCaseId, tenantId, clientIds).catch(
+          (err) =>
+            console.error("Error sending client case creation alerts:", err)
+        );
+      }
 
       return res.status(201).json({
         success: true,

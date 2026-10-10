@@ -16,6 +16,7 @@ import razorpayService from "../../services/razorpay.service.js";
 import supportTickets from "../../db/schema/support/supportTickets.js";
 import supportTicketMessages from "../../db/schema/support/supportTicketMessages.js";
 import notificationQueue from "../../db/schema/notifications/notificationQueue.js";
+import clientPushTokens from "../../db/schema/clients/clientPushTokens.js";
 import JwtService from "../../utils/jwtServices.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import ResponseHandler from "../../utils/responseHandler.js";
@@ -1501,6 +1502,58 @@ const clientPortalController = {
       );
     } catch (error) {
       console.error("Change client password error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  async registerPushToken(req: Request, res: Response, next: NextFunction) {
+    try {
+      const clientId = req.clientUser?.clientId;
+      const { pushToken, deviceType } = req.body;
+
+      if (!clientId) {
+        return next(CustomErrorHandler.unAuthorized("Client ID not found"));
+      }
+
+      if (!pushToken || typeof pushToken !== "string") {
+        return next(CustomErrorHandler.badRequest("Valid pushToken is required"));
+      }
+
+      // Ensure push token table exists
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS client_push_tokens (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          client_id uuid NOT NULL,
+          push_token varchar(255) NOT NULL UNIQUE,
+          device_type varchar(50) DEFAULT 'android',
+          created_at timestamp DEFAULT now(),
+          updated_at timestamp DEFAULT now()
+        );
+      `);
+
+      // Upsert push token for this client
+      await db
+        .insert(clientPushTokens)
+        .values({
+          clientId,
+          pushToken,
+          deviceType: deviceType || "android",
+          updatedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: clientPushTokens.pushToken,
+          set: {
+            clientId,
+            deviceType: deviceType || "android",
+            updatedAt: new Date(),
+          },
+        });
+
+      return res.status(200).json(
+        ResponseHandler(200, "Expo push token registered successfully")
+      );
+    } catch (error) {
+      console.error("Register push token error:", error);
       return next(CustomErrorHandler.serverError());
     }
   },

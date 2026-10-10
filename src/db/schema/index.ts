@@ -22,6 +22,7 @@ export { default as userPermissions } from "./rolePermission/userPermission.js";
 
 export { default as clients } from "./clients/clients.js";
 export { default as clientProfiles } from "./clients/clientProfiles.js";
+export { default as clientPushTokens } from "./clients/clientPushTokens.js";
 export { default as clientConsents } from "./clients/clientConsents.js";
 export { default as clientLedger } from "./clients/clientLedger.js";
 

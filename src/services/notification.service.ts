@@ -2,6 +2,7 @@ import { EventEmitter } from "events";
 import { and, eq } from "drizzle-orm";
 import db from "../db/index.js";
 import { notifications, notificationQueue, userScopes, userScopeOffices } from "../db/schema/index.js";
+import { sendExpoPushToClient } from "./expoPushNotification.service.js";
 
 export const notificationEvents = new EventEmitter();
 notificationEvents.setMaxListeners(0); // Unlimited listeners for active SSE connections
@@ -54,6 +55,18 @@ export const createClientNotification = async (params: CreateClientNotificationP
 
     if (queueItem) {
       notificationEvents.emit("client_notification:new", queueItem);
+
+      // Trigger mobile push notification banner via Expo
+      sendExpoPushToClient(params.clientId, {
+        title: params.title,
+        body: params.message,
+        data: {
+          caseId: params.caseId || null,
+          notificationId: queueItem.id,
+        },
+      }).catch((err) =>
+        console.error("Error dispatching Expo push to client:", err)
+      );
     }
     return queueItem;
   } catch (error) {

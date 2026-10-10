@@ -60,6 +60,7 @@ router.post("/change-password", clientAuth, clientPortalController.changePasswor
 
 router.get("/notifications/stream", clientAuth, clientPortalController.streamNotifications);
 router.get("/notifications", clientAuth, clientPortalController.getNotifications);
+router.post("/notifications/push-token", clientAuth, clientPortalController.registerPushToken);
 router.patch("/notifications/mark-all-read", clientAuth, clientPortalController.markAllNotificationsRead);
 router.patch("/notifications/:id/read", clientAuth, clientPortalController.markNotificationRead);
 router.delete("/notifications/clear-read", clientAuth, clientPortalController.clearReadNotifications);

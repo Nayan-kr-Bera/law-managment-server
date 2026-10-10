@@ -21,6 +21,10 @@ import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import ResponseHandler from "../../utils/responseHandler.js";
 import { sendClientCaseNotificationEmail } from "../../services/clientNotificationEmail.service.js";
 import { notificationEvents } from "../../services/notification.service.js";
+import {
+  notifyClientAddedToCase,
+  notifyClientRemovedFromCase,
+} from "../../services/caseAssignmentNotification.service.js";
 const DISPOSAL_NATURES = [
   "judgment",
   "dismissed",
@@ -980,6 +984,10 @@ const caseActionController = {
         })
         .returning();
 
+      notifyClientAddedToCase(caseId, clientId, tenantId).catch((err) =>
+        console.error("Error notifying client added to case:", err)
+      );
+
       return res
         .status(201)
         .send(
@@ -1035,6 +1043,10 @@ const caseActionController = {
             eq(caseClients.clientId, clientId),
           ),
         );
+
+      notifyClientRemovedFromCase(caseId, clientId, tenantId).catch((err) =>
+        console.error("Error notifying client removed from case:", err)
+      );
 
       return res
         .status(200)
