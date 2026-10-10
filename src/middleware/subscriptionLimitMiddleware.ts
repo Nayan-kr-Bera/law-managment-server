@@ -1,4 +1,4 @@
-import { count, eq } from "drizzle-orm";
+import { count, countDistinct, eq } from "drizzle-orm";
 import { NextFunction, Request, Response } from "express";
 
 import db from "../db/index.js";
@@ -7,6 +7,7 @@ import users from "../db/schema/users.js";
 import offices from "../db/schema/offices.js";
 import tenants from "../db/schema/tenants.js";
 import userScopes from "../db/schema/userScope.js";
+import advocates from "../db/schema/advocates/advocates.js";
 
 import CustomErrorHandler from "../utils/customErrorHandler.js";
 
@@ -14,7 +15,7 @@ const BYTES_PER_GB = 1024 * 1024 * 1024;
 
 const subscriptionLimitMiddleware = {
   // ============================================================
-  // USER LIMIT
+  // USER / ADVOCATE LIMIT
   // ============================================================
 
   async checkUserLimit(req: Request, res: Response, next: NextFunction) {
@@ -42,33 +43,34 @@ const subscriptionLimitMiddleware = {
 
       const result = await db
         .select({
-          count: count(),
+          count: countDistinct(advocates.id),
         })
-        .from(users)
+        .from(advocates)
+        .innerJoin(users, eq(advocates.userId, users.id))
         .innerJoin(userScopes, eq(userScopes.userId, users.id))
         .where(eq(userScopes.tenantId, tenantId));
 
-      const currentUsers = Number(result[0]?.count ?? 0);
+      const currentAdvocates = Number(result[0]?.count ?? 0);
 
-      console.log("[checkUserLimit] User limit check:", {
-        currentUsers,
+      console.log("[checkUserLimit] Advocate limit check:", {
+        currentAdvocates,
         maxUsers: req.subscription.maxUsers,
         planName: req.subscription.planName,
       });
 
-      if (currentUsers >= req.subscription.maxUsers) {
-        console.warn("[checkUserLimit] 403 Forbidden: User limit reached!", {
-          currentUsers,
+      if (currentAdvocates >= req.subscription.maxUsers) {
+        console.warn("[checkUserLimit] 403 Forbidden: Advocate limit reached!", {
+          currentAdvocates,
           maxAllowed: req.subscription.maxUsers,
         });
         return next(
           CustomErrorHandler.forbidden(
-            `User limit reached. Your ${req.subscription.planName} plan allows maximum ${req.subscription.maxUsers} users.`,
+            `Advocate limit reached. Your ${req.subscription.planName} plan allows maximum ${req.subscription.maxUsers} advocate seat${req.subscription.maxUsers === 1 ? "" : "s"}.`,
           ),
         );
       }
 
-      console.log("[checkUserLimit] User limit check passed");
+      console.log("[checkUserLimit] Advocate limit check passed");
       return next();
     } catch (error) {
       console.error("User subscription limit error:", error);
