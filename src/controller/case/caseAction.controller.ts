@@ -25,6 +25,7 @@ import {
   notifyClientAddedToCase,
   notifyClientRemovedFromCase,
 } from "../../services/caseAssignmentNotification.service.js";
+import { CASE_STATUS } from "../../validators/case.validator.js";
 const DISPOSAL_NATURES = [
   "judgment",
   "dismissed",
@@ -330,6 +331,7 @@ const caseActionController = {
         decisionDate,
         natureOfDisposal,
         judgmentSummary,
+        status,
       } = req.body;
 
       const tenantId = req.user?.tenantId;
@@ -360,6 +362,7 @@ const caseActionController = {
         "remove_important",
         "mark_decided",
         "mark_abandoned",
+        "change_status",
       ];
 
       if (!allowedActions.includes(action)) {
@@ -375,6 +378,16 @@ const caseActionController = {
             "Priority must be high or urgent when marking cases as important",
           ),
         );
+      }
+
+      if (action === "change_status") {
+        if (!status || !(CASE_STATUS as readonly string[]).includes(status)) {
+          return next(
+            CustomErrorHandler.badRequest(
+              `Valid case status is required (${CASE_STATUS.join(", ")})`,
+            ),
+          );
+        }
       }
 
       if (action === "mark_decided") {
@@ -405,6 +418,7 @@ const caseActionController = {
         ),
         columns: {
           id: true,
+          status: true,
         },
       });
 
@@ -449,6 +463,15 @@ const caseActionController = {
             isAbandoned: true,
           };
           break;
+
+        case "change_status":
+          updateData = {
+            ...updateData,
+            status,
+            isDecided: status === "disposed" || status === "closed",
+            isAbandoned: status === "archived",
+          };
+          break;
       }
 
       const updatedCases = await db.transaction(async (tx) => {
@@ -461,6 +484,31 @@ const caseActionController = {
           .returning({
             id: cases.id,
           });
+
+        if (action === "change_status") {
+          const statusHistoryEntries = tenantCases
+            .filter((c) => c.status !== status)
+            .map((c) => ({
+              caseId: c.id,
+              oldStatus: c.status,
+              newStatus: status,
+              changedBy: userId,
+            }));
+
+          if (statusHistoryEntries.length > 0) {
+            await tx.insert(caseStatusHistory).values(statusHistoryEntries);
+          }
+
+          await tx.insert(caseTimelines).values(
+            uniqueCaseIds.map((caseId) => ({
+              caseId,
+              userId,
+              activityType: "case_updated",
+              title: "Case status updated",
+              description: `Case status changed to ${status}`,
+            })),
+          );
+        }
 
         if (action === "mark_decided") {
           await tx.insert(caseDecisions).values(
@@ -1104,6 +1152,7 @@ const caseActionController = {
 
         isDecided,
         isAbandoned,
+        status,
       } = req.body;
 
       const existingCase = await db.query.cases.findFirst({
@@ -1115,21 +1164,40 @@ const caseActionController = {
       }
 
       let newStatus = existingCase.status;
+      let finalIsDecided = isDecided !== undefined ? isDecided : existingCase.isDecided;
+      let finalIsAbandoned = isAbandoned !== undefined ? isAbandoned : existingCase.isAbandoned;
 
-      if (isAbandoned === true) {
-        newStatus = "archived";
-      } else if (isDecided === true) {
-        newStatus = "disposed";
-      }
+      if (status && (CASE_STATUS as readonly string[]).includes(status)) {
+        newStatus = status;
+        if (status === "disposed" || status === "closed") {
+          finalIsDecided = true;
+        } else if (status === "archived") {
+          finalIsAbandoned = true;
+        } else {
+          // If explicitly set to an active/in-progress/open/draft/stayed status
+          if (isDecided === undefined && existingCase.isDecided) {
+            finalIsDecided = false;
+          }
+          if (isAbandoned === undefined && existingCase.isAbandoned) {
+            finalIsAbandoned = false;
+          }
+        }
+      } else {
+        if (isAbandoned === true) {
+          newStatus = "archived";
+        } else if (isDecided === true) {
+          newStatus = "disposed";
+        }
 
-      // If previously abandoned/decided and user removes it,
-      // return it to open status.
-      if (isAbandoned === false && existingCase.isAbandoned === true) {
-        newStatus = "open";
-      }
+        // If previously abandoned/decided and user removes it,
+        // return it to open status.
+        if (isAbandoned === false && existingCase.isAbandoned === true) {
+          newStatus = "open";
+        }
 
-      if (isDecided === false && existingCase.isDecided === true) {
-        newStatus = "open";
+        if (isDecided === false && existingCase.isDecided === true) {
+          newStatus = "open";
+        }
       }
 
       const [updatedCase] = await db
@@ -1157,8 +1225,8 @@ const caseActionController = {
 
           priority,
 
-          isDecided,
-          isAbandoned,
+          isDecided: finalIsDecided,
+          isAbandoned: finalIsAbandoned,
 
           status: newStatus,
 
@@ -1175,15 +1243,23 @@ const caseActionController = {
           newStatus,
           changedBy: userId,
         });
-      }
 
-      await db.insert(caseTimelines).values({
-        caseId: id,
-        userId,
-        activityType: "case_updated",
-        title: "Case details updated",
-        description: "Case information was updated",
-      });
+        await db.insert(caseTimelines).values({
+          caseId: id,
+          userId,
+          activityType: "case_updated",
+          title: "Case status changed",
+          description: `Case status changed from ${existingCase.status} to ${newStatus}`,
+        });
+      } else {
+        await db.insert(caseTimelines).values({
+          caseId: id,
+          userId,
+          activityType: "case_updated",
+          title: "Case details updated",
+          description: "Case information was updated",
+        });
+      }
 
       return res
         .status(200)
