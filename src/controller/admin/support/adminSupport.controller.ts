@@ -11,6 +11,7 @@ import {
 import CustomErrorHandler from "../../../utils/customErrorHandler.js";
 import ResponseHandler from "../../../utils/responseHandler.js";
 import { sendContactInquiryReplyEmail } from "../../../services/contactInquiryReplyEmail.service.js";
+import { createClientNotification } from "../../../services/notification.service.js";
 
 const adminSupportController = {
   // =========================================================================
@@ -207,6 +208,36 @@ const adminSupportController = {
         .where(eq(supportTickets.id, id))
         .returning();
 
+      const targetClientId = existing.clientId || existing.clientUserId;
+      if (targetClientId && status && existing.status !== status) {
+        const formatStatus = (s: string) =>
+          s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+        const statusLabel = formatStatus(status);
+        const statusMessage =
+          status === "closed"
+            ? `Your support ticket #${existing.ticketNumber} has been resolved and closed.`
+            : `Your support ticket #${existing.ticketNumber} status has been updated to "${statusLabel}".`;
+
+        createClientNotification({
+          tenantId: existing.tenantId || null,
+          officeId: existing.officeId,
+          caseId: existing.caseId,
+          clientId: targetClientId,
+          channel: "push",
+          title: `Ticket #${existing.ticketNumber} Status: ${statusLabel}`,
+          message: statusMessage,
+          payload: {
+            ticketId: existing.id,
+            ticketNumber: existing.ticketNumber,
+            type: "support_status",
+            status,
+          },
+        }).catch((err) =>
+          console.error("Failed to send admin status push notification:", err)
+        );
+      }
+
       return res.status(200).json(
         ResponseHandler(200, `Ticket stage updated to ${status || updated.status}`, updated)
       );
@@ -262,6 +293,31 @@ const adminSupportController = {
           updatedAt: new Date(),
         })
         .where(eq(supportTickets.id, id));
+
+      // Trigger push notification to client
+      const targetClientId = existing.clientId || existing.clientUserId;
+      if (targetClientId) {
+        const messagePreview =
+          message.length > 80 ? `${message.substring(0, 77)}...` : message;
+
+        createClientNotification({
+          tenantId: existing.tenantId || null,
+          officeId: existing.officeId,
+          caseId: existing.caseId,
+          clientId: targetClientId,
+          channel: "push",
+          title: `Response on Ticket #${existing.ticketNumber}`,
+          message: `${senderName}: "${messagePreview}"`,
+          payload: {
+            ticketId: existing.id,
+            ticketNumber: existing.ticketNumber,
+            type: "support_reply",
+            senderName,
+          },
+        }).catch((err) =>
+          console.error("Failed to send admin reply push notification:", err)
+        );
+      }
 
       return res.status(201).json(
         ResponseHandler(201, "Reply posted successfully", newMessage)

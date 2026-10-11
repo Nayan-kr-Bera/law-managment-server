@@ -1,11 +1,11 @@
 import { and, eq, isNotNull, isNull, or, SQL } from "drizzle-orm";
 import { NextFunction, Request, Response } from "express";
 import db from "../../db/index.js";
-import clients from "../../db/schema/clients/clients.js";
 import supportTicketMessages from "../../db/schema/support/supportTicketMessages.js";
 import supportTickets from "../../db/schema/support/supportTickets.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import ResponseHandler from "../../utils/responseHandler.js";
+import { createClientNotification } from "../../services/notification.service.js";
 
 const supportTicketController = {
   // GET TICKETS FOR CLIENT PORTAL
@@ -369,6 +369,31 @@ const supportTicketController = {
         })
         .where(eq(supportTickets.id, ticketId));
 
+      // Trigger push notification to client if advocate/staff replied
+      const targetClientId = ticketRecord.clientId || ticketRecord.clientUserId;
+      if (targetClientId && (senderType === "advocate" || req.user?.userId)) {
+        const messagePreview =
+          message.length > 80 ? `${message.substring(0, 77)}...` : message;
+
+        createClientNotification({
+          tenantId: ticketRecord.tenantId || null,
+          officeId: ticketRecord.officeId,
+          caseId: ticketRecord.caseId,
+          clientId: targetClientId,
+          channel: "push",
+          title: `Response on Ticket #${ticketRecord.ticketNumber}`,
+          message: `${senderName}: "${messagePreview}"`,
+          payload: {
+            ticketId: ticketRecord.id,
+            ticketNumber: ticketRecord.ticketNumber,
+            type: "support_reply",
+            senderName,
+          },
+        }).catch((err) =>
+          console.error("Failed to push support ticket reply notification:", err)
+        );
+      }
+
       const allMessages = await db.query.supportTicketMessages.findMany({
         where: eq(supportTicketMessages.ticketId, ticketId),
         orderBy: (msgs, { asc }) => [asc(msgs.createdAt)],
@@ -414,6 +439,14 @@ const supportTicketController = {
         return next(CustomErrorHandler.badRequest("Ticket status is required"));
       }
 
+      const ticketRecord = await db.query.supportTickets.findFirst({
+        where: eq(supportTickets.id, ticketId),
+      });
+
+      if (!ticketRecord) {
+        return next(CustomErrorHandler.notFound("Support ticket not found"));
+      }
+
       await db
         .update(supportTickets)
         .set({
@@ -421,6 +454,36 @@ const supportTicketController = {
           updatedAt: new Date(),
         })
         .where(eq(supportTickets.id, ticketId));
+
+      const targetClientId = ticketRecord.clientId || ticketRecord.clientUserId;
+      if (targetClientId && ticketRecord.status !== status) {
+        const formatStatus = (s: string) =>
+          s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+        const statusLabel = formatStatus(status);
+        const statusMessage =
+          status === "closed"
+            ? `Your support ticket #${ticketRecord.ticketNumber} has been resolved and closed.`
+            : `Your support ticket #${ticketRecord.ticketNumber} status is now "${statusLabel}".`;
+
+        createClientNotification({
+          tenantId: ticketRecord.tenantId || null,
+          officeId: ticketRecord.officeId,
+          caseId: ticketRecord.caseId,
+          clientId: targetClientId,
+          channel: "push",
+          title: `Ticket #${ticketRecord.ticketNumber} Status: ${statusLabel}`,
+          message: statusMessage,
+          payload: {
+            ticketId: ticketRecord.id,
+            ticketNumber: ticketRecord.ticketNumber,
+            type: "support_status",
+            status,
+          },
+        }).catch((err) =>
+          console.error("Failed to push support ticket status notification:", err)
+        );
+      }
 
       return res.status(200).json(
         ResponseHandler(200, `Support ticket status updated to ${status}`, {

@@ -17,7 +17,7 @@ export interface CreateNotificationParams {
 }
 
 export interface CreateClientNotificationParams {
-  tenantId: string;
+  tenantId?: string | null;
   officeId?: string | null;
   caseId?: string | null;
   clientId: string;
@@ -36,7 +36,7 @@ export const createClientNotification = async (params: CreateClientNotificationP
     const [queueItem] = await db
       .insert(notificationQueue)
       .values({
-        tenantId: params.tenantId,
+        tenantId: params.tenantId || null,
         officeId: params.officeId || null,
         caseId: params.caseId || null,
         clientId: params.clientId,
@@ -63,6 +63,7 @@ export const createClientNotification = async (params: CreateClientNotificationP
         data: {
           caseId: params.caseId || null,
           notificationId: queueItem.id,
+          ...(params.payload || {}),
         },
       }).catch((err) =>
         console.error("Error dispatching Expo push to client:", err)
