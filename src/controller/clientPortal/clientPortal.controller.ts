@@ -22,7 +22,7 @@ import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import ResponseHandler from "../../utils/responseHandler.js";
 import { config } from "../../config/index.js";
 import { IClientJwtPayload } from "../../@types/payload.types.js";
-import { notificationEvents } from "../../services/notification.service.js";
+import { notificationEvents, createNotification, createClientNotification } from "../../services/notification.service.js";
 import bcrypt from "bcrypt";
 import { formatCaseRemarks } from "../../services/caseRemarks.service.js";
 
@@ -370,6 +370,71 @@ const clientPortalController = {
         .returning();
 
       const [formattedRemark] = await formatCaseRemarks([newNote]);
+
+      // 1. Notify Advocates / Law Office at the office level (Office broadcast)
+      let clientDisplayName = "Client";
+      if (clientId) {
+        const clientRec = await db.query.clients.findFirst({
+          where: eq(clients.id, clientId),
+        });
+        const clientFullName = [clientRec?.firstName, clientRec?.lastName]
+          .filter(Boolean)
+          .join(" ")
+          .trim();
+        if (clientFullName) {
+          clientDisplayName = clientFullName;
+        } else if (clientRec?.companyName) {
+          clientDisplayName = clientRec.companyName;
+        } else if (req.clientUser?.email) {
+          clientDisplayName = req.clientUser.email;
+        }
+      } else if (req.clientUser?.email) {
+        clientDisplayName = req.clientUser.email;
+      }
+
+      if (caseExists.tenantId) {
+        const caseLabel = caseExists.caseNumber ? `#${caseExists.caseNumber}` : caseExists.title;
+        createNotification({
+          tenantId: caseExists.tenantId,
+          officeId: caseExists.officeId || null,
+          title: `New Remark on Case ${caseLabel}`,
+          body: `${clientDisplayName}: "${content.trim().slice(0, 120)}${content.trim().length > 120 ? "..." : ""}"`,
+          type: "case",
+        }).catch((err) =>
+          console.error("Error creating office-level notification for case remark:", err)
+        );
+      }
+
+      // 2. Also notify other co-clients on this case if present
+      try {
+        const coClients = await db.query.caseClients.findMany({
+          where: and(
+            eq(caseClients.caseId, caseId),
+            clientId ? sql`${caseClients.clientId} != ${clientId}` : undefined
+          ),
+        });
+
+        for (const cc of coClients) {
+          if (cc.clientId) {
+            createClientNotification({
+              tenantId: caseExists.tenantId || null,
+              officeId: caseExists.officeId || null,
+              caseId: caseExists.id,
+              clientId: cc.clientId,
+              title: `New Note on Case #${caseExists.caseNumber || caseExists.title}`,
+              message: `${clientDisplayName}: "${content.trim().slice(0, 120)}${content.trim().length > 120 ? "..." : ""}"`,
+              payload: {
+                caseId: caseExists.id,
+                type: "case_remark",
+                tab: "remarks",
+                remarkId: newNote.id,
+              },
+            }).catch((err) => console.error("Error notifying co-client of remark:", err));
+          }
+        }
+      } catch (coErr) {
+        console.error("Error dispatching co-client notifications:", coErr);
+      }
 
       return res.status(201).json(
         ResponseHandler(201, "Case remark posted successfully", {

@@ -1331,7 +1331,10 @@ const caseActionController = {
           status: c.status,
           clients: matchingClients.map((cl) => ({
             id: cl.clientId,
-            name: cl.companyName || `${cl.firstName} ${cl.lastName || ""}`.trim(),
+            name: `${cl.firstName} ${cl.lastName || ""}`.trim() || cl.companyName || "Client",
+            firstName: cl.firstName,
+            lastName: cl.lastName,
+            companyName: cl.companyName,
             email: cl.email,
             phone: cl.phone,
             role: cl.role,
@@ -1433,8 +1436,8 @@ const caseActionController = {
         if (!caseObj) continue;
 
         const clientDisplayName =
-          clientItem.companyName ||
           `${clientItem.firstName} ${clientItem.lastName || ""}`.trim() ||
+          clientItem.companyName ||
           "Client";
 
         // 1. Send Email Notification

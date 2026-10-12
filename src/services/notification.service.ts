@@ -11,6 +11,7 @@ export interface CreateNotificationParams {
   tenantId: string;
   officeId?: string | null;
   userId?: string | null;
+  excludeUserId?: string | null;
   title: string;
   body: string;
   type: "system" | "case" | "hearing" | "task" | "appointment" | "invoice" | "payment" | "reminder";
@@ -142,6 +143,10 @@ export const createNotification = async (params: CreateNotificationParams) => {
             .filter((id): id is string => typeof id === "string" && id.length > 0)
         ),
       ];
+    }
+
+    if (params.excludeUserId) {
+      targetUserIds = targetUserIds.filter((id) => id !== params.excludeUserId);
     }
 
     // Fallback if no target users found

@@ -26,8 +26,10 @@ import {
   courts,
   documentFolders,
   hearings,
-  caseNotes
+  caseNotes,
+  user,
 } from "../../db/schema/index.js";
+import { createNotification, createClientNotification } from "../../services/notification.service.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import { getDateRange } from "../../utils/dateRange.js";
 import { endOfMonth, format, startOfMonth } from "date-fns";
@@ -1445,7 +1447,7 @@ const caseController = {
         let clientName: string | null = null;
         if (item.clients?.[0]?.client) {
           const c = item.clients[0].client;
-          clientName = c.companyName || `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || null;
+          clientName = `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || c.companyName || null;
         }
         if (!clientName && item.firstParty) {
           clientName = item.firstParty;
@@ -1897,6 +1899,66 @@ const caseController = {
         .returning();
 
       const [formattedRemark] = await formatCaseRemarks([newNote]);
+
+      // Resolve author name
+      let authorDisplayName = "Your legal counsel";
+      if (userId) {
+        const authorUser = await db.query.user.findFirst({
+          where: eq(user.id, userId),
+        });
+        if (authorUser?.name) {
+          authorDisplayName = authorUser.name;
+        }
+      }
+
+      const caseLabel = caseExists.caseNumber ? `#${caseExists.caseNumber}` : caseExists.title;
+      const isNotePrivate = Boolean(isPrivate);
+
+      // 1. Notify Clients on this case if note is not marked private
+      if (!isNotePrivate) {
+        try {
+          const linkedClients = await db.query.caseClients.findMany({
+            where: eq(caseClients.caseId, caseId),
+          });
+
+          for (const cc of linkedClients) {
+            if (cc.clientId) {
+              createClientNotification({
+                tenantId: caseExists.tenantId || null,
+                officeId: caseExists.officeId || null,
+                caseId: caseExists.id,
+                clientId: cc.clientId,
+                title: `New Message on Case ${caseLabel}`,
+                message: `${authorDisplayName}: "${content.trim().slice(0, 120)}${content.trim().length > 120 ? "..." : ""}"`,
+                payload: {
+                  caseId: caseExists.id,
+                  type: "case_remark",
+                  tab: "remarks",
+                  remarkId: newNote.id,
+                },
+              }).catch((err) =>
+                console.error("Error creating client notification for advocate remark:", err)
+              );
+            }
+          }
+        } catch (clientNotifErr) {
+          console.error("Error dispatching client notifications for remark:", clientNotifErr);
+        }
+      }
+
+      // 2. Notify Advocates / Law Office at the office level (excluding author)
+      if (caseExists.tenantId) {
+        createNotification({
+          tenantId: caseExists.tenantId,
+          officeId: caseExists.officeId || null,
+          excludeUserId: userId || null,
+          title: `${isNotePrivate ? "Internal Note" : "New Remark"} on Case ${caseLabel}`,
+          body: `${authorDisplayName}: "${content.trim().slice(0, 120)}${content.trim().length > 120 ? "..." : ""}"`,
+          type: "case",
+        }).catch((err) =>
+          console.error("Error creating office notification for advocate remark:", err)
+        );
+      }
 
       return res.status(201).json(
         ResponseHandler(201, "Case remark posted successfully", {

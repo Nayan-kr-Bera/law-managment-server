@@ -649,8 +649,10 @@ export const notifyClientRemovedFromCase = async (
       title: `Notice: Matter Unlinked`,
       message: `Your profile has been unlinked from matter "${caseRecord.title}".`,
       payload: {
+        type: "case_unlinked",
         caseId: caseRecord.id,
         caseTitle: caseRecord.title,
+        unlinked: true,
       },
     });
 
