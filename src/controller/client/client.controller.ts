@@ -58,8 +58,8 @@ const clientController = {
           profileId: clientProfiles.id,
           tenantId: clientProfiles.tenantId,
           officeId: clientProfiles.officeId,
-          // Firm-specific company name overrides identity's global one
-          companyName: sql<string>`COALESCE(${clientProfiles.companyName}, ${clients.companyName})`,
+          // Firm-specific company name overrides identity's global one, ignoring empty/N/A placeholders
+          companyName: sql<string>`COALESCE(NULLIF(NULLIF(TRIM(${clientProfiles.companyName}), 'N/A'), ''), ${clients.companyName})`,
           firstName: clients.firstName,
           lastName: clients.lastName,
           email: clients.email,
@@ -115,7 +115,7 @@ const clientController = {
           profileId: clientProfiles.id,
           tenantId: clientProfiles.tenantId,
           officeId: clientProfiles.officeId,
-          companyName: sql<string>`COALESCE(${clientProfiles.companyName}, ${clients.companyName})`,
+          companyName: sql<string>`COALESCE(NULLIF(NULLIF(TRIM(${clientProfiles.companyName}), 'N/A'), ''), ${clients.companyName})`,
           firstName: clients.firstName,
           lastName: clients.lastName,
           email: clients.email,
@@ -1127,7 +1127,7 @@ const clientController = {
           id: clients.id,
           firstName: clients.firstName,
           lastName: clients.lastName,
-          companyName: sql<string>`COALESCE(${clientProfiles.companyName}, ${clients.companyName})`,
+          companyName: sql<string>`COALESCE(NULLIF(NULLIF(TRIM(${clientProfiles.companyName}), 'N/A'), ''), ${clients.companyName})`,
         })
         .from(clientProfiles)
         .innerJoin(clients, eq(clientProfiles.identityId, clients.id))
