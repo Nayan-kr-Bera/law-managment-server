@@ -58,6 +58,7 @@ router.get(
   caseController.getCasesByPurposeAndAge,
 );
 router.get("/forfrom", auth, officeGuard, caseController.getCasesForFrom);
+router.get("/next-file-no", auth, officeGuard, caseController.getNextFileNumber);
 router.get("/:id/edit", auth, officeGuard, caseController.getCaseForUpdate);
 router.get("/:caseId/remarks", auth, officeGuard, caseController.getCaseRemarks);
 router.post("/:caseId/remarks", auth, officeGuard, caseController.addCaseRemark);

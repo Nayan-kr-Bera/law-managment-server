@@ -1,4 +1,5 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
+import slugify from "slugify";
 import db from "../db/index.js";
 import {
   bareActs,
@@ -26,6 +27,15 @@ export interface IIndiaCodeSearchResult {
   section_count?: number;
   totalSections?: number;
   in_force?: boolean;
+  url?: string;
+}
+
+export interface IIndiaCodeSearchProvisionHit {
+  kind: "section" | "rule" | "act" | "listed" | "judgment" | "rates";
+  ref: string;
+  title: string;
+  act?: string | null;
+  snippet?: string | null;
   url?: string;
 }
 
@@ -190,6 +200,97 @@ class IndiaCodeService {
   }
 
   /**
+   * Universal Live Full-Text Provision Search across 10,000+ Indian Acts
+   * Searches sections, articles, orders, rules, and enactments via eCourts IndiaCode
+   */
+  async searchProvisions(
+    query: string,
+    options?: {
+      limit?: number;
+      offset?: number;
+      kind?: string;
+    }
+  ): Promise<{
+    total: number;
+    count: number;
+    limit: number;
+    offset: number;
+    next: string | null;
+    results: IIndiaCodeSearchProvisionHit[];
+  }> {
+    const cleanQuery = (query || "").trim();
+    if (!cleanQuery) {
+      return { total: 0, count: 0, limit: 15, offset: 0, next: null, results: [] };
+    }
+
+    const limit = Math.min(50, Math.max(1, Number(options?.limit) || 15));
+    const offset = Math.max(0, Number(options?.offset) || 0);
+    const kind = options?.kind || "section,rule,act";
+
+    const params = new URLSearchParams({
+      q: cleanQuery,
+      limit: String(limit),
+      offset: String(offset),
+      kind,
+    });
+
+    const url = `${INDIA_CODE_BASE_URL}/search?${params.toString()}`;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.warn(`IndiaCode search API returned HTTP ${response.status} for query '${cleanQuery}'`);
+        return { total: 0, count: 0, limit, offset, next: null, results: [] };
+      }
+
+      const data = (await response.json()) as {
+        total: number;
+        count: number;
+        limit: number;
+        offset: number;
+        next: string | null;
+        results: IIndiaCodeSearchProvisionHit[];
+      };
+
+      return {
+        total: Number(data.total) || 0,
+        count: data.results?.length || 0,
+        limit,
+        offset,
+        next: data.next || null,
+        results: data.results || [],
+      };
+    } catch (err) {
+      console.warn(`Failed to connect to IndiaCode live search API:`, err);
+      return { total: 0, count: 0, limit, offset, next: null, results: [] };
+    }
+  }
+
+  /**
+   * Get Code of Civil Procedure (CPC) Order overview and list of Rules
+   */
+  async getCPCOrder(order: string | number): Promise<{
+    order?: string;
+    order_arabic?: number;
+    title?: string;
+    rules?: Array<{ rule: string; heading: string; words?: number; url?: string }>;
+  } | null> {
+    const cleanOrd = String(order).trim().toLowerCase();
+    const url = `${INDIA_CODE_BASE_URL}/cpc/order/${encodeURIComponent(cleanOrd)}`;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return null;
+      return (await response.json()) as {
+        order?: string;
+        order_arabic?: number;
+        title?: string;
+        rules?: Array<{ rule: string; heading: string; words?: number; url?: string }>;
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Get an Act's overview, all section headings, and schedules
    */
   async getActOverview(actSlug: string): Promise<IIndiaCodeActOverview> {
@@ -240,9 +341,28 @@ class IndiaCodeService {
       cleanSlug = IndiaCodeService.SLUG_ALIASES[cleanSlug];
     }
     const cleanNumber = sectionNumber.trim();
-    const url = `${INDIA_CODE_BASE_URL}/${cleanSlug}/section/${encodeURIComponent(cleanNumber)}`;
+    let url = `${INDIA_CODE_BASE_URL}/${cleanSlug}/section/${encodeURIComponent(cleanNumber)}`;
+
+    // Special routing for Code of Civil Procedure (CPC) Orders and Rules
+    if (cleanSlug === "cpc" && /order/i.test(cleanNumber)) {
+      const orderRuleMatch = cleanNumber.match(/order[-_\s/]*(\d+|[a-z]+)(?:[-_\s/]*rule[-_\s/]*(\d+))?/i);
+      if (orderRuleMatch) {
+        const ord = orderRuleMatch[1];
+        const rl = orderRuleMatch[2];
+        url = rl
+          ? `${INDIA_CODE_BASE_URL}/cpc/order/${ord}/rule/${rl}`
+          : `${INDIA_CODE_BASE_URL}/cpc/order/${ord}`;
+      }
+    }
 
     let response = await fetch(url, { redirect: "follow" });
+
+    // Constitution of India: retry /article/:number if /section/:number returned 404
+    if (!response.ok && response.status === 404 && cleanSlug === "constitution-of-india") {
+      const articleUrl = `${INDIA_CODE_BASE_URL}/constitution-of-india/article/${encodeURIComponent(cleanNumber)}`;
+      response = await fetch(articleUrl, { redirect: "follow" });
+    }
+
     if (!response.ok && response.status === 404) {
       // Check if overview points to a resolved canonical slug
       try {
@@ -264,13 +384,42 @@ class IndiaCodeService {
       throw new AppError(`IndiaCode API error: ${response.statusText}`, response.status);
     }
 
-    return (await response.json()) as IIndiaCodeSectionDetail;
+    const rawData = (await response.json()) as Record<string, any>;
+
+    // Normalize CPC order/rule format if returned
+    if (rawData.order && (rawData.heading || rawData.rules)) {
+      const ruleText =
+        rawData.text ||
+        rawData.html ||
+        (Array.isArray(rawData.rules)
+          ? rawData.rules.map((r: any) => `${r.rule}. ${r.heading}`).join("\n\n")
+          : "");
+      return {
+        act: {
+          id: "cpc",
+          short_title: rawData.act_title || "The Code of Civil Procedure, 1908",
+          act_year: 1908,
+          unit: "rule",
+        },
+        section: {
+          number: rawData.rule
+            ? `Order ${rawData.order_arabic || rawData.order} Rule ${rawData.rule}`
+            : `Order ${rawData.order_arabic || rawData.order}`,
+          heading: rawData.heading || rawData.title || `Order ${rawData.order_arabic || rawData.order}`,
+          text: ruleText,
+        },
+        classification: [],
+        judgments: [],
+      };
+    }
+
+    return rawData as IIndiaCodeSectionDetail;
   }
 
   /**
    * Helper to derive a clean shortCode from title / slug
    */
-  private deriveShortCode(title: string, slug: string): string {
+  public deriveShortCode(title: string, slug: string): string {
     const cleanTitle = title.replace(/^the\s+/i, "").replace(/,\s*\d{4}.*$/, "").trim();
     const words = cleanTitle.split(/\s+/).filter(Boolean);
     if (words.length === 1) return words[0].toUpperCase().slice(0, 10);
@@ -281,7 +430,7 @@ class IndiaCodeService {
   /**
    * Helper to deduce category enum from title and description
    */
-  private deduceCategory(
+  public deduceCategory(
     title: string,
     longTitle?: string
   ): (typeof bareActCategoryEnum.enumValues)[number] {
@@ -669,10 +818,18 @@ class IndiaCodeService {
    * fetches from IndiaCode, caches it to DB, and returns it.
    */
   async getOrFetchSection(actSlug: string, sectionNumber: string) {
-    const cleanNumber = sectionNumber.replace(/^section\s+/i, "").replace(/^article\s+/i, "").trim();
+    let cleanSlug = actSlug.toLowerCase().trim();
+    if (IndiaCodeService.SLUG_ALIASES[cleanSlug]) {
+      cleanSlug = IndiaCodeService.SLUG_ALIASES[cleanSlug];
+    }
+    const cleanNumber = sectionNumber
+      .replace(new RegExp(`^${cleanSlug}[-_]section[-_]`, "i"), "")
+      .replace(new RegExp(`^${cleanSlug}[-_]`, "i"), "")
+      .replace(/^(section|article)[-_\s]+/i, "")
+      .trim();
 
     // 1. Fetch from IndiaCode
-    const detail = await this.getSection(actSlug, cleanNumber);
+    const detail = await this.getSection(cleanSlug, cleanNumber);
     const { act, section, classification, judgments } = detail;
     if (!section) {
       throw new AppError(`Section ${sectionNumber} not found on IndiaCode.`, 404);
@@ -703,10 +860,27 @@ class IndiaCodeService {
       actRecord = newAct;
     }
 
-    const secNumberStr = `${act.unit === "article" ? "Article" : "Section"} ${section.number}`;
-    const secSlug = `${act.id}-section-${section.number.toLowerCase()}`;
+    const isOrderRule = act.unit === "rule" || /^order/i.test(section.number);
+    const secNumberStr = isOrderRule
+      ? (section.number.startsWith("Order") ? section.number : `Order ${section.number}`)
+      : `${act.unit === "article" ? "Article" : "Section"} ${section.number}`;
+    const secSlug = slugify(`${act.id}-${section.number}`, { lower: true, strict: true });
     const parsedClass = this.parseClassification(classification);
     const secNumeric = this.parseNumeric(section.number);
+
+    // Check if section already exists in DB
+    const existing = await db.query.bareActSections.findFirst({
+      where: and(
+        eq(bareActSections.actId, actRecord.id),
+        or(
+          eq(bareActSections.slug, secSlug),
+          eq(bareActSections.sectionNumber, secNumberStr)
+        )
+      ),
+    });
+    if (existing) {
+      return existing;
+    }
 
     const landmarkJudgments = (judgments || []).map((j) => ({
       title: j.title,
@@ -719,7 +893,7 @@ class IndiaCodeService {
       .insert(bareActSections)
       .values({
         actId: actRecord.id,
-        sectionType: act.unit === "article" ? "article" : "section",
+        sectionType: isOrderRule ? "order_rule" : (act.unit === "article" ? "article" : "section"),
         sectionNumber: secNumberStr,
         sectionNumeric: secNumeric,
         title: section.heading || `Provision ${section.number}`,

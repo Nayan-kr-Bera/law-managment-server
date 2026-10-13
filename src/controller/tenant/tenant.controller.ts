@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
+import slugify from "slugify";
 
 import db from "../../db/index.js";
 import tenants from "../../db/schema/tenants.js";
@@ -169,6 +170,30 @@ const tenantController = {
       let logoUrl: string | undefined;
 
       /**
+       * Resolve and ensure unique slug if name or slug is being updated
+       */
+      let resolvedSlug: string | undefined = slug;
+      if (name && (!resolvedSlug || resolvedSlug.trim() === "")) {
+        resolvedSlug = slugify(name, { lower: true, strict: true });
+      } else if (resolvedSlug) {
+        resolvedSlug = slugify(resolvedSlug, { lower: true, strict: true });
+      }
+
+      if (resolvedSlug) {
+        const baseSlug = resolvedSlug;
+        let finalSlug = baseSlug;
+        let count = 1;
+        while (
+          await db.query.tenants.findFirst({
+            where: and(eq(tenants.slug, finalSlug), ne(tenants.id, id)),
+          })
+        ) {
+          finalSlug = `${baseSlug}-${count++}`;
+        }
+        resolvedSlug = finalSlug;
+      }
+
+      /**
        * Upload new logo if provided
        */
       if (req.file) {
@@ -196,7 +221,7 @@ const tenantController = {
         .update(tenants)
         .set({
           ...(name !== undefined && { name }),
-          ...(slug !== undefined && { slug }),
+          ...(resolvedSlug !== undefined && { slug: resolvedSlug }),
           ...(gst !== undefined && { gst }),
           ...(organisationEmail !== undefined && {
             organisationEmail,

@@ -22,19 +22,12 @@ export const PERMISSIONS: PermissionDefinition[] = [
   { code: "calendar.update", description: "Update calendar events", isAdminPortal: false },
   { code: "calendar.delete", description: "Delete calendar events", isAdminPortal: false },
 
-  // Users
-  { code: "user.read", description: "View users", isAdminPortal: false },
-  { code: "user.create", description: "Create users", isAdminPortal: false },
-  { code: "user.update", description: "Update users", isAdminPortal: false },
-  { code: "user.delete", description: "Delete users", isAdminPortal: false },
-  { code: "user.assign_role", description: "Assign roles to users", isAdminPortal: false },
-  { code: "user_permission.manage", description: "Manage user and advocate specific permissions", isAdminPortal: false },
-
   // Advocates
   { code: "advocate.read", description: "View advocates", isAdminPortal: false },
   { code: "advocate.create", description: "Create advocates", isAdminPortal: false },
   { code: "advocate.update", description: "Update advocates", isAdminPortal: false },
   { code: "advocate.delete", description: "Delete advocates", isAdminPortal: false },
+  { code: "user_permission.manage", description: "Manage advocate specific permissions", isAdminPortal: false },
 
   // Partners
   { code: "partner.read", description: "View partners", isAdminPortal: false },

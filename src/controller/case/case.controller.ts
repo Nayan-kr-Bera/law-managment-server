@@ -1971,6 +1971,94 @@ const caseController = {
       return next(CustomErrorHandler.serverError());
     }
   },
+
+  async getNextFileNumber(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return next(CustomErrorHandler.unAuthorized());
+      }
+
+      const tenantId = req.user.tenantId;
+      const officeId = req.officeId;
+
+      if (!tenantId || !officeId) {
+        return next(
+          new CustomErrorHandler(400, "Tenant or office context is missing")
+        );
+      }
+
+      // Query only cases belonging to the specific tenant and office
+      // Strictly isolated per organization and branch office
+      const existingCases = await db
+        .select({
+          fileNumber: cases.fileNumber,
+          createdAt: cases.createdAt,
+        })
+        .from(cases)
+        .where(
+          and(
+            eq(cases.tenantId, tenantId),
+            eq(cases.officeId, officeId),
+            isNull(cases.deletedAt),
+            sql`${cases.fileNumber} IS NOT NULL AND ${cases.fileNumber} != ''`
+          )
+        )
+        .orderBy(desc(cases.createdAt))
+        .limit(200);
+
+      const currentYear = new Date().getFullYear();
+      let maxNumber = 0;
+
+      for (const c of existingCases) {
+        if (!c.fileNumber) continue;
+        // Match numbers in patterns like CF-2026/02, 2026/02, CF/02, or plain 2
+        const matches = c.fileNumber.match(/\d+/g);
+        if (matches && matches.length > 0) {
+          let candidateNum: number | null = null;
+          if (matches.length === 1) {
+            candidateNum = parseInt(matches[0], 10);
+          } else {
+            // For example "CF-2026/05", matches are ["2026", "05"]
+            const lastPart = matches[matches.length - 1];
+            candidateNum = parseInt(lastPart, 10);
+          }
+          if (candidateNum !== null && !isNaN(candidateNum) && candidateNum > maxNumber) {
+            maxNumber = candidateNum;
+          }
+        }
+      }
+
+      // If no valid serial number was found from existing non-empty file numbers,
+      // fallback to total cases count in this office
+      if (maxNumber === 0) {
+        const [totalResult] = await db
+          .select({ total: count() })
+          .from(cases)
+          .where(
+            and(
+              eq(cases.tenantId, tenantId),
+              eq(cases.officeId, officeId),
+              isNull(cases.deletedAt)
+            )
+          );
+        maxNumber = Number(totalResult?.total || 0);
+      }
+
+      const nextNumber = maxNumber + 1;
+      const formattedSeq = String(nextNumber).padStart(2, "0");
+      const suggestedFileNumber = `CF-${currentYear}/${formattedSeq}`;
+
+      return res.status(200).json(
+        ResponseHandler(200, "Next file number retrieved successfully", {
+          nextNumber,
+          suggestedFileNumber,
+        })
+      );
+    } catch (error) {
+      console.error("getNextFileNumber error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
 };
 
 export default caseController;

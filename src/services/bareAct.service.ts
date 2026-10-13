@@ -54,6 +54,200 @@ export function invalidateCriminalComparisonsCache(): void {
   cachedCriminalComparisons = null;
 }
 
+// Base curated statutory bridge between Colonial statutes and 2024 New Criminal Laws
+export const BASE_CRIMINAL_COMPARISONS = [
+  {
+    subject: "Murder & Mob Lynching",
+    oldLaw: "IPC Section 302",
+    newLaw: "BNS Section 103",
+    newSectionLookup: "103",
+    actSlug: "bns",
+    punishment: "Death or Imprisonment for Life, and Fine (Mob lynching sub-clause 2 added)",
+    bailable: "Non-Bailable",
+    cognizable: "Cognizable",
+  },
+  {
+    subject: "Rape & Aggravated Sexual Offences",
+    oldLaw: "IPC Section 375 & 376",
+    newLaw: "BNS Section 63 & 64",
+    newSectionLookup: "64",
+    actSlug: "bns",
+    punishment: "Rigorous Imprisonment 10 years to Life, and Fine",
+    bailable: "Non-Bailable",
+    cognizable: "Cognizable",
+  },
+  {
+    subject: "Sexual intercourse by deceitful promise to marry",
+    oldLaw: "IPC Section 417 / 376(2)(n) (Judicial interpretation)",
+    newLaw: "BNS Section 69",
+    newSectionLookup: "69",
+    actSlug: "bns",
+    punishment: "Imprisonment up to 10 years and Fine",
+    bailable: "Non-Bailable",
+    cognizable: "Cognizable",
+  },
+  {
+    subject: "Cruelty by Husband or Relatives (Dowry Harassment)",
+    oldLaw: "IPC Section 498A",
+    newLaw: "BNS Section 85 & 86",
+    newSectionLookup: "85",
+    actSlug: "bns",
+    punishment: "Imprisonment up to 3 years and Fine",
+    bailable: "Non-Bailable",
+    cognizable: "Cognizable",
+  },
+  {
+    subject: "Organised Crime & Syndicated Gang Offence",
+    oldLaw: "MCOCA / State Enactments (No IPC provision)",
+    newLaw: "BNS Section 111",
+    newSectionLookup: "111",
+    actSlug: "bns",
+    punishment: "Death or Life Imprisonment, with minimum fine of ₹5,00,000",
+    bailable: "Non-Bailable",
+    cognizable: "Cognizable",
+  },
+  {
+    subject: "Petty Organised Crime / Snatching",
+    oldLaw: "IPC Section 379 / Local Laws",
+    newLaw: "BNS Section 112",
+    newSectionLookup: "112",
+    actSlug: "bns",
+    punishment: "Imprisonment 1 to 7 years, and Fine",
+    bailable: "Non-Bailable",
+    cognizable: "Cognizable",
+  },
+  {
+    subject: "Terrorist Act defined under General Criminal Law",
+    oldLaw: "UAPA Section 15 (Special Act only)",
+    newLaw: "BNS Section 113",
+    newSectionLookup: "113",
+    actSlug: "bns",
+    punishment: "Death or Imprisonment for Life, and Fine",
+    bailable: "Non-Bailable",
+    cognizable: "Cognizable",
+  },
+  {
+    subject: "Theft (with Community Service for First Offender < ₹5000)",
+    oldLaw: "IPC Section 379",
+    newLaw: "BNS Section 303",
+    newSectionLookup: "303",
+    actSlug: "bns",
+    punishment: "Up to 3 years or fine (Community Service for petty first offence)",
+    bailable: "Non-Bailable",
+    cognizable: "Cognizable",
+  },
+  {
+    subject: "Cheating and Dishonestly Inducing Delivery of Property (420)",
+    oldLaw: "IPC Section 420",
+    newLaw: "BNS Section 318(4)",
+    newSectionLookup: "318",
+    actSlug: "bns",
+    punishment: "Imprisonment up to 7 years and Fine",
+    bailable: "Non-Bailable",
+    cognizable: "Cognizable",
+  },
+  {
+    subject: "Criminal Breach of Trust",
+    oldLaw: "IPC Section 406",
+    newLaw: "BNS Section 316",
+    newSectionLookup: "316",
+    actSlug: "bns",
+    punishment: "Imprisonment up to 5 years, or fine, or both",
+    bailable: "Non-Bailable",
+    cognizable: "Cognizable",
+  },
+  {
+    subject: "Endangering Sovereignty, Unity & Integrity of India",
+    oldLaw: "IPC Section 124A (Sedition - Repealed)",
+    newLaw: "BNS Section 152",
+    newSectionLookup: "152",
+    actSlug: "bns",
+    punishment: "Imprisonment for Life or up to 7 years, and Fine",
+    bailable: "Non-Bailable",
+    cognizable: "Cognizable",
+  },
+  {
+    subject: "First Information Report (FIR / Zero FIR / e-FIR)",
+    oldLaw: "CrPC Section 154",
+    newLaw: "BNSS Section 173",
+    newSectionLookup: "173",
+    actSlug: "bnss",
+    punishment: "Procedure for Zero FIR & Electronic FIR registration within 3 days",
+    bailable: "N/A",
+    cognizable: "N/A",
+  },
+  {
+    subject: "Magistrate Statement / Audio-Video Victim Recording",
+    oldLaw: "CrPC Section 164",
+    newLaw: "BNSS Section 183",
+    newSectionLookup: "183",
+    actSlug: "bnss",
+    punishment: "Mandatory Audio-Video recording for sexual assault victim statements",
+    bailable: "N/A",
+    cognizable: "N/A",
+  },
+  {
+    subject: "Police Custody / Remand beyond Initial 15 Days",
+    oldLaw: "CrPC Section 167(2)",
+    newLaw: "BNSS Section 187",
+    newSectionLookup: "187",
+    actSlug: "bnss",
+    punishment: "15-day police custody can be taken in parts across first 40 or 60 days of detention",
+    bailable: "N/A",
+    cognizable: "N/A",
+  },
+  {
+    subject: "Regular Bail in Non-Bailable Offences",
+    oldLaw: "CrPC Section 437",
+    newLaw: "BNSS Section 480",
+    newSectionLookup: "480",
+    actSlug: "bnss",
+    punishment: "Magisterial bail procedure & maximum custody thresholds",
+    bailable: "N/A",
+    cognizable: "N/A",
+  },
+  {
+    subject: "Anticipatory Bail (Pre-Arrest Bail)",
+    oldLaw: "CrPC Section 438",
+    newLaw: "BNSS Section 482",
+    newSectionLookup: "482",
+    actSlug: "bnss",
+    punishment: "Sessions Court / High Court pre-arrest bail directions",
+    bailable: "N/A",
+    cognizable: "N/A",
+  },
+  {
+    subject: "Special Powers of High Court / Sessions Court on Bail",
+    oldLaw: "CrPC Section 439",
+    newLaw: "BNSS Section 483",
+    newSectionLookup: "483",
+    actSlug: "bnss",
+    punishment: "Superior Court regular bail jurisdiction",
+    bailable: "N/A",
+    cognizable: "N/A",
+  },
+  {
+    subject: "Inherent Powers of High Court (Quashing of FIR & Proceedings)",
+    oldLaw: "CrPC Section 482",
+    newLaw: "BNSS Section 528",
+    newSectionLookup: "528",
+    actSlug: "bnss",
+    punishment: "High Court power to prevent abuse of process & secure ends of justice",
+    bailable: "N/A",
+    cognizable: "N/A",
+  },
+  {
+    subject: "Admissibility of Electronic Records & Digital Evidence",
+    oldLaw: "IEA Section 65B",
+    newLaw: "BSA Section 61 & 63",
+    newSectionLookup: "61",
+    actSlug: "bsa",
+    punishment: "Electronic records recognized as primary documents under prescribed certification",
+    bailable: "N/A",
+    cognizable: "N/A",
+  },
+];
+
 export class BareActService {
   /* =========================================================================
      CLIENT / ADVOCATE FACING QUERIES
@@ -668,19 +862,21 @@ export class BareActService {
 
   /**
    * Ultra-fast Advocate Instant Search / Quick Section Lookup
+   * Connects local DB and live eCourts IndiaCode full-text API
    * e.g. "302", "cheating", "Article 21", "anticipatory bail", "Order 39", "138", "BNSS 482"
    */
   async quickLookup(query: { q: string; limit?: number }) {
     if (!query.q || !query.q.trim()) {
-      return { data: [] };
+      return { query: "", count: 0, data: [] };
     }
 
     const searchTerm = query.q.trim();
     const likeTerm = `%${searchTerm}%`;
     const limit = Math.min(50, Math.max(1, Number(query.limit) || 15));
+    const lowerQ = searchTerm.toLowerCase();
 
-    // Search across sections with act join
-    const results = await db
+    // 1. Search local Postgres database
+    const localResults = await db
       .select({
         sectionId: bareActSections.id,
         sectionNumber: bareActSections.sectionNumber,
@@ -714,10 +910,191 @@ export class BareActService {
       )
       .limit(limit);
 
+    const mergedResults: Array<{
+      sectionId: string;
+      sectionNumber: string;
+      sectionTitle: string;
+      sectionSlug: string;
+      sectionType: string;
+      punishment?: string | null;
+      bailableStatus: string;
+      cognizableStatus: string;
+      compoundableStatus: string;
+      crossReferences: any;
+      actId: string;
+      actTitle: string;
+      actShortCode?: string | null;
+      actSlug: string;
+      actCategory: string;
+      actYear: number;
+    }> = [...localResults];
+
+    const seenKeys = new Set(
+      localResults.map(
+        (r) => `${r.actSlug.toLowerCase()}-${r.sectionNumber.toLowerCase().replace(/[^a-z0-9]/g, "")}`
+      )
+    );
+
+    // 2. Generic Dynamic Handler for Code of Civil Procedure (CPC) Orders & Rules
+    // Dynamically matches queries like "Order 39", "Order 21", "Order 7", "injunction", etc.
+    const cpcOrderMatch = lowerQ.match(/\border\s+([0-9]+|[ivxlcdm]+)\b/i);
+    const isGenericInjunction = lowerQ.includes("injunction") && !cpcOrderMatch;
+
+    if (cpcOrderMatch || isGenericInjunction) {
+      const orderParam = cpcOrderMatch ? cpcOrderMatch[1] : "39";
+      try {
+        const cpcData = await indiaCodeService.getCPCOrder(orderParam);
+        if (cpcData?.rules) {
+          const ordNum = cpcData.order_arabic || orderParam;
+          for (const rl of cpcData.rules.slice(0, 3)) {
+            const key = `cpc-order${ordNum}rule${rl.rule.toLowerCase()}`;
+            if (!seenKeys.has(key)) {
+              seenKeys.add(key);
+              mergedResults.push({
+                sectionId: `cpc-order-${ordNum}-rule-${rl.rule.toLowerCase()}`,
+                sectionNumber: `Order ${ordNum} Rule ${rl.rule}`,
+                sectionTitle: `${rl.heading} (${cpcData.title || "CPC Order"})`,
+                sectionSlug: `order-${ordNum}-rule-${rl.rule.toLowerCase()}`,
+                sectionType: "order_rule",
+                punishment: null,
+                bailableStatus: "not_applicable",
+                cognizableStatus: "not_applicable",
+                compoundableStatus: "not_applicable",
+                crossReferences: {
+                  orderTitle: cpcData.title,
+                },
+                actId: "cpc",
+                actTitle: "The Code of Civil Procedure, 1908",
+                actShortCode: "CPC",
+                actSlug: "cpc",
+                actCategory: "civil_procedure",
+                actYear: 1908,
+              });
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(`Could not fetch CPC Order ${orderParam}:`, err);
+      }
+    }
+
+    // 3. Fallback / Live Enrichment via eCourts IndiaCode full-text statutory search API
+    // If local results are fewer than limit or search is a topical inquiry (e.g. "anticipatory bail", "cheating", etc.)
+    if (mergedResults.length < limit || isNaN(Number(searchTerm))) {
+      try {
+        const liveHits = await indiaCodeService.searchProvisions(searchTerm, { limit });
+        const results = liveHits.results || [];
+
+        for (const hit of results) {
+          if (!hit.ref) continue;
+          const parts = hit.ref.split("/");
+          const actSlug = parts[0]?.toLowerCase();
+          const rawProvision = parts.slice(1).join("/");
+
+          if (!actSlug || !rawProvision) continue;
+
+          const isConstitution = actSlug === "constitution-of-india";
+          const isRule = hit.kind === "rule" || hit.ref.includes("order");
+
+          let secNum = rawProvision;
+          let secTitle = hit.title || `Provision ${rawProvision}`;
+          let secSlug = rawProvision;
+
+          if (isRule && hit.ref.includes("order")) {
+            // e.g. "cpc/order/xxxix/rule/1"
+            const ruleMatch = hit.ref.match(/order\/([^\/]+)(?:\/rule\/([^\/]+))?/i);
+            const ordNum = ruleMatch?.[1]?.toUpperCase() === "XXXIX" ? "39" : ruleMatch?.[1] || "";
+            const rlNum = ruleMatch?.[2] || "1";
+            secNum = `Order ${ordNum} Rule ${rlNum}`;
+            secSlug = `order-${ordNum}-rule-${rlNum}`.toLowerCase();
+          } else if (isConstitution) {
+            secNum = `Article ${rawProvision}`;
+          } else {
+            secNum = `Section ${rawProvision}`;
+          }
+
+          // Special enrichments for landmark provisions & comparative bridges
+          let crossReferences: any = undefined;
+          let bailableStatus = "not_applicable";
+          let cognizableStatus = "not_applicable";
+          let punishment: string | null = null;
+
+          // Dynamically check against statutory comparison matrix if applicable
+          const comp = BASE_CRIMINAL_COMPARISONS.find((c) => {
+            const numClean = rawProvision.toLowerCase();
+            const isNew =
+              c.actSlug === actSlug &&
+              (c.newSectionLookup === numClean || c.newLaw.toLowerCase().includes(numClean));
+            const isOld =
+              c.oldLaw.toLowerCase().includes(numClean) &&
+              ((actSlug === "ipc" && c.oldLaw.startsWith("IPC")) ||
+                (actSlug === "crpc" && c.oldLaw.startsWith("CrPC")) ||
+                (actSlug === "iea" && c.oldLaw.startsWith("IEA")));
+            return isNew || isOld;
+          });
+
+          if (comp) {
+            const isNew = comp.actSlug === actSlug;
+            crossReferences = isNew
+              ? { oldEquivalent: `${comp.oldLaw} (${comp.subject})` }
+              : { newEquivalent: `${comp.newLaw} (${comp.subject})` };
+            bailableStatus =
+              comp.bailable === "Bailable"
+                ? "bailable"
+                : comp.bailable === "Non-Bailable"
+                ? "non_bailable"
+                : "not_applicable";
+            cognizableStatus =
+              comp.cognizable === "Cognizable"
+                ? "cognizable"
+                : comp.cognizable === "Non-Cognizable"
+                ? "non_cognizable"
+                : "not_applicable";
+            punishment = comp.punishment || null;
+            if (!secTitle.toLowerCase().includes(comp.subject.toLowerCase())) {
+              secTitle = `${secTitle} (${comp.subject})`;
+            }
+          }
+
+          const dedupeKey = `${actSlug}-${secNum.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+          if (!seenKeys.has(dedupeKey)) {
+            seenKeys.add(dedupeKey);
+
+            // Extract year if available in hit.act
+            const yearMatch = (hit.act || "").match(/\b(18\d\d|19\d\d|20\d\d)\b/);
+            const actYear = yearMatch ? Number(yearMatch[1]) : new Date().getFullYear();
+
+            mergedResults.push({
+              sectionId: `${actSlug}-${secSlug}`,
+              sectionNumber: secNum,
+              sectionTitle: secTitle,
+              sectionSlug: secSlug,
+              sectionType: isRule ? "rule" : (isConstitution ? "article" : "section"),
+              punishment,
+              bailableStatus,
+              cognizableStatus,
+              compoundableStatus: "not_applicable",
+              crossReferences,
+              actId: actSlug,
+              actTitle: hit.act || actSlug.toUpperCase(),
+              actShortCode: indiaCodeService.deriveShortCode(hit.act || actSlug, actSlug),
+              actSlug,
+              actCategory: indiaCodeService.deduceCategory(hit.act || actSlug),
+              actYear,
+            });
+          }
+
+          if (mergedResults.length >= limit) break;
+        }
+      } catch (err) {
+        console.warn("IndiaCode live provision search error:", err);
+      }
+    }
+
     return {
       query: searchTerm,
-      count: results.length,
-      data: results,
+      count: mergedResults.length,
+      data: mergedResults.slice(0, limit),
     };
   }
 
@@ -876,198 +1253,7 @@ export class BareActService {
     }
 
     // Base curated statutory bridge between Colonial statutes and 2024 New Criminal Laws
-    const baseComparisons = [
-      {
-        subject: "Murder & Mob Lynching",
-        oldLaw: "IPC Section 302",
-        newLaw: "BNS Section 103",
-        newSectionLookup: "103",
-        actSlug: "bns",
-        punishment: "Death or Imprisonment for Life, and Fine (Mob lynching sub-clause 2 added)",
-        bailable: "Non-Bailable",
-        cognizable: "Cognizable",
-      },
-      {
-        subject: "Rape & Aggravated Sexual Offences",
-        oldLaw: "IPC Section 375 & 376",
-        newLaw: "BNS Section 63 & 64",
-        newSectionLookup: "64",
-        actSlug: "bns",
-        punishment: "Rigorous Imprisonment 10 years to Life, and Fine",
-        bailable: "Non-Bailable",
-        cognizable: "Cognizable",
-      },
-      {
-        subject: "Sexual intercourse by deceitful promise to marry",
-        oldLaw: "IPC Section 417 / 376(2)(n) (Judicial interpretation)",
-        newLaw: "BNS Section 69",
-        newSectionLookup: "69",
-        actSlug: "bns",
-        punishment: "Imprisonment up to 10 years and Fine",
-        bailable: "Non-Bailable",
-        cognizable: "Cognizable",
-      },
-      {
-        subject: "Cruelty by Husband or Relatives (Dowry Harassment)",
-        oldLaw: "IPC Section 498A",
-        newLaw: "BNS Section 85 & 86",
-        newSectionLookup: "85",
-        actSlug: "bns",
-        punishment: "Imprisonment up to 3 years and Fine",
-        bailable: "Non-Bailable",
-        cognizable: "Cognizable",
-      },
-      {
-        subject: "Organised Crime & Syndicated Gang Offence",
-        oldLaw: "MCOCA / State Enactments (No IPC provision)",
-        newLaw: "BNS Section 111",
-        newSectionLookup: "111",
-        actSlug: "bns",
-        punishment: "Death or Life Imprisonment, with minimum fine of ₹5,00,000",
-        bailable: "Non-Bailable",
-        cognizable: "Cognizable",
-      },
-      {
-        subject: "Petty Organised Crime / Snatching",
-        oldLaw: "IPC Section 379 / Local Laws",
-        newLaw: "BNS Section 112",
-        newSectionLookup: "112",
-        actSlug: "bns",
-        punishment: "Imprisonment 1 to 7 years, and Fine",
-        bailable: "Non-Bailable",
-        cognizable: "Cognizable",
-      },
-      {
-        subject: "Terrorist Act defined under General Criminal Law",
-        oldLaw: "UAPA Section 15 (Special Act only)",
-        newLaw: "BNS Section 113",
-        newSectionLookup: "113",
-        actSlug: "bns",
-        punishment: "Death or Imprisonment for Life, and Fine",
-        bailable: "Non-Bailable",
-        cognizable: "Cognizable",
-      },
-      {
-        subject: "Theft (with Community Service for First Offender < ₹5000)",
-        oldLaw: "IPC Section 379",
-        newLaw: "BNS Section 303",
-        newSectionLookup: "303",
-        actSlug: "bns",
-        punishment: "Up to 3 years or fine (Community Service for petty first offence)",
-        bailable: "Non-Bailable",
-        cognizable: "Cognizable",
-      },
-      {
-        subject: "Cheating and Dishonestly Inducing Delivery of Property (420)",
-        oldLaw: "IPC Section 420",
-        newLaw: "BNS Section 318(4)",
-        newSectionLookup: "318",
-        actSlug: "bns",
-        punishment: "Imprisonment up to 7 years and Fine",
-        bailable: "Non-Bailable",
-        cognizable: "Cognizable",
-      },
-      {
-        subject: "Criminal Breach of Trust",
-        oldLaw: "IPC Section 406",
-        newLaw: "BNS Section 316",
-        newSectionLookup: "316",
-        actSlug: "bns",
-        punishment: "Imprisonment up to 5 years, or fine, or both",
-        bailable: "Non-Bailable",
-        cognizable: "Cognizable",
-      },
-      {
-        subject: "Endangering Sovereignty, Unity & Integrity of India",
-        oldLaw: "IPC Section 124A (Sedition - Repealed)",
-        newLaw: "BNS Section 152",
-        newSectionLookup: "152",
-        actSlug: "bns",
-        punishment: "Imprisonment for Life or up to 7 years, and Fine",
-        bailable: "Non-Bailable",
-        cognizable: "Cognizable",
-      },
-      {
-        subject: "First Information Report (FIR / Zero FIR / e-FIR)",
-        oldLaw: "CrPC Section 154",
-        newLaw: "BNSS Section 173",
-        newSectionLookup: "173",
-        actSlug: "bnss",
-        punishment: "Procedure for Zero FIR & Electronic FIR registration within 3 days",
-        bailable: "N/A",
-        cognizable: "N/A",
-      },
-      {
-        subject: "Magistrate Statement / Audio-Video Victim Recording",
-        oldLaw: "CrPC Section 164",
-        newLaw: "BNSS Section 183",
-        newSectionLookup: "183",
-        actSlug: "bnss",
-        punishment: "Mandatory Audio-Video recording for sexual assault victim statements",
-        bailable: "N/A",
-        cognizable: "N/A",
-      },
-      {
-        subject: "Police Custody / Remand beyond Initial 15 Days",
-        oldLaw: "CrPC Section 167(2)",
-        newLaw: "BNSS Section 187",
-        newSectionLookup: "187",
-        actSlug: "bnss",
-        punishment: "15-day police custody can be taken in parts across first 40 or 60 days of detention",
-        bailable: "N/A",
-        cognizable: "N/A",
-      },
-      {
-        subject: "Regular Bail in Non-Bailable Offences",
-        oldLaw: "CrPC Section 437",
-        newLaw: "BNSS Section 480",
-        newSectionLookup: "480",
-        actSlug: "bnss",
-        punishment: "Magisterial bail procedure & maximum custody thresholds",
-        bailable: "N/A",
-        cognizable: "N/A",
-      },
-      {
-        subject: "Anticipatory Bail (Pre-Arrest Bail)",
-        oldLaw: "CrPC Section 438",
-        newLaw: "BNSS Section 482",
-        newSectionLookup: "482",
-        actSlug: "bnss",
-        punishment: "Sessions Court / High Court pre-arrest bail directions",
-        bailable: "N/A",
-        cognizable: "N/A",
-      },
-      {
-        subject: "Special Powers of High Court / Sessions Court on Bail",
-        oldLaw: "CrPC Section 439",
-        newLaw: "BNSS Section 483",
-        newSectionLookup: "483",
-        actSlug: "bnss",
-        punishment: "Superior Court regular bail jurisdiction",
-        bailable: "N/A",
-        cognizable: "N/A",
-      },
-      {
-        subject: "Inherent Powers of High Court (Quashing of FIR & Proceedings)",
-        oldLaw: "CrPC Section 482",
-        newLaw: "BNSS Section 528",
-        newSectionLookup: "528",
-        actSlug: "bnss",
-        punishment: "High Court power to prevent abuse of process & secure ends of justice",
-        bailable: "N/A",
-        cognizable: "N/A",
-      },
-      {
-        subject: "Admissibility of Electronic Records & Digital Evidence",
-        oldLaw: "IEA Section 65B",
-        newLaw: "BSA Section 61 & 63",
-        newSectionLookup: "61",
-        actSlug: "bsa",
-        punishment: "Electronic records recognized as primary documents under prescribed certification",
-        bailable: "N/A",
-        cognizable: "N/A",
-      },
-    ];
+    const baseComparisons = BASE_CRIMINAL_COMPARISONS;
 
     try {
       // 1. Fetch live BNS, BNSS, and BSA acts from DB

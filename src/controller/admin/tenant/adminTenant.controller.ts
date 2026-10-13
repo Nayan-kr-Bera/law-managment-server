@@ -1,4 +1,4 @@
-import { eq, ne, ilike, or, and, count, inArray, SQL } from "drizzle-orm";
+import { eq, ne, ilike, or, and, count, inArray, SQL, asc, desc } from "drizzle-orm";
 import { NextFunction, Request, Response } from "express";
 import bcrypt from "bcrypt";
 import slugify from "slugify";
@@ -29,6 +29,103 @@ import {
 } from "../../../services/cloudinary.service.js";
 import auditLogService from "../../../services/auditLog.service.js";
 import { sendLawFirmWelcomeEmail } from "../../../services/lawFirmWelcomeEmail.service.js";
+
+/**
+ * Helper to fetch the actual Managing Partner / Firm Owner for a tenant workspace.
+ * Resolves by priority:
+ * 1. User with 'tenant_admin' role in this tenant workspace
+ * 2. User with 'admin' role in this tenant workspace
+ * 3. Founding user (earliest created user scope for this tenant)
+ */
+async function getTenantManagingPartner(
+  tenantId: string,
+  tenantName?: string | null,
+  tenantEmail?: string | null
+) {
+  // 1. Look for user with 'tenant_admin' role in this tenant workspace
+  const [adminRow] = await db
+    .select({
+      user: user,
+      roleSlug: roles.slug,
+      roleName: roles.name,
+    })
+    .from(userScopes)
+    .innerJoin(user, eq(userScopes.userId, user.id))
+    .innerJoin(userRoles, eq(userRoles.scopeId, userScopes.id))
+    .innerJoin(roles, eq(userRoles.roleId, roles.id))
+    .where(
+      and(
+        eq(userScopes.tenantId, tenantId),
+        eq(roles.slug, "tenant_admin")
+      )
+    )
+    .orderBy(asc(userScopes.createdAt))
+    .limit(1);
+
+  if (adminRow?.user) {
+    return {
+      realUser: adminRow.user,
+      ownerName: adminRow.user.name,
+      ownerEmail: adminRow.user.email,
+      ownerPhone: adminRow.user.phone || undefined,
+      ownerId: adminRow.user.id,
+      roleSlug: adminRow.roleSlug,
+      roleName: adminRow.roleName || "Managing Partner",
+    };
+  }
+
+  // 2. Fallback: User with 'admin' role in this tenant workspace
+  const [generalAdminRow] = await db
+    .select({
+      user: user,
+      roleSlug: roles.slug,
+      roleName: roles.name,
+    })
+    .from(userScopes)
+    .innerJoin(user, eq(userScopes.userId, user.id))
+    .innerJoin(userRoles, eq(userRoles.scopeId, userScopes.id))
+    .innerJoin(roles, eq(userRoles.roleId, roles.id))
+    .where(
+      and(
+        eq(userScopes.tenantId, tenantId),
+        eq(roles.slug, "admin")
+      )
+    )
+    .orderBy(asc(userScopes.createdAt))
+    .limit(1);
+
+  if (generalAdminRow?.user) {
+    return {
+      realUser: generalAdminRow.user,
+      ownerName: generalAdminRow.user.name,
+      ownerEmail: generalAdminRow.user.email,
+      ownerPhone: generalAdminRow.user.phone || undefined,
+      ownerId: generalAdminRow.user.id,
+      roleSlug: generalAdminRow.roleSlug,
+      roleName: generalAdminRow.roleName || "Administrator",
+    };
+  }
+
+  // 3. Fallback: Chronologically first user created for this tenant (founding account)
+  const initialScope = await db.query.userScopes.findFirst({
+    where: eq(userScopes.tenantId, tenantId),
+    with: {
+      user: true,
+    },
+    orderBy: (s, { asc }) => [asc(s.createdAt)],
+  });
+
+  const realUser = initialScope?.user;
+  return {
+    realUser,
+    ownerName: realUser?.name || (tenantName ? `${tenantName} Admin` : "Law Firm Admin"),
+    ownerEmail: realUser?.email || tenantEmail || undefined,
+    ownerPhone: realUser?.phone || undefined,
+    ownerId: realUser?.id || undefined,
+    roleSlug: "tenant_admin",
+    roleName: "Managing Partner",
+  };
+}
 
 const adminTenantController = {
   // =========================================================================
@@ -92,19 +189,8 @@ const adminTenantController = {
             .from(cases)
             .where(eq(cases.tenantId, t.id));
 
-          // Fetch the real primary / managing partner user for this tenant
-          const primaryScope = await db.query.userScopes.findFirst({
-            where: eq(userScopes.tenantId, t.id),
-            with: {
-              user: true,
-            },
-            orderBy: (s, { desc }) => [desc(s.isDefault), desc(s.createdAt)],
-          });
-
-          const realUser = primaryScope?.user;
-          const ownerName = realUser?.name || (t.name ? `${t.name} Admin` : "Law Firm Admin");
-          const ownerEmail = realUser?.email || t.organisationEmail || undefined;
-          const ownerPhone = realUser?.phone || undefined;
+          // Fetch the real primary / managing partner user for this tenant (priority: tenant_admin role)
+          const partner = await getTenantManagingPartner(t.id, t.name, t.organisationEmail);
 
           return {
             id: t.id,
@@ -115,10 +201,10 @@ const adminTenantController = {
             status: t.status || "active",
             createdAt: t.createdAt ? new Date(t.createdAt).toISOString() : new Date().toISOString(),
             updatedAt: t.updatedAt ? new Date(t.updatedAt).toISOString() : undefined,
-            ownerName,
-            ownerEmail,
-            ownerPhone,
-            ownerId: realUser?.id || undefined,
+            ownerName: partner.ownerName,
+            ownerEmail: partner.ownerEmail,
+            ownerPhone: partner.ownerPhone,
+            ownerId: partner.ownerId,
             usersCount: usersRes?.count || 1,
             officesCount: officesRes?.count || 1,
             casesCount: casesRes?.count || 0,
@@ -182,19 +268,8 @@ const adminTenantController = {
         },
       });
 
-      // Fetch the real primary / managing partner user for this tenant
-      const primaryScope = await db.query.userScopes.findFirst({
-        where: eq(userScopes.tenantId, tenant.id),
-        with: {
-          user: true,
-        },
-        orderBy: (s, { desc }) => [desc(s.isDefault), desc(s.createdAt)],
-      });
-
-      const realUser = primaryScope?.user;
-      const ownerName = realUser?.name || `${tenant.name} Owner`;
-      const ownerEmail = realUser?.email || tenant.organisationEmail || undefined;
-      const ownerPhone = realUser?.phone || undefined;
+      // Fetch the real primary / managing partner user for this tenant (priority: tenant_admin role)
+      const partner = await getTenantManagingPartner(tenant.id, tenant.name, tenant.organisationEmail);
 
       const formattedTenant = {
         id: tenant.id,
@@ -205,10 +280,10 @@ const adminTenantController = {
         status: tenant.status || "active",
         createdAt: tenant.createdAt ? new Date(tenant.createdAt).toISOString() : new Date().toISOString(),
         updatedAt: tenant.updatedAt ? new Date(tenant.updatedAt).toISOString() : undefined,
-        ownerName,
-        ownerEmail,
-        ownerPhone,
-        ownerId: realUser?.id || undefined,
+        ownerName: partner.ownerName,
+        ownerEmail: partner.ownerEmail,
+        ownerPhone: partner.ownerPhone,
+        ownerId: partner.ownerId,
         usersCount: usersRes?.count || 1,
         officesCount: officesRes?.count || 1,
         activePlan: sub?.plan
@@ -937,8 +1012,19 @@ const adminTenantController = {
                 createdAt: s.tenant.createdAt,
               }));
 
-            // Exclude platform-side staff / superadmin and accounts without business tenant
-            if (isSuperAdmin || isPlatformRole || isOnlySystemTenant || validOrgs.length === 0) {
+            // Only accounts that are Firm Owners / Managing Partners (tenant_admin or admin) count as customer account owners
+            const isCustomerOwner = assignedRoles.some(
+              (r) => r.slug === "tenant_admin" || r.slug === "admin"
+            );
+
+            // Exclude platform-side staff / superadmin, accounts without business tenant, and non-owner tenant members (advocates, staff, clients)
+            if (
+              isSuperAdmin ||
+              isPlatformRole ||
+              isOnlySystemTenant ||
+              validOrgs.length === 0 ||
+              !isCustomerOwner
+            ) {
               return null;
             }
 
