@@ -920,7 +920,7 @@ export class BareActService {
       bailableStatus: string;
       cognizableStatus: string;
       compoundableStatus: string;
-      crossReferences: any;
+      crossReferences?: ICrossReferenceInfo | Record<string, unknown> | null;
       actId: string;
       actTitle: string;
       actShortCode?: string | null;
@@ -1014,7 +1014,7 @@ export class BareActService {
           }
 
           // Special enrichments for landmark provisions & comparative bridges
-          let crossReferences: any = undefined;
+          let crossReferences: ICrossReferenceInfo | Record<string, unknown> | undefined = undefined;
           let bailableStatus = "not_applicable";
           let cognizableStatus = "not_applicable";
           let punishment: string | null = null;

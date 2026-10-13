@@ -110,6 +110,19 @@ export interface IIndiaCodeSectionDetail {
   }>;
 }
 
+export interface IRawIndiaCodeSectionResponse {
+  order?: string | number;
+  order_arabic?: string | number;
+  rules?: Array<{ rule?: string | number; heading?: string }>;
+  heading?: string;
+  title?: string;
+  text?: string;
+  html?: string;
+  act_title?: string;
+  rule?: string | number;
+  [key: string]: unknown;
+}
+
 class IndiaCodeService {
   /**
    * Common slug aliases to map informal or legacy slugs to live eCourts IndiaCode IDs
@@ -384,7 +397,7 @@ class IndiaCodeService {
       throw new AppError(`IndiaCode API error: ${response.statusText}`, response.status);
     }
 
-    const rawData = (await response.json()) as Record<string, any>;
+    const rawData = (await response.json()) as IRawIndiaCodeSectionResponse;
 
     // Normalize CPC order/rule format if returned
     if (rawData.order && (rawData.heading || rawData.rules)) {
@@ -392,12 +405,12 @@ class IndiaCodeService {
         rawData.text ||
         rawData.html ||
         (Array.isArray(rawData.rules)
-          ? rawData.rules.map((r: any) => `${r.rule}. ${r.heading}`).join("\n\n")
+          ? rawData.rules.map((r) => `${r.rule}. ${r.heading}`).join("\n\n")
           : "");
       return {
         act: {
           id: "cpc",
-          short_title: rawData.act_title || "The Code of Civil Procedure, 1908",
+          short_title: (rawData.act_title as string) || "The Code of Civil Procedure, 1908",
           act_year: 1908,
           unit: "rule",
         },
@@ -405,7 +418,7 @@ class IndiaCodeService {
           number: rawData.rule
             ? `Order ${rawData.order_arabic || rawData.order} Rule ${rawData.rule}`
             : `Order ${rawData.order_arabic || rawData.order}`,
-          heading: rawData.heading || rawData.title || `Order ${rawData.order_arabic || rawData.order}`,
+          heading: (rawData.heading || rawData.title || `Order ${rawData.order_arabic || rawData.order}`) as string,
           text: ruleText,
         },
         classification: [],
@@ -413,7 +426,7 @@ class IndiaCodeService {
       };
     }
 
-    return rawData as IIndiaCodeSectionDetail;
+    return rawData as unknown as IIndiaCodeSectionDetail;
   }
 
   /**

@@ -19,6 +19,10 @@ import {
   roles,
   userRoles,
   subscriptionPaymentHistory,
+  advocates,
+  caseAdvocates,
+  courts,
+  caseTypes,
 } from "../../../db/schema/index.js";
 
 import CustomErrorHandler from "../../../utils/customErrorHandler.js";
@@ -268,6 +272,47 @@ const adminTenantController = {
         },
       });
 
+      const [casesRes] = await db
+        .select({ count: count() })
+        .from(cases)
+        .where(eq(cases.tenantId, tenant.id));
+
+      const [activeCasesRes] = await db
+        .select({ count: count() })
+        .from(cases)
+        .where(
+          and(
+            eq(cases.tenantId, tenant.id),
+            eq(cases.isDecided, false),
+            eq(cases.isAbandoned, false)
+          )
+        );
+
+      const [disposedCasesRes] = await db
+        .select({ count: count() })
+        .from(cases)
+        .where(
+          and(
+            eq(cases.tenantId, tenant.id),
+            or(eq(cases.isDecided, true), eq(cases.status, "disposed"))
+          )
+        );
+
+      const firmCasesValue = await db
+        .select({ caseValue: cases.caseValue })
+        .from(cases)
+        .where(eq(cases.tenantId, tenant.id));
+
+      const totalClaimValue = firmCasesValue.reduce(
+        (acc, c) => acc + (Number(c.caseValue) || 0),
+        0
+      );
+
+      const firmOffices = await db.query.offices.findMany({
+        where: eq(offices.tenantId, tenant.id),
+        orderBy: (o, { desc }) => [desc(o.isHeadOffice), desc(o.createdAt)],
+      });
+
       // Fetch the real primary / managing partner user for this tenant (priority: tenant_admin role)
       const partner = await getTenantManagingPartner(tenant.id, tenant.name, tenant.organisationEmail);
 
@@ -276,16 +321,38 @@ const adminTenantController = {
         name: tenant.name,
         slug: tenant.slug,
         logo: tenant.logo,
+        gst: tenant.gst || undefined,
+        organisationEmail: tenant.organisationEmail || undefined,
+        organisationPhone: tenant.organisationPhone || undefined,
         timezone: tenant.timezone || "Asia/Kolkata",
         status: tenant.status || "active",
+        storageUsedBytes: Number(tenant.storageUsedBytes) || 0,
         createdAt: tenant.createdAt ? new Date(tenant.createdAt).toISOString() : new Date().toISOString(),
         updatedAt: tenant.updatedAt ? new Date(tenant.updatedAt).toISOString() : undefined,
         ownerName: partner.ownerName,
         ownerEmail: partner.ownerEmail,
         ownerPhone: partner.ownerPhone,
         ownerId: partner.ownerId,
+        ownerRole: partner.roleName || "Managing Partner",
         usersCount: usersRes?.count || 1,
         officesCount: officesRes?.count || 1,
+        casesCount: casesRes?.count || 0,
+        activeCasesCount: activeCasesRes?.count || 0,
+        disposedCasesCount: disposedCasesRes?.count || 0,
+        totalClaimValue,
+        offices: firmOffices.map((o) => ({
+          id: o.id,
+          name: o.name,
+          code: o.code || undefined,
+          email: o.email || undefined,
+          phone: o.phone || undefined,
+          address: o.address || undefined,
+          city: o.city || undefined,
+          state: o.state || undefined,
+          country: o.country || undefined,
+          isHeadOffice: Boolean(o.isHeadOffice),
+          isActive: Boolean(o.isActive),
+        })),
         activePlan: sub?.plan
           ? {
               id: sub.plan.id,
@@ -304,6 +371,498 @@ const adminTenantController = {
       );
     } catch (error) {
       console.error("Admin get tenant by ID error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  // =========================================================================
+  // GET TENANT ADVOCATES ROSTER
+  // =========================================================================
+  async getTenantAdvocates(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+
+      const tenantRecord = await db.query.tenants.findFirst({
+        where: eq(tenants.id, id),
+      });
+
+      if (!tenantRecord) {
+        return next(CustomErrorHandler.notFound("Tenant not found"));
+      }
+
+      // Query all user scopes in this tenant
+      const scopes = await db.query.userScopes.findMany({
+        where: eq(userScopes.tenantId, id),
+        with: {
+          user: true,
+        },
+      });
+
+      const advocatesList = await Promise.all(
+        scopes.map(async (scope) => {
+          if (!scope.user) return null;
+
+          // Check advocate profile if exists
+          const advProfile = await db.query.advocates.findFirst({
+            where: eq(advocates.userId, scope.user.id),
+          });
+
+          // Check roles in this tenant scope
+          const assignedRoles = await db
+            .select({
+              id: roles.id,
+              name: roles.name,
+              slug: roles.slug,
+            })
+            .from(userRoles)
+            .innerJoin(roles, eq(userRoles.roleId, roles.id))
+            .where(eq(userRoles.scopeId, scope.id));
+
+          // If advocate profile exists, query their assigned cases for this firm
+          let activeCasesCount = 0;
+          let disposedCasesCount = 0;
+
+          if (advProfile) {
+            const assignedCaseLinks = await db
+              .select({
+                isDecided: cases.isDecided,
+                isAbandoned: cases.isAbandoned,
+                status: cases.status,
+              })
+              .from(caseAdvocates)
+              .innerJoin(cases, eq(caseAdvocates.caseId, cases.id))
+              .where(
+                and(
+                  eq(caseAdvocates.advocateId, advProfile.id),
+                  eq(cases.tenantId, id)
+                )
+              );
+
+            for (const c of assignedCaseLinks) {
+              if (
+                c.isDecided ||
+                c.status === "disposed" ||
+                c.isAbandoned ||
+                c.status === "closed"
+              ) {
+                disposedCasesCount++;
+              } else {
+                activeCasesCount++;
+              }
+            }
+          }
+
+          const primaryRole = assignedRoles[0];
+
+          return {
+            id: scope.user.id,
+            userId: scope.user.id,
+            advocateId: advProfile?.id || null,
+            name: scope.user.name,
+            email: scope.user.email,
+            phone: scope.user.phone || undefined,
+            avatar: scope.user.avatar || undefined,
+            designation:
+              advProfile?.designation ||
+              (primaryRole?.slug === "tenant_admin"
+                ? "Managing Partner"
+                : primaryRole?.name || "Advocate"),
+            enrollmentNo: advProfile?.enrollmentNo || undefined,
+            barCouncil: advProfile?.barCouncil || undefined,
+            barCouncilNumber: advProfile?.barCouncil || advProfile?.enrollmentNo || undefined,
+            practiceArea: advProfile?.practiceArea || undefined,
+            practiceAreas: advProfile?.practiceArea ? [advProfile.practiceArea] : [],
+            isLead: primaryRole?.slug === "tenant_admin",
+            isOwner: primaryRole?.slug === "tenant_admin",
+            role: primaryRole?.name || "Advocate",
+            roleName: primaryRole?.name || "Advocate",
+            roleSlug: primaryRole?.slug || "advocate",
+            activeCasesCount,
+            disposedCasesCount,
+            totalCasesCount: activeCasesCount + disposedCasesCount,
+            casesActive: activeCasesCount,
+            casesDisposed: disposedCasesCount,
+            casesTotal: activeCasesCount + disposedCasesCount,
+            isDefault: scope.isDefault,
+            joinedAt: scope.createdAt
+              ? new Date(scope.createdAt).toISOString()
+              : new Date().toISOString(),
+          };
+        })
+      );
+
+      // Sort: Managing partner first, then by active cases desc, then by name
+      const sorted = (
+        advocatesList.filter(Boolean) as NonNullable<
+          (typeof advocatesList)[number]
+        >[]
+      ).sort((a, b) => {
+        if (a.isLead && !b.isLead) return -1;
+        if (!a.isLead && b.isLead) return 1;
+        return b.activeCasesCount - a.activeCasesCount || a.name.localeCompare(b.name);
+      });
+
+      return res.status(200).json(
+        ResponseHandler(200, "Firm advocates fetched successfully", sorted)
+      );
+    } catch (error) {
+      console.error("Admin get tenant advocates error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  // =========================================================================
+  // GET TENANT CASES SUMMARY & STATUS PIPELINE
+  // =========================================================================
+  async getTenantCasesSummary(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const { status, search } = req.query as { status?: string; search?: string };
+
+      const tenantRecord = await db.query.tenants.findFirst({
+        where: eq(tenants.id, id),
+      });
+
+      if (!tenantRecord) {
+        return next(CustomErrorHandler.notFound("Tenant not found"));
+      }
+
+      // 1. Fetch all cases for this firm
+      const firmCases = await db
+        .select({
+          id: cases.id,
+          caseNumber: cases.caseNumber,
+          cnrNumber: cases.cnrNumber,
+          title: cases.title,
+          stage: cases.stage,
+          priority: cases.priority,
+          status: cases.status,
+          caseValue: cases.caseValue,
+          isDecided: cases.isDecided,
+          isAbandoned: cases.isAbandoned,
+          firstParty: cases.firstParty,
+          oppositeParty: cases.oppositeParty,
+          judgeName: cases.judgeName,
+          filingDate: cases.filingDate,
+          registrationDate: cases.registrationDate,
+          nextHearingDate: cases.nextHearingDate,
+          createdAt: cases.createdAt,
+          courtName: courts.name,
+          caseTypeName: caseTypes.name,
+        })
+        .from(cases)
+        .leftJoin(courts, eq(cases.courtId, courts.id))
+        .leftJoin(caseTypes, eq(cases.caseTypeId, caseTypes.id))
+        .where(eq(cases.tenantId, id))
+        .orderBy(desc(cases.createdAt));
+
+      // 2. Fetch assigned advocates for all firm cases
+      const caseIds = firmCases.map((c) => c.id);
+      const advocateAssignments =
+        caseIds.length > 0
+          ? await db
+              .select({
+                caseId: caseAdvocates.caseId,
+                advocateId: caseAdvocates.advocateId,
+                isPrimary: caseAdvocates.isPrimary,
+                userId: user.id,
+                userName: user.name,
+                userEmail: user.email,
+                avatar: user.avatar,
+                designation: advocates.designation,
+                barCouncil: advocates.barCouncil,
+                enrollmentNo: advocates.enrollmentNo,
+              })
+              .from(caseAdvocates)
+              .innerJoin(advocates, eq(caseAdvocates.advocateId, advocates.id))
+              .innerJoin(user, eq(advocates.userId, user.id))
+              .where(inArray(caseAdvocates.caseId, caseIds))
+          : [];
+
+      const advocatesByCase = new Map<string, typeof advocateAssignments>();
+      for (const a of advocateAssignments) {
+        if (!advocatesByCase.has(a.caseId)) {
+          advocatesByCase.set(a.caseId, []);
+        }
+        advocatesByCase.get(a.caseId)!.push(a);
+      }
+
+      // 3. Compute status statistics pipeline
+      const stats = {
+        total: firmCases.length,
+        totalCases: firmCases.length,
+        activeCases: 0,
+        disposedCases: 0,
+        closedCases: 0,
+        open: 0,
+        in_progress: 0,
+        pending: 0,
+        stayed: 0,
+        disposed: 0,
+        closed: 0,
+        totalClaimValue: 0,
+        statusBreakdown: {
+          open: 0,
+          in_progress: 0,
+          pending: 0,
+          stayed: 0,
+          disposed: 0,
+          closed: 0,
+        },
+      };
+
+      for (const c of firmCases) {
+        if (c.caseValue) {
+          stats.totalClaimValue += Number(c.caseValue) || 0;
+        }
+
+        if (c.isDecided || c.status === "disposed") {
+          stats.disposed++;
+          stats.disposedCases++;
+          stats.statusBreakdown.disposed++;
+        } else if (c.isAbandoned || c.status === "closed") {
+          stats.closed++;
+          stats.closedCases++;
+          stats.statusBreakdown.closed++;
+        } else if (c.status === "in_progress") {
+          stats.in_progress++;
+          stats.activeCases++;
+          stats.statusBreakdown.in_progress++;
+        } else if (c.status === "stayed") {
+          stats.stayed++;
+          stats.activeCases++;
+          stats.statusBreakdown.stayed++;
+        } else if (c.status === "pending") {
+          stats.pending++;
+          stats.activeCases++;
+          stats.statusBreakdown.pending++;
+        } else {
+          stats.open++;
+          stats.activeCases++;
+          stats.statusBreakdown.open++;
+        }
+      }
+
+      // 4. Filter cases by search or status if provided
+      let filtered = firmCases;
+      if (status && status !== "all") {
+        if (status === "disposed") {
+          filtered = filtered.filter((c) => c.isDecided || c.status === "disposed");
+        } else if (status === "closed") {
+          filtered = filtered.filter((c) => c.isAbandoned || c.status === "closed");
+        } else {
+          filtered = filtered.filter((c) => c.status === status);
+        }
+      }
+
+      if (search && search.trim() !== "") {
+        const q = search.trim().toLowerCase();
+        filtered = filtered.filter((c) => {
+          const assigned = advocatesByCase.get(c.id) || [];
+          const matchesAdvocate = assigned.some(
+            (a) =>
+              (a.userName && a.userName.toLowerCase().includes(q)) ||
+              (a.userEmail && a.userEmail.toLowerCase().includes(q))
+          );
+          return (
+            (c.title && c.title.toLowerCase().includes(q)) ||
+            (c.caseNumber && c.caseNumber.toLowerCase().includes(q)) ||
+            (c.cnrNumber && c.cnrNumber.toLowerCase().includes(q)) ||
+            (c.courtName && c.courtName.toLowerCase().includes(q)) ||
+            matchesAdvocate
+          );
+        });
+      }
+
+      return res.status(200).json(
+        ResponseHandler(200, "Firm cases summary fetched successfully", {
+          stats,
+          cases: filtered.map((c) => {
+            const assigned = advocatesByCase.get(c.id) || [];
+            const primaryAdvocate = assigned.find((a) => a.isPrimary) || assigned[0];
+            return {
+              ...c,
+              court: c.courtName,
+              caseType: c.caseTypeName,
+              caseValue: c.caseValue ? Number(c.caseValue) : undefined,
+              assignedLawyer: primaryAdvocate
+                ? {
+                    id: primaryAdvocate.userId,
+                    advocateId: primaryAdvocate.advocateId,
+                    name: primaryAdvocate.userName,
+                    email: primaryAdvocate.userEmail,
+                    isPrimary: primaryAdvocate.isPrimary,
+                    designation: primaryAdvocate.designation,
+                    barCouncilNumber:
+                      primaryAdvocate.barCouncil || primaryAdvocate.enrollmentNo,
+                  }
+                : null,
+              assignedAdvocates: assigned.map((a) => ({
+                id: a.userId,
+                advocateId: a.advocateId,
+                name: a.userName,
+                email: a.userEmail,
+                isPrimary: a.isPrimary,
+              })),
+              createdAt: c.createdAt
+                ? new Date(c.createdAt).toISOString()
+                : new Date().toISOString(),
+            };
+          }),
+        })
+      );
+    } catch (error) {
+      console.error("Admin get tenant cases summary error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  // =========================================================================
+  // GET TENANT BILLING & SUBSCRIPTION
+  // =========================================================================
+  async getTenantBillingSubscription(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+
+      const tenantRecord = await db.query.tenants.findFirst({
+        where: eq(tenants.id, id),
+      });
+
+      if (!tenantRecord) {
+        return next(CustomErrorHandler.notFound("Tenant not found"));
+      }
+
+      // Active Subscription
+      const sub = await db.query.tenantSubscriptions.findFirst({
+        where: eq(tenantSubscriptions.tenantId, id),
+        with: {
+          plan: true,
+        },
+      });
+
+      // Always resolve actual plan limits from subscriptionPlans table
+      let planRecord = sub?.plan;
+      if (!planRecord && sub?.planId) {
+        planRecord = await db.query.subscriptionPlans.findFirst({
+          where: eq(subscriptionPlans.id, sub.planId),
+        });
+      }
+      if (!planRecord) {
+        planRecord = await db.query.subscriptionPlans.findFirst({
+          where: eq(subscriptionPlans.code, "free_trial"),
+        });
+      }
+
+      const planLimits = {
+        maxUsers: planRecord?.maxUsers ?? 1,
+        maxOffices: planRecord?.maxOffices ?? 1,
+        maxStorageGb: planRecord?.maxStorageGb ?? 2,
+        monthlyAiDrafts: planRecord?.monthlyAiDrafts ?? 4,
+        monthlyOcrPages: planRecord?.monthlyOcrPages ?? 10,
+        monthlyOcrCredits: planRecord?.monthlyOcrCredits ?? 100,
+      };
+
+      // Platform resource consumption
+      const [usersRes] = await db
+        .select({ count: count() })
+        .from(userScopes)
+        .where(eq(userScopes.tenantId, id));
+
+      const [officesRes] = await db
+        .select({ count: count() })
+        .from(offices)
+        .where(eq(offices.tenantId, id));
+
+      // Payment History
+      const payments = await db.query.subscriptionPaymentHistory.findMany({
+        where: eq(subscriptionPaymentHistory.tenantId, id),
+        orderBy: (p, { desc }) => [desc(p.transactionDate), desc(p.createdAt)],
+      });
+
+      // Total Spend
+      const totalSpend = payments.reduce(
+        (acc, p) => acc + (Number(p.amount) || 0),
+        0
+      );
+
+      const usage = {
+        users: {
+          used: usersRes?.count || 1,
+          current: usersRes?.count || 1,
+          limit: planLimits.maxUsers,
+        },
+        offices: {
+          used: officesRes?.count || 1,
+          current: officesRes?.count || 1,
+          limit: planLimits.maxOffices,
+        },
+        storage: {
+          usedBytes: Number(tenantRecord.storageUsedBytes) || 0,
+          currentBytes: Number(tenantRecord.storageUsedBytes) || 0,
+          limitGb: planLimits.maxStorageGb,
+        },
+      };
+
+      const subscriptionObj = sub
+        ? {
+            id: sub.id,
+            planId: sub.planId,
+            planName: planRecord?.name || "Free Trial",
+            tier: planRecord?.code || "free_trial",
+            planCode: planRecord?.code || "free_trial",
+            status: sub.status,
+            billingCycle: sub.billingCycle,
+            amount: Number(sub.amount),
+            price: Number(sub.amount),
+            currency: sub.currency,
+            startDate: sub.startDate
+              ? new Date(sub.startDate).toISOString()
+              : undefined,
+            currentPeriodStart: sub.startDate
+              ? new Date(sub.startDate).toISOString()
+              : undefined,
+            nextBillingDate: sub.nextBillingDate
+              ? new Date(sub.nextBillingDate).toISOString()
+              : undefined,
+            currentPeriodEnd: sub.nextBillingDate
+              ? new Date(sub.nextBillingDate).toISOString()
+              : undefined,
+            features: planRecord?.features || [],
+            limits: planLimits,
+          }
+        : null;
+
+      const paymentsList = payments.map((p) => ({
+        id: p.id,
+        invoiceNumber: p.invoiceNumber,
+        planName: p.planName || "Subscription Renewal",
+        amount: Number(p.amount),
+        currency: p.currency,
+        status: p.status,
+        billingCycle: p.billingCycle,
+        paymentMethod: p.paymentMethod || "Razorpay Online",
+        receiptUrl: p.receiptUrl,
+        invoiceUrl: p.receiptUrl,
+        transactionDate: p.transactionDate
+          ? new Date(p.transactionDate).toISOString()
+          : new Date().toISOString(),
+        createdAt: p.transactionDate
+          ? new Date(p.transactionDate).toISOString()
+          : new Date().toISOString(),
+      }));
+
+      return res.status(200).json(
+        ResponseHandler(200, "Firm billing & subscription fetched successfully", {
+          subscription: subscriptionObj,
+          ongoingSubscription: subscriptionObj,
+          usage,
+          totalSpend,
+          payments: paymentsList,
+          paymentHistory: paymentsList,
+        })
+      );
+    } catch (error) {
+      console.error("Admin get tenant billing subscription error:", error);
       return next(CustomErrorHandler.serverError());
     }
   },
@@ -1352,6 +1911,256 @@ const adminTenantController = {
       );
     } catch (error) {
       console.error("Admin provision organization for user error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  // =========================================================================
+  // GET ALL USERS DIRECTORY (With Paginated Results & Linked Organizations)
+  // =========================================================================
+  async getUsersDirectory(req: Request, res: Response, next: NextFunction) {
+    try {
+      const page = Math.max(1, parseInt(req.query.page as string) || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 10));
+      const search = (req.query.search as string)?.trim().toLowerCase() || "";
+      const roleFilter = (req.query.role as string)?.trim() || "";
+      const statusFilter = (req.query.status as string)?.trim() || "";
+
+      // 1. Fetch all users
+      const allUsers = await db.query.user.findMany({
+        orderBy: (u, { desc }) => [desc(u.createdAt)],
+      });
+
+      // 2. Enrich with scopes, organizations, and roles
+      const enrichedUsers = await Promise.all(
+        allUsers.map(async (u) => {
+          const scopes = await db.query.userScopes.findMany({
+            where: eq(userScopes.userId, u.id),
+            with: {
+              tenant: true,
+            },
+          });
+
+          // Roles
+          const assignedRoles = await db
+            .select({
+              slug: roles.slug,
+              name: roles.name,
+              isSystemRole: roles.isSystemRole,
+            })
+            .from(userRoles)
+            .innerJoin(roles, eq(userRoles.roleId, roles.id))
+            .innerJoin(userScopes, eq(userRoles.scopeId, userScopes.id))
+            .where(eq(userScopes.userId, u.id));
+
+          const isSuperAdmin =
+            u.email?.toLowerCase().includes("superadmin") ||
+            assignedRoles.some((r) => r.slug === "super_admin");
+          const isTenantAdmin = assignedRoles.some((r) => r.slug === "tenant_admin");
+          const isPlatformAdmin = assignedRoles.some((r) => r.slug === "admin");
+
+          let roleSlug = "advocate";
+          let primaryRole = "Advocate";
+
+          if (isSuperAdmin) {
+            roleSlug = "super_admin";
+            primaryRole = "Super Admin";
+          } else if (isTenantAdmin) {
+            roleSlug = "tenant_admin";
+            primaryRole = "Firm Owner";
+          } else if (isPlatformAdmin) {
+            roleSlug = "admin";
+            primaryRole = "Platform Admin";
+          } else if (assignedRoles.length > 0) {
+            roleSlug = assignedRoles[0].slug || "advocate";
+            primaryRole = assignedRoles[0].name;
+          }
+
+          // Valid business orgs
+          const validOrgs = scopes
+            .filter((s) => s.tenant && (isSuperAdmin || s.tenant.slug !== "system"))
+            .map((s) => ({
+              tenantId: s.tenant!.id,
+              name: s.tenant!.name,
+              slug: s.tenant!.slug,
+              status: s.tenant!.status,
+              isDefault: s.isDefault,
+            }));
+
+          return {
+            id: u.id,
+            name: u.name,
+            email: u.email,
+            phone: u.phone || "—",
+            status: u.isEmailVerified ? "active" : "inactive",
+            roleName: primaryRole,
+            roleSlug,
+            isSuperAdmin,
+            organizations: validOrgs,
+            organizationsCount: validOrgs.length,
+            primaryOrganization: validOrgs.find((o) => o.isDefault)?.name || validOrgs[0]?.name || "Unassigned Firm",
+            createdAt: u.createdAt ? new Date(u.createdAt).toISOString() : new Date().toISOString(),
+            lastActiveAt: u.updatedAt ? new Date(u.updatedAt).toISOString() : undefined,
+          };
+        })
+      );
+
+      // 3. Filter
+      let filtered = enrichedUsers;
+      if (search) {
+        filtered = filtered.filter(
+          (u) =>
+            u.name.toLowerCase().includes(search) ||
+            u.email.toLowerCase().includes(search) ||
+            (u.phone && u.phone.includes(search)) ||
+            u.roleName.toLowerCase().includes(search) ||
+            u.organizations.some(
+              (o) =>
+                o.name.toLowerCase().includes(search) ||
+                o.slug.toLowerCase().includes(search)
+            )
+        );
+      }
+
+      if (roleFilter && roleFilter !== "all") {
+        filtered = filtered.filter(
+          (u) =>
+            u.roleSlug === roleFilter ||
+            u.roleName.toLowerCase().includes(roleFilter.toLowerCase())
+        );
+      }
+
+      if (statusFilter && statusFilter !== "all") {
+        filtered = filtered.filter((u) => u.status === statusFilter);
+      }
+
+      const total = filtered.length;
+      const totalPages = Math.ceil(total / limit) || 1;
+      const startIndex = (page - 1) * limit;
+      const paginatedUsers = filtered.slice(startIndex, startIndex + limit);
+
+      return res.status(200).json(
+        ResponseHandler(200, "Users directory fetched successfully", {
+          users: paginatedUsers,
+          pagination: {
+            page,
+            limit,
+            total,
+            totalPages,
+          },
+        })
+      );
+    } catch (error) {
+      console.error("Admin getUsersDirectory error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  // =========================================================================
+  // GET ALL CLIENTS DIRECTORY (With Paginated Results & Linked Organizations)
+  // =========================================================================
+  async getClientsDirectory(req: Request, res: Response, next: NextFunction) {
+    try {
+      const page = Math.max(1, parseInt(req.query.page as string) || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 10));
+      const search = (req.query.search as string)?.trim().toLowerCase() || "";
+      const statusFilter = (req.query.status as string)?.trim() || "";
+
+      // 1. Fetch all clients with their profiles (tenants & offices)
+      const allClients = await db.query.clients.findMany({
+        orderBy: (c, { desc }) => [desc(c.createdAt)],
+        with: {
+          profiles: {
+            with: {
+              tenant: true,
+              office: true,
+            },
+          },
+        },
+      });
+
+      // 2. Fetch case counts for each client from caseClients
+      const clientSummaries = await Promise.all(
+        allClients.map(async (c) => {
+          const [caseCountRes] = await db
+            .select({ count: count() })
+            .from(caseClients)
+            .where(eq(caseClients.clientId, c.id));
+
+          const linkedOrgs = c.profiles
+            .filter((p) => p.tenant)
+            .map((p) => ({
+              tenantId: p.tenantId,
+              name: p.tenant.name,
+              slug: p.tenant.slug,
+              officeName: p.office?.name || "Main Office",
+              status: p.status,
+            }));
+
+          const fullName = [c.firstName, c.lastName].filter(Boolean).join(" ") || "Unnamed Client";
+
+          return {
+            id: c.id,
+            firstName: c.firstName,
+            lastName: c.lastName || "",
+            name: fullName,
+            email: c.email || "—",
+            phone: c.phone || "—",
+            companyName: c.companyName || "Individual",
+            city: c.city || "—",
+            state: c.state || "—",
+            country: c.country || "India",
+            status: c.status || "active",
+            hasPortalAccess: Boolean(c.passwordHash),
+            lastLoginAt: c.lastLoginAt ? new Date(c.lastLoginAt).toISOString() : null,
+            createdAt: c.createdAt ? new Date(c.createdAt).toISOString() : new Date().toISOString(),
+            organizations: linkedOrgs,
+            organizationsCount: linkedOrgs.length,
+            casesCount: Number(caseCountRes?.count) || 0,
+          };
+        })
+      );
+
+      // 3. Filter
+      let filtered = clientSummaries;
+      if (search) {
+        filtered = filtered.filter(
+          (c) =>
+            c.name.toLowerCase().includes(search) ||
+            c.email.toLowerCase().includes(search) ||
+            c.phone.includes(search) ||
+            c.companyName.toLowerCase().includes(search) ||
+            c.city.toLowerCase().includes(search) ||
+            c.organizations.some(
+              (o) =>
+                o.name.toLowerCase().includes(search) ||
+                o.slug.toLowerCase().includes(search)
+            )
+        );
+      }
+
+      if (statusFilter && statusFilter !== "all") {
+        filtered = filtered.filter((c) => c.status === statusFilter);
+      }
+
+      const total = filtered.length;
+      const totalPages = Math.ceil(total / limit) || 1;
+      const startIndex = (page - 1) * limit;
+      const paginatedClients = filtered.slice(startIndex, startIndex + limit);
+
+      return res.status(200).json(
+        ResponseHandler(200, "Clients directory fetched successfully", {
+          clients: paginatedClients,
+          pagination: {
+            page,
+            limit,
+            total,
+            totalPages,
+          },
+        })
+      );
+    } catch (error) {
+      console.error("Admin getClientsDirectory error:", error);
       return next(CustomErrorHandler.serverError());
     }
   },

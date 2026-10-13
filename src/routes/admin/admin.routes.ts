@@ -38,9 +38,14 @@ router.get("/system-stats", adminAuth, adminPermissionGuard("admin.dashboard.rea
 router.get("/tenants", adminAuth, adminPermissionGuard("admin.tenants.read"), adminTenantController.getTenants);
 router.get("/tenants/ecosystem", adminAuth, adminPermissionGuard("admin.tenants.read"), adminTenantController.getTenantEcosystem);
 router.get("/tenants/multi-org-customers", adminAuth, adminPermissionGuard("admin.tenants.read"), adminTenantController.getMultiOrgCustomers);
+router.get("/tenants/users-directory", adminAuth, adminPermissionGuard("admin.tenants.read"), adminTenantController.getUsersDirectory);
+router.get("/tenants/clients-directory", adminAuth, adminPermissionGuard("admin.tenants.read"), adminTenantController.getClientsDirectory);
 router.get("/tenants/user/:userId/organizations", adminAuth, adminPermissionGuard("admin.tenants.read"), adminTenantController.getUserOrganizations);
 router.post("/tenants/provision-for-user", adminAuth, adminPermissionGuard("admin.tenants.create"), adminTenantController.provisionOrganizationForUser);
 router.get("/tenants/:id", adminAuth, adminPermissionGuard("admin.tenants.read"), adminTenantController.getTenantById);
+router.get("/tenants/:id/advocates", adminAuth, adminPermissionGuard("admin.tenants.read"), adminTenantController.getTenantAdvocates);
+router.get("/tenants/:id/cases-summary", adminAuth, adminPermissionGuard("admin.tenants.read"), adminTenantController.getTenantCasesSummary);
+router.get("/tenants/:id/billing-subscription", adminAuth, adminPermissionGuard("admin.tenants.read"), adminTenantController.getTenantBillingSubscription);
 router.post("/tenants", adminAuth, adminPermissionGuard("admin.tenants.create"), adminTenantController.createTenant);
 router.put("/tenants/:id", adminAuth, adminPermissionGuard("admin.tenants.update"), upload.single("logo"), adminTenantController.updateTenant);
 router.delete("/tenants/:id", adminAuth, adminPermissionGuard("admin.tenants.delete"), adminTenantController.deleteTenant);

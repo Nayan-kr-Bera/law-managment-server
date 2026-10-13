@@ -15,35 +15,38 @@ import ResponseHandler from "../../utils/responseHandler.js";
 const tenantController = {
   async getTenantByUserId(req: Request, res: Response, next: NextFunction) {
     try {
-      const { userId } = req.user;
+      const { userId, tenantId: userTenantId } = req.user;
 
       if (!userId) {
         return next(CustomErrorHandler.badRequest("User id is required"));
       }
 
-      // FIND DEFAULT USER SCOPE
-      const scope = await db.query.userScopes.findFirst({
-        where: eq(userScopes.userId, userId),
-      });
+      let tenantIdToFetch = userTenantId;
 
-      if (!scope) {
-        return next(
-          CustomErrorHandler.notFound("No tenant found for this user"),
-        );
-      }
+      if (!tenantIdToFetch) {
+        // FIND DEFAULT USER SCOPE
+        const scope =
+          (await db.query.userScopes.findFirst({
+            where: and(
+              eq(userScopes.userId, userId),
+              eq(userScopes.isDefault, true),
+            ),
+          })) ||
+          (await db.query.userScopes.findFirst({
+            where: eq(userScopes.userId, userId),
+          }));
 
-      // CHECK TENANT ID
-      if (!scope.tenantId) {
-        return next(
-          CustomErrorHandler.notFound(
-            "No tenant is associated with this user scope",
-          ),
-        );
+        if (!scope || !scope.tenantId) {
+          return next(
+            CustomErrorHandler.notFound("No tenant found for this user"),
+          );
+        }
+        tenantIdToFetch = scope.tenantId;
       }
 
       // FIND TENANT
       const tenant = await db.query.tenants.findFirst({
-        where: eq(tenants.id, scope.tenantId),
+        where: eq(tenants.id, tenantIdToFetch),
       });
 
       if (!tenant) {
