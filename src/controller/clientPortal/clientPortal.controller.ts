@@ -1244,6 +1244,52 @@ const clientPortalController = {
     }
   },
 
+  async submitSupportTicketCsat(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { ticketId } = req.params;
+      const { rating, feedback } = req.body;
+
+      if (!rating || Number(rating) < 1 || Number(rating) > 5) {
+        return next(CustomErrorHandler.badRequest("Rating must be a valid integer between 1 and 5"));
+      }
+
+      const ticket = await db.query.supportTickets.findFirst({
+        where: eq(supportTickets.id, ticketId),
+      });
+
+      if (!ticket) {
+        return next(CustomErrorHandler.notFound("Support ticket not found"));
+      }
+
+      const [updated] = await db
+        .update(supportTickets)
+        .set({
+          csatRating: Number(rating),
+          csatFeedback: feedback?.trim() || null,
+          csatRatedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(supportTickets.id, ticketId))
+        .returning();
+
+      const stars = "⭐".repeat(Number(rating));
+      await db.insert(supportTicketMessages).values({
+        ticketId,
+        senderType: "client",
+        senderId: req.clientUser?.clientUserId || req.clientUser?.clientId || undefined,
+        senderName: "Client Review",
+        message: `Client rated this ticket resolution ${stars} (${rating}/5)${feedback ? `: "${feedback.trim()}"` : "."}`,
+      });
+
+      return res.status(200).json(
+        ResponseHandler(200, "Thank you! Your feedback has been recorded.", updated)
+      );
+    } catch (error) {
+      console.error("Submit client ticket CSAT error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
   // ─── CLIENT NOTIFICATIONS ──────────────────────────────────────────
   async getNotifications(req: Request, res: Response, next: NextFunction) {
     try {

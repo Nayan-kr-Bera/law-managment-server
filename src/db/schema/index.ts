@@ -120,6 +120,7 @@ export {
 // Support Tickets
 export { default as supportTickets } from "./support/supportTickets.js";
 export { default as supportTicketMessages } from "./support/supportTicketMessages.js";
+export { default as supportCallLogs } from "./support/supportCallLogs.js";
 
 // Contact Us & Inquiries
 export { default as contactUsMessages } from "./contactUs.js";

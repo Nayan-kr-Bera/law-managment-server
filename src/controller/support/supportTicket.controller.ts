@@ -3,9 +3,24 @@ import { NextFunction, Request, Response } from "express";
 import db from "../../db/index.js";
 import supportTicketMessages from "../../db/schema/support/supportTicketMessages.js";
 import supportTickets from "../../db/schema/support/supportTickets.js";
+import {
+  autoCloseInactiveTicketIfExpired,
+  autoCloseInactiveTicketsList,
+  findOptimalOnlineSupportAgent,
+  formatTicketMessage,
+  isAnySupportAgentBusy,
+  isExplicitProblemSolved,
+  isSupportOfficeHours,
+} from "../../helpers/supportTicket.helper.js";
+import { aiSupportService } from "../../services/aiSupport.service.js";
+import { createClientNotification } from "../../services/notification.service.js";
+import {
+  emitTicketClosed,
+  emitTicketMessage,
+  emitTicketUpdated,
+} from "../../socket/socket.service.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import ResponseHandler from "../../utils/responseHandler.js";
-import { createClientNotification } from "../../services/notification.service.js";
 
 const supportTicketController = {
   // GET TICKETS FOR CLIENT PORTAL
@@ -49,13 +64,7 @@ const supportTicketController = {
         caseNumber: t.case?.caseNumber || undefined,
         createdAt: t.createdAt ? new Date(t.createdAt).toLocaleString() : "",
         updatedAt: t.updatedAt ? new Date(t.updatedAt).toLocaleString() : "",
-        messages: (t.messages || []).map((m) => ({
-          id: m.id,
-          senderName: m.senderName,
-          senderRole: m.senderType,
-          message: m.message,
-          timestamp: m.createdAt ? new Date(m.createdAt).toLocaleString() : "",
-        })),
+        messages: (t.messages || []).map(formatTicketMessage),
       }));
 
       return res.status(200).json(
@@ -133,9 +142,19 @@ const supportTicketController = {
               email: true,
             },
           },
+          assignedToUser: {
+            columns: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
         },
         orderBy: (t, { desc }) => [desc(t.updatedAt)],
       });
+
+      // Auto-close inactive AI-handled tickets if user hasn't messaged within 7 minutes
+      await autoCloseInactiveTicketsList(ticketRecords);
 
       const formattedTickets = ticketRecords.map((t) => ({
         id: t.id,
@@ -151,15 +170,12 @@ const supportTicketController = {
           ? `${t.client.firstName || ""} ${t.client.lastName || ""}`.trim() || t.client.companyName || "Client"
           : "Client User",
         clientEmail: t.client?.email || undefined,
+        isAiHandled: t.isAiHandled ?? false,
+        aiResolutionStatus: t.aiResolutionStatus ?? null,
+        assignedToUser: t.assignedToUser ?? null,
         createdAt: t.createdAt ? new Date(t.createdAt).toLocaleString() : "",
         updatedAt: t.updatedAt ? new Date(t.updatedAt).toLocaleString() : "",
-        messages: (t.messages || []).map((m) => ({
-          id: m.id,
-          senderName: m.senderName,
-          senderRole: m.senderType,
-          message: m.message,
-          timestamp: m.createdAt ? new Date(m.createdAt).toLocaleString() : "",
-        })),
+        messages: (t.messages || []).map(formatTicketMessage),
       }));
 
       return res.status(200).json(
@@ -184,6 +200,13 @@ const supportTicketController = {
           },
           case: true,
           client: true,
+          assignedToUser: {
+            columns: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
         },
       });
 
@@ -191,16 +214,12 @@ const supportTicketController = {
         return next(CustomErrorHandler.notFound("Support ticket not found"));
       }
 
+      await autoCloseInactiveTicketIfExpired(ticketRecord);
+
       return res.status(200).json(
         ResponseHandler(200, "Support ticket fetched successfully", {
           ...ticketRecord,
-          messages: (ticketRecord.messages || []).map((m) => ({
-            id: m.id,
-            senderName: m.senderName,
-            senderRole: m.senderType,
-            message: m.message,
-            timestamp: m.createdAt ? new Date(m.createdAt).toLocaleString() : "",
-          })),
+          messages: (ticketRecord.messages || []).map(formatTicketMessage),
         })
       );
     } catch (error) {
@@ -242,16 +261,14 @@ const supportTicketController = {
 
       if (req.user?.userId) {
         senderType = "advocate";
-        senderName =
-          req.body.senderName ||
-          req.user.name ||
-          req.user.email ||
-          "Advocate Law Firm";
+        senderName = req.body.senderName || req.user.name || "Advocate";
       } else if (req.clientUser?.email) {
         senderName = `Client (${req.clientUser.email})`;
       }
 
       const generatedTicketNo = `TKT-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      const isPlatformTicket = !caseId;
 
       const [newTicket] = await db
         .insert(supportTickets)
@@ -266,6 +283,8 @@ const supportTicketController = {
           category: category || "general",
           priority: priority || "medium",
           status: "open",
+          isAiHandled: isPlatformTicket,
+          aiResolutionStatus: isPlatformTicket ? "in_progress" : null,
         })
         .returning();
 
@@ -280,6 +299,107 @@ const supportTicketController = {
         })
         .returning();
 
+      const formattedMessages = [
+        {
+          id: initialMessage.id,
+          senderName: initialMessage.senderName,
+          senderRole: initialMessage.senderType,
+          message: initialMessage.message,
+          timestamp: new Date().toLocaleString(),
+        },
+      ];
+
+      // Auto-trigger Nyaya Sahayak AI Support Agent for Platform Tickets
+      if (isPlatformTicket) {
+        try {
+          const aiResponse = await aiSupportService.processSupportChat([], message);
+          if (aiResponse && aiResponse.message) {
+            const [aiMsg] = await db
+              .insert(supportTicketMessages)
+              .values({
+                ticketId: newTicket.id,
+                senderType: "ai",
+                senderName: "Nyaya Sahayak AI",
+                message: aiResponse.message,
+              })
+              .returning();
+
+            formattedMessages.push({
+              id: aiMsg.id,
+              senderName: aiMsg.senderName,
+              senderRole: aiMsg.senderType,
+              message: aiMsg.message,
+              timestamp: new Date().toLocaleString(),
+            });
+
+            // If user immediately requested human escalation
+            if (aiResponse.isEscalated) {
+              const optimalAgent = await findOptimalOnlineSupportAgent();
+              if (optimalAgent) {
+                await db
+                  .update(supportTickets)
+                  .set({
+                    assignedToUserId: optimalAgent.id,
+                    assignedAt: new Date(),
+                    aiResolutionStatus: "escalated",
+                    priority: aiResponse.suggestedPriority || "high",
+                    status: "in_progress",
+                  })
+                  .where(eq(supportTickets.id, newTicket.id));
+
+                const [escalateMsg] = await db
+                  .insert(supportTicketMessages)
+                  .values({
+                    ticketId: newTicket.id,
+                    senderType: "ai",
+                    senderName: "Nyaya Sahayak AI",
+                    message: `📌 Ticket transferred to live support specialist: ${optimalAgent.name} (${optimalAgent.email}). An agent will respond shortly.`,
+                  })
+                  .returning();
+
+                formattedMessages.push({
+                  id: escalateMsg.id,
+                  senderName: escalateMsg.senderName,
+                  senderRole: escalateMsg.senderType,
+                  message: escalateMsg.message,
+                  timestamp: new Date().toLocaleString(),
+                });
+              } else {
+                await db
+                  .update(supportTickets)
+                  .set({
+                    aiResolutionStatus: "escalated",
+                    priority: "high",
+                    status: "in_progress",
+                  })
+                  .where(eq(supportTickets.id, newTicket.id));
+
+                const [queueMsg] = await db
+                  .insert(supportTicketMessages)
+                  .values({
+                    ticketId: newTicket.id,
+                    senderType: "ai",
+                    senderName: "Nyaya Sahayak AI",
+                    message:
+                      "I cannot create new organizations or law firm chambers directly. I have marked your ticket as High Priority. As soon as a support specialist is online, they will review your request and you will be notified.",
+                  })
+                  .returning();
+
+                formattedMessages.push({
+                  id: queueMsg.id,
+                  senderName: queueMsg.senderName,
+                  senderRole: queueMsg.senderType,
+                  message: queueMsg.message,
+                  timestamp: new Date().toLocaleString(),
+                });
+              }
+            }
+          }
+        } catch (aiErr) {
+          console.error("AI initial response generation error:", aiErr);
+        }
+      }
+
       const formattedTicket = {
         id: newTicket.id,
         ticketNumber: newTicket.ticketNumber,
@@ -288,17 +408,11 @@ const supportTicketController = {
         priority: newTicket.priority,
         status: newTicket.status,
         caseId: newTicket.caseId || undefined,
+        isAiHandled: isPlatformTicket,
+        aiResolutionStatus: isPlatformTicket ? "in_progress" : null,
         createdAt: new Date().toLocaleString(),
         updatedAt: new Date().toLocaleString(),
-        messages: [
-          {
-            id: initialMessage.id,
-            senderName: initialMessage.senderName,
-            senderRole: initialMessage.senderType,
-            message: initialMessage.message,
-            timestamp: new Date().toLocaleString(),
-          },
-        ],
+        messages: formattedMessages,
       };
 
       return res.status(201).json(
@@ -330,10 +444,10 @@ const supportTicketController = {
         return next(CustomErrorHandler.notFound("Support ticket not found"));
       }
 
-      if (ticketRecord.status === "closed" && (req.clientUser || !req.user?.userId)) {
+      if (ticketRecord.status === "closed") {
         return next(
           CustomErrorHandler.badRequest(
-            "This support ticket is closed. Sending messages to a closed ticket is not permitted."
+            "This support ticket has been closed. Further replies are disabled. Please raise a new ticket."
           )
         );
       }
@@ -343,7 +457,7 @@ const supportTicketController = {
 
       if (req.user?.userId) {
         senderType = "advocate";
-        senderName = "Legal Desk Team";
+        senderName = req.user.name || "Advocate";
       } else if (req.clientUser?.email) {
         senderName = `Client (${req.clientUser.email})`;
       }
@@ -359,12 +473,15 @@ const supportTicketController = {
         })
         .returning();
 
+      // Broadcast real-time message to socket room
+      emitTicketMessage(ticketId, newMessage);
+
       // Update ticket updatedAt and set status to in_progress if open
-      const newStatus = ticketRecord.status === "open" ? "in_progress" : ticketRecord.status;
+      let currentStatus = ticketRecord.status === "closed" || ticketRecord.status === "open" ? "in_progress" : ticketRecord.status;
       await db
         .update(supportTickets)
         .set({
-          status: newStatus,
+          status: currentStatus,
           updatedAt: new Date(),
         })
         .where(eq(supportTickets.id, ticketId));
@@ -394,6 +511,167 @@ const supportTicketController = {
         );
       }
 
+      // If this is a platform support ticket, Nyaya Sahayak AI answers advocate messages!
+      const isPlatformTicket = !ticketRecord.caseId;
+      if (isPlatformTicket && senderType === "advocate") {
+        try {
+          const allMsgs = await db.query.supportTicketMessages.findMany({
+            where: eq(supportTicketMessages.ticketId, ticketId),
+            orderBy: (m, { asc }) => [asc(m.createdAt)],
+          });
+
+          const chatHistory = allMsgs.map((m) => ({
+            role: (m.senderType === "ai" || m.senderType === "staff" ? "assistant" : "user") as "user" | "assistant",
+            content: m.message,
+          }));
+
+          const aiResult = await aiSupportService.processSupportChat(chatHistory, message);
+
+          // Natural conversational pacing pause so typing state feels authentic
+          await new Promise((resolve) => setTimeout(resolve, 1200));
+
+          if (aiResult.isTicketClosed || isExplicitProblemSolved(message)) {
+            // Advocate confirmed problem is resolved
+            currentStatus = "closed";
+            await db
+              .update(supportTickets)
+              .set({
+                status: "closed",
+                aiResolutionStatus: "resolved_by_ai",
+                resolvedAt: new Date(),
+                updatedAt: new Date(),
+              })
+              .where(eq(supportTickets.id, ticketId));
+
+            const [savedAiMsg] = await db
+              .insert(supportTicketMessages)
+              .values({
+                ticketId,
+                senderType: "ai",
+                senderName: "Nyaya Sahayak AI",
+                message: aiResult.message.replace(/\*{1,3}/g, ""),
+              })
+              .returning();
+
+            emitTicketMessage(ticketId, savedAiMsg);
+            emitTicketClosed(ticketId);
+            emitTicketUpdated(ticketId, { status: "closed" });
+          } else if (aiResult.isEscalated) {
+            // Check Office Hours: 10:00 AM to 7:00 PM IST (10:00 - 19:00)
+            if (!isSupportOfficeHours()) {
+              await db
+                .update(supportTickets)
+                .set({
+                  aiResolutionStatus: "escalated",
+                  priority: "high",
+                  status: "in_progress",
+                  updatedAt: new Date(),
+                })
+                .where(eq(supportTickets.id, ticketId));
+
+              const outOfOfficeNotice =
+                "I cannot create new organizations or law firm chambers directly. Our live human support specialists are available during office hours from 10:00 AM to 7:00 PM. I have marked your ticket as High Priority. As soon as an agent is online at 10:00 AM, they will assist you and you will be notified.";
+
+              const [outMsg] = await db
+                .insert(supportTicketMessages)
+                .values({
+                  ticketId,
+                  senderType: "ai",
+                  senderName: "Nyaya Sahayak AI",
+                  message: outOfOfficeNotice,
+                })
+                .returning();
+
+              emitTicketMessage(ticketId, outMsg);
+              emitTicketUpdated(ticketId, { status: "in_progress" });
+            } else {
+              // Within office hours: check for online, available agents
+              const optimalAgent = await findOptimalOnlineSupportAgent();
+
+              if (optimalAgent) {
+                // Agent is live and available
+                await db
+                  .update(supportTickets)
+                  .set({
+                    assignedToUserId: optimalAgent.id,
+                    assignedAt: new Date(),
+                    aiResolutionStatus: "escalated",
+                    priority: aiResult.suggestedPriority || "high",
+                    status: "in_progress",
+                    updatedAt: new Date(),
+                  })
+                  .where(eq(supportTickets.id, ticketId));
+
+                const handoverNotice = `Connected with specialist ${optimalAgent.name}. They will join this chat shortly.`;
+
+                const [handoverMsg] = await db
+                  .insert(supportTicketMessages)
+                  .values({
+                    ticketId,
+                    senderType: "system",
+                    senderName: "System",
+                    message: handoverNotice,
+                  })
+                  .returning();
+
+                emitTicketMessage(ticketId, handoverMsg);
+                emitTicketUpdated(ticketId, {
+                  assignedToUserId: optimalAgent.id,
+                  assignedToUser: optimalAgent,
+                  status: "in_progress",
+                });
+              } else {
+                // Check if any support agent is online but currently marked 'busy'
+                const isAnyAgentBusy = await isAnySupportAgentBusy();
+
+                await db
+                  .update(supportTickets)
+                  .set({
+                    aiResolutionStatus: "escalated",
+                    priority: "high",
+                    status: "in_progress",
+                    updatedAt: new Date(),
+                  })
+                  .where(eq(supportTickets.id, ticketId));
+
+                const waitNotice = isAnyAgentBusy
+                  ? "I cannot create new organizations or law firm chambers directly. I have marked your ticket as High Priority. All our support specialists are currently assisting other advocates, but you will be notified as soon as an agent becomes free."
+                  : "I cannot create new organizations or law firm chambers directly. I have marked your ticket as High Priority and queued it for our support specialists. Once a specialist is online, they will take over this ticket and you will be notified.";
+
+                const [waitMsg] = await db
+                  .insert(supportTicketMessages)
+                  .values({
+                    ticketId,
+                    senderType: "ai",
+                    senderName: "Nyaya Sahayak AI",
+                    message: waitNotice,
+                  })
+                  .returning();
+
+                emitTicketMessage(ticketId, waitMsg);
+                emitTicketUpdated(ticketId, { status: "in_progress" });
+              }
+            }
+          } else {
+            // Standard step-by-step guidance without any markdown asterisks
+            const plainMessage = aiResult.message.replace(/\*{1,3}/g, "");
+            const [guidanceMsg] = await db
+              .insert(supportTicketMessages)
+              .values({
+                ticketId,
+                senderType: "ai",
+                senderName: "Nyaya Sahayak AI",
+                message: plainMessage,
+              })
+              .returning();
+
+            emitTicketMessage(ticketId, guidanceMsg);
+          }
+        } catch (aiErr) {
+          console.error("AI reply processing error:", aiErr);
+        }
+      }
+
       const allMessages = await db.query.supportTicketMessages.findMany({
         where: eq(supportTicketMessages.ticketId, ticketId),
         orderBy: (msgs, { asc }) => [asc(msgs.createdAt)],
@@ -405,17 +683,11 @@ const supportTicketController = {
         subject: ticketRecord.subject,
         category: ticketRecord.category,
         priority: ticketRecord.priority,
-        status: newStatus,
+        status: currentStatus,
         caseId: ticketRecord.caseId || undefined,
         createdAt: new Date(ticketRecord.createdAt).toLocaleString(),
         updatedAt: new Date().toLocaleString(),
-        messages: allMessages.map((m) => ({
-          id: m.id,
-          senderName: m.senderName,
-          senderRole: m.senderType,
-          message: m.message,
-          timestamp: m.createdAt ? new Date(m.createdAt).toLocaleString() : "",
-        })),
+        messages: allMessages.map(formatTicketMessage),
       };
 
       return res.status(200).json(
@@ -451,9 +723,17 @@ const supportTicketController = {
         .update(supportTickets)
         .set({
           status,
+          ...(status === "resolved" || status === "closed"
+            ? { resolvedAt: ticketRecord.resolvedAt || new Date() }
+            : {}),
           updatedAt: new Date(),
         })
         .where(eq(supportTickets.id, ticketId));
+
+      emitTicketUpdated(ticketId, { status });
+      if (status === "closed" || status === "resolved") {
+        emitTicketClosed(ticketId);
+      }
 
       const targetClientId = ticketRecord.clientId || ticketRecord.clientUserId;
       if (targetClientId && ticketRecord.status !== status) {
@@ -493,6 +773,54 @@ const supportTicketController = {
       );
     } catch (error) {
       console.error("Update ticket status error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  // SUBMIT CUSTOMER SATISFACTION (CSAT) RATING & FEEDBACK
+  async submitCsatRating(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { ticketId } = req.params;
+      const { rating, feedback } = req.body;
+
+      if (!rating || Number(rating) < 1 || Number(rating) > 5) {
+        return next(CustomErrorHandler.badRequest("Rating must be a valid integer between 1 and 5"));
+      }
+
+      const existing = await db.query.supportTickets.findFirst({
+        where: eq(supportTickets.id, ticketId),
+      });
+
+      if (!existing) {
+        return next(CustomErrorHandler.notFound("Support ticket not found"));
+      }
+
+      const [updated] = await db
+        .update(supportTickets)
+        .set({
+          csatRating: Number(rating),
+          csatFeedback: feedback?.trim() || null,
+          csatRatedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(supportTickets.id, ticketId))
+        .returning();
+
+      // Append CSAT system entry in ticket messages
+      const stars = "⭐".repeat(Number(rating));
+      await db.insert(supportTicketMessages).values({
+        ticketId,
+        senderType: "client",
+        senderId: (req as Request & { user?: { id?: string } }).user?.id || null,
+        senderName: "Customer Feedback",
+        message: `Customer rated resolution ${stars} (${rating}/5)${feedback ? `: "${feedback.trim()}"` : "."}`,
+      });
+
+      return res.status(200).json(
+        ResponseHandler(200, "Thank you! Your feedback has been recorded.", updated)
+      );
+    } catch (error) {
+      console.error("Submit CSAT rating error:", error);
       return next(CustomErrorHandler.serverError());
     }
   },

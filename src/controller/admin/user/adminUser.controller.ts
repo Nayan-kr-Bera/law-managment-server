@@ -152,6 +152,7 @@ const adminUserController = {
             roleSlug,
             isSuperAdmin,
             isPanelAdmin,
+            isSupportAgent: u.isSupportAgent || false,
             permissions: userPermCodes,
             tenantName: scope?.tenant?.name || undefined,
             tenantId: scope?.tenantId || undefined,
@@ -249,7 +250,7 @@ const adminUserController = {
   // =========================================================================
   async createAdminUser(req: Request, res: Response, next: NextFunction) {
     try {
-      const { name, email, phone, password, roleSlug, permissions: grantedCodes } = req.body;
+      const { name, email, phone, password, roleSlug, permissions: grantedCodes, isSupportAgent } = req.body;
 
       if (!name || !email || !password) {
         return next(CustomErrorHandler.badRequest("Name, email, and password are required"));
@@ -287,6 +288,7 @@ const adminUserController = {
 
       const hashedPassword = await bcrypt.hash(password, 10);
       const isSuperAdminRequested = roleSlug === "super_admin";
+      const shouldBeSupportAgent = isSupportAgent === true || roleSlug === "support_admin";
 
       const createdUser = await db.transaction(async (tx) => {
         // 1. Insert User
@@ -299,6 +301,7 @@ const adminUserController = {
             password: hashedPassword,
             isEmailVerified: true,
             isPhoneVerified: true,
+            isSupportAgent: shouldBeSupportAgent,
           })
           .returning();
 
@@ -405,7 +408,7 @@ const adminUserController = {
   async updateAdminPermissions(req: Request, res: Response, next: NextFunction) {
     try {
       const { userId } = req.params;
-      const { roleSlug, permissions: grantedCodes } = req.body;
+      const { roleSlug, permissions: grantedCodes, isSupportAgent } = req.body;
 
       const targetUser = await db.query.user.findFirst({
         where: eq(user.id, userId),
@@ -474,6 +477,13 @@ const adminUserController = {
             });
           }
         }
+
+        // 4. Update isSupportAgent if provided or role is support_admin
+        if (typeof isSupportAgent === "boolean") {
+          await tx.update(user).set({ isSupportAgent }).where(eq(user.id, userId));
+        } else if (roleSlug === "support_admin") {
+          await tx.update(user).set({ isSupportAgent: true }).where(eq(user.id, userId));
+        }
       });
 
       return res.status(200).json(
@@ -514,6 +524,43 @@ const adminUserController = {
       );
     } catch (error) {
       console.error("Admin toggle user status error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  // =========================================================================
+  // TOGGLE SUPPORT SPECIALIST ROSTER ELIGIBILITY
+  // =========================================================================
+  async toggleSupportAgentStatus(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { userId } = req.params;
+      const { isSupportAgent } = req.body;
+
+      const existingUser = await db.query.user.findFirst({
+        where: eq(user.id, userId),
+      });
+
+      if (!existingUser) {
+        return next(CustomErrorHandler.notFound("User not found"));
+      }
+
+      const nextVal = typeof isSupportAgent === "boolean" ? isSupportAgent : !existingUser.isSupportAgent;
+      await db
+        .update(user)
+        .set({
+          isSupportAgent: nextVal,
+          updatedAt: new Date(),
+        })
+        .where(eq(user.id, userId));
+
+      return res.status(200).json(
+        ResponseHandler(200, `Support specialist roster status updated to ${nextVal ? "active" : "inactive"}`, {
+          userId,
+          isSupportAgent: nextVal,
+        })
+      );
+    } catch (error) {
+      console.error("Admin toggle support agent status error:", error);
       return next(CustomErrorHandler.serverError());
     }
   },

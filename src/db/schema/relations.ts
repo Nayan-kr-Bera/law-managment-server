@@ -92,6 +92,7 @@ export {subscriptionPlanRelations} from "./subscription/subscriptionPlans.js"
 // Support
 export { supportTicketRelations } from "./support/supportTickets.js";
 export { supportTicketMessageRelations } from "./support/supportTicketMessages.js";
+export { supportCallLogRelations } from "./support/supportCallLogs.js";
 
 // Bare Acts
 export { bareActsRelations } from "./bareActs/bareActs.js";

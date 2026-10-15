@@ -38,6 +38,12 @@ const users = pgTable("users", {
 
   lastLoginAt: timestamp("last_login_at").defaultNow().notNull(),
 
+  lastActiveAt: timestamp("last_active_at"),
+
+  supportAvailability: varchar("support_availability", { length: 20 }).default("online"),
+
+  isSupportAgent: boolean("is_support_agent").default(false).notNull(),
+
   deletedAt: timestamp("deleted_at"),
 
   deletedBy: uuid("deleted_by"),

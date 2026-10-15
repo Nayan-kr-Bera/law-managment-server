@@ -15,6 +15,7 @@ export interface IUserJwtPayload {
 
 export interface IAdminJwtPayload {
   userId: string;
+  id?: string;
   adminId?: string;
   email: string;
   name?: string;

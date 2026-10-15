@@ -38,6 +38,7 @@
     "postgres": "^3.4.8",
     "razorpay": "^2.9.8",
     "slugify": "^1.6.9",
+    "socket.io": "^4.8.4",
     "tesseract.js": "^7.0.0",
     "zod": "^4.4.3"
   },

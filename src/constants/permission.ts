@@ -230,6 +230,8 @@ export const PERMISSIONS: PermissionDefinition[] = [
   // Admin Helpdesk & Leads
   { code: "admin.support.read", description: "View support tickets and contact inquiries", isAdminPortal: true },
   { code: "admin.support.update", description: "Respond to and update support tickets status", isAdminPortal: true },
+  { code: "admin.support.assign", description: "Assign and reallocate support tickets to agents", isAdminPortal: true },
+  { code: "admin.support.analytics", description: "View support performance leaderboard, SLA metrics, and CSAT reports", isAdminPortal: true },
 
   // Bare Acts Library & Indian Legislation (Client/Advocate Access)
   { code: "bare_act.read", description: "Search, browse and view Bare Acts and Constitution library", isAdminPortal: false },

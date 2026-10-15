@@ -1,5 +1,7 @@
+import { createServer } from "http";
 import app from "./app.js";
 import { config } from "./config/index.js";
+import { initSocketServer } from "./socket/socket.service.js";
 import { startReminderCron } from "./services/reminderCron.service.js";
 import { startHearingReminderCron } from "./services/hearingReminderCron.service.js";
 import { startTaskReminderCron } from "./services/taskReminderCron.service.js";
@@ -10,8 +12,11 @@ const PORT = config.PORT;
 
 const startServer = async () => {
 	try {
-		const server = app.listen(PORT, async () => {
-			console.log(`🚀 Server is running on port ${PORT} in ${config.NODE_ENV} mode`);
+		const httpServer = createServer(app);
+		initSocketServer(httpServer);
+
+		httpServer.listen(PORT, async () => {
+			console.log(`🚀 Server is running on port ${PORT} in ${config.NODE_ENV} mode (Socket.IO active)`);
 			await verifySMTP();
 			startReminderCron();
 			startHearingReminderCron();
@@ -21,7 +26,7 @@ const startServer = async () => {
 
 		/* Graceful Shutdown */
 		process.on("SIGINT", () => {
-			server.close(() => {
+			httpServer.close(() => {
 				console.log("Server closed");
 				process.exit(0);
 			});

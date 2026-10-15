@@ -132,6 +132,8 @@ export const adminAuth = async (
       );
     }
 
+    decoded.name = existingUser.name || decoded.name;
+    decoded.id = decoded.userId;
     req.user = decoded as unknown as IUserJwtPayload;
     req.adminUser = decoded;
     next();

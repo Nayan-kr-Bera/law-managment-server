@@ -53,6 +53,7 @@ router.post("/billing/invoices/:invoiceId/pay", clientAuth, clientPortalControll
 router.get("/support/tickets", clientAuth, clientPortalController.getSupportTickets);
 router.post("/support/tickets", clientAuth, clientPortalController.createSupportTicket);
 router.post("/support/tickets/:ticketId/reply", clientAuth, clientPortalController.replySupportTicket);
+router.post("/support/tickets/:ticketId/csat", clientAuth, clientPortalController.submitSupportTicketCsat);
 
 router.get("/profile", clientAuth, clientPortalController.getProfile);
 router.put("/profile", clientAuth, clientPortalController.updateProfile);

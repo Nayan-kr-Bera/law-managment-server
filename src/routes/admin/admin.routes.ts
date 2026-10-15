@@ -75,15 +75,25 @@ router.get("/users", adminAuth, adminPermissionGuard("admin.users.read"), adminU
 router.post("/users", adminAuth, adminPermissionGuard("admin.users.create"), adminUserController.createAdminUser);
 router.put("/users/:userId/permissions", adminAuth, adminPermissionGuard("admin.users.update"), adminUserController.updateAdminPermissions);
 router.patch("/users/:userId/status", adminAuth, adminPermissionGuard("admin.users.update"), adminUserController.toggleUserStatus);
+router.patch("/users/:userId/support-status", adminAuth, adminPermissionGuard("admin.users.update"), adminUserController.toggleSupportAgentStatus);
 
 /* =========================================================================
    SUPPORT TICKETS & INQUIRIES
    ========================================================================= */
 router.get("/support/stats", adminAuth, adminPermissionGuard("admin.support.read"), adminSupportController.getSupportStats);
+router.get("/support/analytics", adminAuth, adminPermissionGuard("admin.support.read"), adminSupportController.getSupportAnalytics);
+router.get("/support/agents", adminAuth, adminPermissionGuard("admin.support.read"), adminSupportController.getSupportAgents);
 router.get("/support/tickets", adminAuth, adminPermissionGuard("admin.support.read"), adminSupportController.getSupportTickets);
 router.get("/support/tickets/:id", adminAuth, adminPermissionGuard("admin.support.read"), adminSupportController.getTicketById);
 router.patch("/support/tickets/:id/status", adminAuth, adminPermissionGuard("admin.support.update"), adminSupportController.updateTicketStatus);
+router.patch("/support/tickets/:id/assign", adminAuth, adminPermissionGuard("admin.support.update"), adminSupportController.assignTicket);
 router.post("/support/tickets/:id/reply", adminAuth, adminPermissionGuard("admin.support.update"), adminSupportController.replyTicket);
+router.post("/support/tickets/:id/calls", adminAuth, adminPermissionGuard("admin.support.update"), adminSupportController.logCall);
+router.get("/support/tickets/:id/calls", adminAuth, adminPermissionGuard("admin.support.read"), adminSupportController.getCallLogs);
+router.post("/support/heartbeat", adminAuth, adminSupportController.recordHeartbeat);
+router.patch("/support/availability", adminAuth, adminSupportController.updateAgentAvailability);
+router.post("/support/tickets/:id/auto-assign", adminAuth, adminPermissionGuard("admin.support.update"), adminSupportController.autoAssignTicket);
+router.post("/support/ai/chat", adminAuth, adminPermissionGuard("admin.support.read"), adminSupportController.handleAiSupportChat);
 router.get("/support/inquiries", adminAuth, adminPermissionGuard("admin.support.read"), adminSupportController.getContactInquiries);
 router.patch("/support/inquiries/:id/status", adminAuth, adminPermissionGuard("admin.support.update"), adminSupportController.updateContactInquiryStatus);
 router.post("/support/inquiries/:id/reply", adminAuth, adminPermissionGuard("admin.support.update"), adminSupportController.replyContactInquiry);

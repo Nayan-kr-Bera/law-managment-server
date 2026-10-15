@@ -1,8 +1,11 @@
 import {
+  boolean,
+  integer,
   pgTable,
+  text,
+  timestamp,
   uuid,
   varchar,
-  timestamp,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -10,7 +13,9 @@ import tenants from "../tenants.js";
 import offices from "../offices.js";
 import clients from "../clients/clients.js";
 import cases from "../caseMangment/cases.js";
+import users from "../users.js";
 import supportTicketMessages from "./supportTicketMessages.js";
+import supportCallLogs from "./supportCallLogs.js";
 
 const supportTickets = pgTable("support_tickets", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -34,6 +39,28 @@ const supportTickets = pgTable("support_tickets", {
   priority: varchar("priority", { length: 50 }).default("medium").notNull(),
 
   status: varchar("status", { length: 50 }).default("open").notNull(),
+
+  // Assigned Agent & Assignment Time
+  assignedToUserId: uuid("assigned_to_user_id").references(() => users.id),
+
+  assignedAt: timestamp("assigned_at"),
+
+  // SLA & Resolution Performance Timestamps
+  firstResponseAt: timestamp("first_response_at"),
+
+  resolvedAt: timestamp("resolved_at"),
+
+  // Customer Satisfaction (CSAT) Rating & Feedback
+  csatRating: integer("csat_rating"), // 1 - 5 stars
+
+  csatFeedback: text("csat_feedback"),
+
+  csatRatedAt: timestamp("csat_rated_at"),
+
+  // AI Assistant & Escalation Tracking
+  isAiHandled: boolean("is_ai_handled").default(false),
+
+  aiResolutionStatus: varchar("ai_resolution_status", { length: 50 }), // 'resolved_by_ai' | 'escalated' | 'direct_human'
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
 
@@ -70,6 +97,13 @@ export const supportTicketRelations = relations(
       references: [cases.id],
     }),
 
+    assignedToUser: one(users, {
+      fields: [supportTickets.assignedToUserId],
+      references: [users.id],
+    }),
+
     messages: many(supportTicketMessages),
+
+    callLogs: many(supportCallLogs),
   }),
 );
