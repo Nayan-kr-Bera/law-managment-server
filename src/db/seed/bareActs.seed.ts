@@ -17,26 +17,29 @@ export const FLAGSHIP_INDIAN_ACT_SLUGS = [
   "insolvency-bankruptcy-code-2016",
 ];
 
-export async function seedBareActs() {
-  console.log("📜 Initializing Indian Bare Acts via IndiaCode Hybrid Service...");
+export async function seedBareActs(force = false) {
+  console.log("📜 Initializing Indian Bare Acts via IndiaCode / Statutory Service...");
 
-  // Check how many acts already exist in the database
-  const existingCount = await db.select().from(bareActs).limit(1);
+  const existingActs = await db.select({ slug: bareActs.slug }).from(bareActs);
+  const existingSet = new Set(existingActs.map((a) => a.slug.toLowerCase()));
 
-  if (existingCount.length > 0) {
-    console.log("ℹ️ Bare Acts table already contains acts. Skipping initial seed.");
-    console.log("💡 You can import any of the 10,000+ Acts on-demand via the Admin API: POST /api/v1/admin/bare-acts/indiacode/import");
+  const slugsToSeed = force
+    ? FLAGSHIP_INDIAN_ACT_SLUGS
+    : FLAGSHIP_INDIAN_ACT_SLUGS.filter((s) => !existingSet.has(s.toLowerCase()));
+
+  if (slugsToSeed.length === 0) {
+    console.log("ℹ️ All flagship Indian Bare Acts are already installed in the database.");
     return;
   }
 
-  console.log(`🌐 Seeding flagship Acts from IndiaCode API: ${FLAGSHIP_INDIAN_ACT_SLUGS.join(", ")}`);
+  console.log(`🌐 Seeding flagship Acts (${slugsToSeed.length}): ${slugsToSeed.join(", ")}`);
 
-  for (const slug of FLAGSHIP_INDIAN_ACT_SLUGS) {
+  for (const slug of slugsToSeed) {
     try {
-      console.log(`  ⏳ Ingesting '${slug}' from IndiaCode...`);
-      // Seed with initial top 10 sections for lightning-fast bootstrapping
+      console.log(`  ⏳ Ingesting '${slug}'...`);
+      // Seed with initial provisions for lightning-fast bootstrapping
       await indiaCodeService.importActWithSections(slug, {
-        maxSections: 10,
+        maxSections: 20,
         batchSize: 5,
       });
     } catch (err) {
@@ -45,8 +48,7 @@ export async function seedBareActs() {
     }
   }
 
-  console.log("🎉 Flagship Bare Acts seeded successfully via IndiaCode API!");
-  console.log("💡 Any additional act or section is automatically fetched and cached when accessed.");
+  console.log("🎉 Flagship Bare Acts seeded successfully!");
 }
 
 export default seedBareActs;

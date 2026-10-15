@@ -62,8 +62,8 @@ const supportTicketController = {
         status: t.status,
         caseId: t.caseId || undefined,
         caseNumber: t.case?.caseNumber || undefined,
-        createdAt: t.createdAt ? new Date(t.createdAt).toLocaleString() : "",
-        updatedAt: t.updatedAt ? new Date(t.updatedAt).toLocaleString() : "",
+        createdAt: t.createdAt ? new Date(t.createdAt).toISOString() : new Date().toISOString(),
+        updatedAt: t.updatedAt ? new Date(t.updatedAt).toISOString() : new Date().toISOString(),
         messages: (t.messages || []).map(formatTicketMessage),
       }));
 
@@ -173,8 +173,8 @@ const supportTicketController = {
         isAiHandled: t.isAiHandled ?? false,
         aiResolutionStatus: t.aiResolutionStatus ?? null,
         assignedToUser: t.assignedToUser ?? null,
-        createdAt: t.createdAt ? new Date(t.createdAt).toLocaleString() : "",
-        updatedAt: t.updatedAt ? new Date(t.updatedAt).toLocaleString() : "",
+        createdAt: t.createdAt ? new Date(t.createdAt).toISOString() : new Date().toISOString(),
+        updatedAt: t.updatedAt ? new Date(t.updatedAt).toISOString() : new Date().toISOString(),
         messages: (t.messages || []).map(formatTicketMessage),
       }));
 
@@ -305,7 +305,8 @@ const supportTicketController = {
           senderName: initialMessage.senderName,
           senderRole: initialMessage.senderType,
           message: initialMessage.message,
-          timestamp: new Date().toLocaleString(),
+          timestamp: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
         },
       ];
 
@@ -329,7 +330,8 @@ const supportTicketController = {
               senderName: aiMsg.senderName,
               senderRole: aiMsg.senderType,
               message: aiMsg.message,
-              timestamp: new Date().toLocaleString(),
+              timestamp: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
             });
 
             // If user immediately requested human escalation
@@ -362,7 +364,8 @@ const supportTicketController = {
                   senderName: escalateMsg.senderName,
                   senderRole: escalateMsg.senderType,
                   message: escalateMsg.message,
-                  timestamp: new Date().toLocaleString(),
+                  timestamp: new Date().toISOString(),
+                  createdAt: new Date().toISOString(),
                 });
               } else {
                 await db
@@ -390,7 +393,8 @@ const supportTicketController = {
                   senderName: queueMsg.senderName,
                   senderRole: queueMsg.senderType,
                   message: queueMsg.message,
-                  timestamp: new Date().toLocaleString(),
+                  timestamp: new Date().toISOString(),
+                  createdAt: new Date().toISOString(),
                 });
               }
             }
@@ -410,8 +414,8 @@ const supportTicketController = {
         caseId: newTicket.caseId || undefined,
         isAiHandled: isPlatformTicket,
         aiResolutionStatus: isPlatformTicket ? "in_progress" : null,
-        createdAt: new Date().toLocaleString(),
-        updatedAt: new Date().toLocaleString(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
         messages: formattedMessages,
       };
 
@@ -685,8 +689,8 @@ const supportTicketController = {
         priority: ticketRecord.priority,
         status: currentStatus,
         caseId: ticketRecord.caseId || undefined,
-        createdAt: new Date(ticketRecord.createdAt).toLocaleString(),
-        updatedAt: new Date().toLocaleString(),
+        createdAt: ticketRecord.createdAt ? new Date(ticketRecord.createdAt).toISOString() : new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
         messages: allMessages.map(formatTicketMessage),
       };
 

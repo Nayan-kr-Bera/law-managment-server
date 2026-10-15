@@ -106,6 +106,11 @@ router.get("/audit-logs", adminAuth, adminPermissionGuard("admin.audit.read"), a
 /* =========================================================================
    BARE ACTS & LEGISLATION REPOSITORY (ADMIN CURATION & SEEDING)
    ========================================================================= */
+// IndiaCode Live Integration (Search, Preview, 1-Click DB Import)
+router.get("/bare-acts/indiacode/search", adminBareActController.searchIndiaCode);
+router.get("/bare-acts/indiacode/preview/:actSlug", adminBareActController.previewIndiaCodeAct);
+router.post("/bare-acts/indiacode/import", adminAuth, adminPermissionGuard("admin.bare_acts.manage"), adminBareActController.importFromIndiaCode);
+
 router.get("/bare-acts", adminAuth, adminPermissionGuard("admin.bare_acts.read"), adminBareActController.getActs);
 router.get("/bare-acts/meta/slugs", adminAuth, adminPermissionGuard("admin.bare_acts.read"), adminBareActController.getActSlugs);
 router.get("/bare-acts/:id", adminAuth, adminPermissionGuard("admin.bare_acts.read"), adminBareActController.getActById);
@@ -128,11 +133,6 @@ router.delete("/bare-acts/sections/:sectionId", adminAuth, adminPermissionGuard(
 // Bulk Import & Seeding
 router.post("/bare-acts/bulk-import", adminAuth, adminPermissionGuard("admin.bare_acts.manage"), adminBareActController.bulkImportAct);
 router.post("/bare-acts/seed-library", adminAuth, adminPermissionGuard("admin.bare_acts.manage"), adminBareActController.seedLibrary);
-
-// IndiaCode Live Integration (Search, Preview, 1-Click DB Import)
-router.get("/bare-acts/indiacode/search", adminAuth, adminPermissionGuard("admin.bare_acts.read"), adminBareActController.searchIndiaCode);
-router.get("/bare-acts/indiacode/preview/:actSlug", adminAuth, adminPermissionGuard("admin.bare_acts.read"), adminBareActController.previewIndiaCodeAct);
-router.post("/bare-acts/indiacode/import", adminAuth, adminPermissionGuard("admin.bare_acts.manage"), adminBareActController.importFromIndiaCode);
 
 /* =========================================================================
    COURT JUDGMENTS MANAGEMENT & SEEDING

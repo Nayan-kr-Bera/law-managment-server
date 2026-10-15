@@ -38,12 +38,18 @@ export function formatTicketMessage(m: {
   message: string;
   createdAt?: Date | string | null;
 }) {
+  const isoTime = m.createdAt
+    ? (m.createdAt instanceof Date ? m.createdAt.toISOString() : new Date(m.createdAt).toISOString())
+    : new Date().toISOString();
+
   return {
     id: m.id,
     senderName: m.senderName,
     senderRole: m.senderType,
+    senderType: m.senderType,
     message: m.message,
-    timestamp: m.createdAt ? new Date(m.createdAt).toLocaleString() : "",
+    createdAt: isoTime,
+    timestamp: isoTime,
   };
 }
 

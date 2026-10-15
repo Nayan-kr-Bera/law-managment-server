@@ -1090,15 +1090,22 @@ const clientPortalController = {
         caseNumber: t.case?.caseNumber || undefined,
         officeName: t.office?.name || t.case?.office?.name || undefined,
         firmName: t.tenant?.name || t.case?.tenant?.name || undefined,
-        createdAt: t.createdAt ? new Date(t.createdAt).toLocaleString() : "",
-        updatedAt: t.updatedAt ? new Date(t.updatedAt).toLocaleString() : "",
-        messages: (t.messages || []).map((m) => ({
-          id: m.id,
-          senderName: m.senderName,
-          senderRole: m.senderType,
-          message: m.message,
-          timestamp: m.createdAt ? new Date(m.createdAt).toLocaleString() : "",
-        })),
+        createdAt: t.createdAt ? new Date(t.createdAt).toISOString() : new Date().toISOString(),
+        updatedAt: t.updatedAt ? new Date(t.updatedAt).toISOString() : new Date().toISOString(),
+        messages: (t.messages || []).map((m) => {
+          const isoTime = m.createdAt
+            ? (m.createdAt instanceof Date ? m.createdAt.toISOString() : new Date(m.createdAt).toISOString())
+            : new Date().toISOString();
+          return {
+            id: m.id,
+            senderName: m.senderName,
+            senderRole: m.senderType,
+            senderType: m.senderType,
+            message: m.message,
+            createdAt: isoTime,
+            timestamp: isoTime,
+          };
+        }),
       }));
 
       return res.status(200).json(

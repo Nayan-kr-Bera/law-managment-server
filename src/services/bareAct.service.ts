@@ -1984,7 +1984,7 @@ export class BareActService {
    * Re-seed System Default Bare Acts Library
    */
   async reseedLibrary() {
-    await seedBareActs();
+    await seedBareActs(true);
     return { success: true, message: "Indian Bare Acts library seeded successfully" };
   }
 

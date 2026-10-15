@@ -177,11 +177,19 @@ export const bareActController = {
   async searchIndiaCode(req: Request, res: Response, next: NextFunction) {
     try {
       const { q, jurisdiction, ministry, year, limit, offset } = req.query;
-      const result = await indiaCodeService.searchActs(q as string, {
-        jurisdiction: jurisdiction as string,
-        ministry: ministry as string,
+      const cleanQ = q && q !== "undefined" && q !== "null" ? String(q).trim() : "";
+      const cleanJur =
+        jurisdiction && jurisdiction !== "undefined" && jurisdiction !== "null" && jurisdiction !== "all"
+          ? String(jurisdiction).trim()
+          : undefined;
+      const cleanMinistry =
+        ministry && ministry !== "undefined" && ministry !== "null" ? String(ministry).trim() : undefined;
+
+      const result = await indiaCodeService.searchActs(cleanQ, {
+        jurisdiction: cleanJur,
+        ministry: cleanMinistry,
         year: year ? Number(year) : undefined,
-        limit: limit ? Number(limit) : 20,
+        limit: limit ? Number(limit) : 24,
         offset: offset ? Number(offset) : 0,
       });
       return res
