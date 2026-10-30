@@ -1,30 +1,21 @@
 import nodemailer from "nodemailer";
 import { config } from "../config/index.js";
+import {
+  buildMiLawEmailHtml,
+  escapeHtml,
+  getMiLawLogoAttachments,
+} from "./emailBrandLayout.js";
 
-const port = Number(process.env.SMTP_PORT) || 2525;
-const isSecure = port === 465 || process.env.SMTP_SRC === "true";
-
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || "mail.smtp2go.com",
-  port,
-  secure: isSecure,
-  ...(isSecure ? {} : { requireTLS: true }),
-  auth: {
-    user: process.env.SMTP_USER || process.env.SMTP_MAIL,
-    pass: process.env.SMTP_PASSWORD || process.env.SMTP_PASS,
-  },
-});
-
-export interface CaseNotificationEmailParams {
+export interface ClientCaseNotificationParams {
   clientName: string;
   clientEmail: string;
   caseTitle: string;
-  caseNumber?: string;
-  cnrNumber?: string;
-  court?: string;
-  courtNo?: string;
-  firstParty?: string;
-  oppositeParty?: string;
+  caseNumber?: string | null;
+  cnrNumber?: string | null;
+  court?: string | null;
+  courtNo?: string | null;
+  firstParty?: string | null;
+  oppositeParty?: string | null;
   nextHearingDate?: string | Date | null;
   fixedFor?: string | null;
   subject?: string;
@@ -32,184 +23,155 @@ export interface CaseNotificationEmailParams {
   firmName?: string;
 }
 
-export const sendClientCaseNotificationEmail = async ({
-  clientName,
-  clientEmail,
-  caseTitle,
-  caseNumber,
-  cnrNumber,
-  court,
-  courtNo,
-  firstParty,
-  oppositeParty,
-  nextHearingDate,
-  fixedFor,
-  subject,
-  customMessage,
-  firmName = "Law Practice System",
-}: CaseNotificationEmailParams) => {
+const createTransporter = () => {
+  const port = Number(config.SMTP_PORT) || 587;
+  const secure = config.SMTP_SRC === "true" || port === 465;
+
+  return nodemailer.createTransport({
+    host: config.SMTP_HOST,
+    port,
+    secure,
+    auth: {
+      user: config.SMTP_MAIL,
+      pass: config.SMTP_PASS,
+    },
+  });
+};
+
+export const sendClientCaseNotificationEmail = async (
+  params: ClientCaseNotificationParams,
+): Promise<{ success: boolean; error?: string }> => {
   try {
-    const formattedHearingDate = nextHearingDate
-      ? new Date(nextHearingDate).toLocaleDateString("en-IN", {
+    const transporter = createTransporter();
+
+    const formattedNextDate = params.nextHearingDate
+      ? new Date(params.nextHearingDate).toLocaleDateString("en-IN", {
+          weekday: "short",
           day: "2-digit",
           month: "short",
           year: "numeric",
         })
-      : "To be notified";
+      : "To Be Announced";
 
+    const portalUrl =
+      config.ORIGIN_CLIENT || config.ORIGIN_FRONTEND || "http://localhost:5174";
     const emailSubject =
-      subject?.trim() ||
-      `Case Notice & Status Update — ${caseNumber || caseTitle || "Your Matter"}`;
+      params.subject?.trim() ||
+      `Case Status Update: ${params.caseNumber ? `[${params.caseNumber}] ` : ""}${params.caseTitle}`;
 
-    const portalLoginUrl =
-      config.ORIGIN_CLIENT || "http://localhost:5174";
+    const partiesDisplay =
+      params.firstParty || params.oppositeParty
+        ? `${params.firstParty || "First Party"} vs. ${params.oppositeParty || "Opposite Party"}`
+        : null;
 
-    const mail = {
-      from: config.SMTP_MAIL,
-      to: clientEmail,
-      subject: emailSubject,
-      html: `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>${emailSubject}</title>
-</head>
-<body style="margin: 0; padding: 0; background: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
-  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background: #f8fafc; padding: 32px 16px;">
-    <tr>
-      <td align="center">
-        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 620px; background: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
-          
-          <!-- Header Banner -->
-          <tr>
-            <td style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 32px 36px; text-align: left; border-bottom: 3px solid #2176ff;">
-              <p style="margin: 0 0 6px; color: #93c5fd; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;">Official Legal Notice</p>
-              <h1 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 700; letter-spacing: -0.02em;">${firmName}</h1>
-            </td>
-          </tr>
+    const badgeHtml = `<span style="display:inline-block;background-color:#eef2ff;color:#4f46e5;font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;text-transform:uppercase;letter-spacing:0.6px;border:1px solid #c7d2fe;">Official Case Update</span>`;
 
-          <!-- Main Content -->
-          <tr>
-            <td style="padding: 32px 36px;">
-              <p style="margin: 0 0 16px; font-size: 15px; color: #475569;">
-                Dear <strong>${clientName}</strong>,
-              </p>
-              
-              <p style="margin: 0 0 24px; font-size: 14px; line-height: 1.6; color: #334155;">
-                This is an official communication regarding your ongoing legal matter handled by our practice. Please find the latest updates and proceedings information summarized below:
-              </p>
+    const customNoteHtml = params.customMessage?.trim()
+      ? `
+      <div style="background:#eef2ff;border-left:4px solid #4f46e5;padding:16px 18px;border-radius:8px;margin-bottom:24px;">
+        <p style="margin:0 0 6px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#4338ca;">
+          Note from Your Legal Counsel
+        </p>
+        <p style="margin:0;color:#1e293b;font-size:14px;line-height:1.6;white-space:pre-line;">${escapeHtml(params.customMessage.trim())}</p>
+      </div>`
+      : "";
 
+    const bodyHtml = `
+      <p style="margin:0 0 12px;color:#0f172a;font-size:15px;">
+        Dear <strong>${escapeHtml(params.clientName)}</strong>,
+      </p>
+      <p style="margin:0 0 24px;color:#475569;font-size:14px;line-height:1.6;">
+        We are writing to share an official update regarding your legal matter managed by <strong>${escapeHtml(params.firmName || "our chamber")}</strong>. Please review the latest docket details and upcoming hearing information below.
+      </p>
+
+      ${customNoteHtml}
+
+      <!-- Case Details Table -->
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:24px;">
+        <tr>
+          <td style="padding:18px 20px;">
+            <p style="margin:0 0 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#64748b;">
+              Case &amp; Hearing Particulars
+            </p>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="padding:7px 0;color:#64748b;font-size:13px;width:140px;border-bottom:1px solid #f1f5f9;">Case Title</td>
+                <td style="padding:7px 0;color:#0f172a;font-size:13px;font-weight:700;border-bottom:1px solid #f1f5f9;">${escapeHtml(params.caseTitle)}</td>
+              </tr>
+              <tr>
+                <td style="padding:7px 0;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;">Case Number</td>
+                <td style="padding:7px 0;color:#0f172a;font-size:13px;font-weight:700;font-family:monospace;border-bottom:1px solid #f1f5f9;">${escapeHtml(params.caseNumber || "N/A")}</td>
+              </tr>
               ${
-                customMessage?.trim()
-                  ? `
-              <!-- Advocate / Custom Message Box -->
-              <div style="background: #eff6ff; border-left: 4px solid #2176ff; border-radius: 8px; padding: 18px 20px; margin-bottom: 28px;">
-                <p style="margin: 0 0 6px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #1e40af;">Advocate's Note / Notice</p>
-                <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #1e3a8a; white-space: pre-wrap;">${customMessage.trim()}</p>
-              </div>
-              `
+                params.cnrNumber
+                  ? `<tr>
+                      <td style="padding:7px 0;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;">CNR Number</td>
+                      <td style="padding:7px 0;color:#0f172a;font-size:13px;font-weight:600;font-family:monospace;border-bottom:1px solid #f1f5f9;">${escapeHtml(params.cnrNumber)}</td>
+                    </tr>`
                   : ""
               }
+              ${
+                partiesDisplay
+                  ? `<tr>
+                      <td style="padding:7px 0;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;">Parties</td>
+                      <td style="padding:7px 0;color:#0f172a;font-size:13px;font-weight:600;border-bottom:1px solid #f1f5f9;">${escapeHtml(partiesDisplay)}</td>
+                    </tr>`
+                  : ""
+              }
+              <tr>
+                <td style="padding:7px 0;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;">Court / Forum</td>
+                <td style="padding:7px 0;color:#0f172a;font-size:13px;font-weight:600;border-bottom:1px solid #f1f5f9;">
+                  ${escapeHtml(params.court || "N/A")}${params.courtNo ? ` (Court Room: ${escapeHtml(params.courtNo)})` : ""}
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:7px 0;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;">Next Hearing Date</td>
+                <td style="padding:7px 0;color:#4f46e5;font-size:13px;font-weight:700;border-bottom:1px solid #f1f5f9;">${escapeHtml(formattedNextDate)}</td>
+              </tr>
+              <tr>
+                <td style="padding:7px 0;color:#64748b;font-size:13px;">Stage / Fixed For</td>
+                <td style="padding:7px 0;color:#0f172a;font-size:13px;font-weight:600;">${escapeHtml(params.fixedFor || "Scheduled Proceeding")}</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
 
-              <!-- Case Information Table -->
-              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 28px; overflow: hidden;">
-                <tr>
-                  <td colspan="2" style="background: #f1f5f9; padding: 12px 18px; border-bottom: 1px solid #e2e8f0;">
-                    <p style="margin: 0; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #475569;">Matter Details</p>
-                  </td>
-                </tr>
-                <tr>
-                  <td width="35%" style="padding: 11px 18px; font-size: 13px; color: #64748b; border-bottom: 1px solid #e2e8f0;">Case Title / Number:</td>
-                  <td style="padding: 11px 18px; font-size: 13px; font-weight: 600; color: #0f172a; border-bottom: 1px solid #e2e8f0;">
-                    ${caseNumber || "N/A"} ${caseTitle ? `— ${caseTitle}` : ""}
-                  </td>
-                </tr>
-                ${
-                  cnrNumber
-                    ? `
-                <tr>
-                  <td style="padding: 11px 18px; font-size: 13px; color: #64748b; border-bottom: 1px solid #e2e8f0;">CNR Number:</td>
-                  <td style="padding: 11px 18px; font-size: 13px; font-weight: 600; color: #0f172a; border-bottom: 1px solid #e2e8f0;">${cnrNumber}</td>
-                </tr>`
-                    : ""
-                }
-                <tr>
-                  <td style="padding: 11px 18px; font-size: 13px; color: #64748b; border-bottom: 1px solid #e2e8f0;">Court & Room:</td>
-                  <td style="padding: 11px 18px; font-size: 13px; font-weight: 600; color: #0f172a; border-bottom: 1px solid #e2e8f0;">
-                    ${court || "Court of Record"}${courtNo ? ` (Court No. ${courtNo})` : ""}
-                  </td>
-                </tr>
-                ${
-                  firstParty || oppositeParty
-                    ? `
-                <tr>
-                  <td style="padding: 11px 18px; font-size: 13px; color: #64748b; border-bottom: 1px solid #e2e8f0;">Parties:</td>
-                  <td style="padding: 11px 18px; font-size: 13px; font-weight: 600; color: #0f172a; border-bottom: 1px solid #e2e8f0;">
-                    ${firstParty || "Petitioner"} vs ${oppositeParty || "Respondent"}
-                  </td>
-                </tr>`
-                    : ""
-                }
-                <tr>
-                  <td style="padding: 11px 18px; font-size: 13px; color: #64748b;">Next Hearing Date:</td>
-                  <td style="padding: 11px 18px; font-size: 13px; font-weight: 700; color: #2176ff;">
-                    ${formattedHearingDate} ${fixedFor ? `(Fixed for: ${fixedFor})` : ""}
-                  </td>
-                </tr>
-              </table>
+      <!-- CTA Button -->
+      <div style="text-align:center;margin:28px 0 8px;">
+        <a href="${escapeHtml(portalUrl)}" style="display:inline-block;background-color:#0f172a;color:#ffffff;text-decoration:none;padding:13px 32px;border-radius:8px;font-size:14px;font-weight:600;">
+          View Case in Client Portal &rarr;
+        </a>
+      </div>
+    `;
 
-              <!-- Portal Access CTA Button -->
-              <div style="text-align: center; margin: 32px 0 20px;">
-                <a href="${portalLoginUrl}" style="display: inline-block; background: #2176ff; color: #ffffff; text-decoration: none; padding: 13px 28px; border-radius: 10px; font-size: 14px; font-weight: 600; box-shadow: 0 2px 4px rgba(33, 118, 255, 0.25);">
-                  View Case in Client Portal &rarr;
-                </a>
-              </div>
+    const html = buildMiLawEmailHtml({
+      documentTitle: emailSubject,
+      brandSubtitle: params.firmName || "Client Legal Advisory",
+      badgeHtml,
+      heading: "Case Status & Hearing Update",
+      subheading: `${escapeHtml(params.caseNumber || "Matter")} — ${escapeHtml(params.caseTitle)}`,
+      bodyHtml,
+      footerReason: `Official Case Communication from ${escapeHtml(params.firmName || "MI Law")}`,
+      firmName: params.firmName,
+    });
 
-              <p style="margin: 24px 0 0; font-size: 13px; line-height: 1.6; color: #64748b; text-align: center;">
-                You can also review all proceedings, filed documents, and schedule updates directly through your online client portal.
-              </p>
-            </td>
-          </tr>
+    await transporter.sendMail({
+      from: `"${params.firmName || config.APP_NAME || "MI Law"}" <${config.SMTP_MAIL}>`,
+      to: params.clientEmail,
+      subject: emailSubject,
+      html,
+      attachments: getMiLawLogoAttachments(),
+    });
 
-          <!-- Footer -->
-          <tr>
-            <td style="padding: 24px 36px; background: #f8fafc; border-top: 1px solid #e2e8f0; text-align: center;">
-              <p style="margin: 0 0 6px; font-size: 12px; color: #94a3b8;">
-                This email contains confidential client-attorney privileged information intended solely for ${clientEmail}.
-              </p>
-              <p style="margin: 0; font-size: 12px; color: #cbd5e1;">
-                &copy; ${new Date().getFullYear()} ${firmName}. All rights reserved.
-              </p>
-            </td>
-          </tr>
-
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-`,
-    };
-
-    console.log(`📨 [SMTP] Sending case notification to client: ${clientEmail} (${caseNumber || caseTitle})...`);
-    const info = await transporter.sendMail(mail);
-    console.log(`✅ [SMTP] Notification delivered to ${clientEmail}. Message ID:`, info.messageId);
-
-    return {
-      success: true,
-      messageId: info.messageId,
-    };
+    return { success: true };
   } catch (error: unknown) {
-    console.error(
-      `❌ [SMTP] Failed to send client notification to ${clientEmail}:`,
-      error instanceof Error ? error.message : error
-    );
+    console.error("Client case notification email failed:", error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Failed to deliver email",
+      error: error instanceof Error ? error.message : "Failed to send email",
     };
   }
 };
+
+export default sendClientCaseNotificationEmail;

@@ -61,7 +61,12 @@ const loginController = {
       }
 
       if (!clientUser.isEmailVerified) {
-        await emailOtpService({ id: clientUser.id, email: clientUser.email });
+        await emailOtpService({
+          id: clientUser.id,
+          email: clientUser.email,
+          userName: clientUser.name,
+          purpose: "account sign-in verification",
+        });
         return res.status(403).json(
           ResponseHandler(403, "Email verification required", {
             requireVerification: true,

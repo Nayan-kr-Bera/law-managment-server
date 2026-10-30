@@ -740,6 +740,8 @@ const appointmentController = {
             appointmentDate: existingAppointment.date,
 
             purpose: existingAppointment.purpose,
+            mode: existingAppointment.mode as AppointmentMode,
+            location: existingAppointment.location,
           });
         }
       }

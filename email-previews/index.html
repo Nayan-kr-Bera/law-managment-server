@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LawOS — Email Templates Live Preview Studio</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #0f172a;
+      color: #f8fafc;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+    .sidebar {
+      width: 340px;
+      background: #1e293b;
+      border-right: 1px solid #334155;
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    .sidebar-header {
+      padding: 20px;
+      border-bottom: 1px solid #334155;
+    }
+    .sidebar-header h1 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .sidebar-header p {
+      margin: 6px 0 0;
+      font-size: 12px;
+      color: #94a3b8;
+    }
+    .template-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+    }
+    .template-item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 6px;
+      color: #cbd5e1;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .template-item:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: #fff;
+    }
+    .template-item.active {
+      background: rgba(59, 130, 246, 0.15);
+      border-color: rgba(59, 130, 246, 0.4);
+      color: #fff;
+    }
+    .template-title {
+      font-size: 13px;
+      font-weight: 600;
+      display: block;
+      margin-bottom: 3px;
+    }
+    .template-meta {
+      font-size: 11px;
+      color: #64748b;
+      font-family: monospace;
+      display: block;
+    }
+    .template-item.active .template-meta {
+      color: #93c5fd;
+    }
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: #0f172a;
+    }
+    .toolbar {
+      height: 60px;
+      background: #1e293b;
+      border-bottom: 1px solid #334155;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+    }
+    .toolbar-info {
+      display: flex;
+      flex-direction: column;
+    }
+    .toolbar-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #f8fafc;
+    }
+    .toolbar-source {
+      font-size: 12px;
+      color: #94a3b8;
+      font-family: monospace;
+      margin-top: 2px;
+    }
+    .toolbar-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .btn {
+      background: #334155;
+      color: #e2e8f0;
+      border: 1px solid #475569;
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn:hover {
+      background: #475569;
+    }
+    .btn.active {
+      background: #2563eb;
+      border-color: #3b82f6;
+      color: #fff;
+    }
+    .preview-stage {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      align-items: stretch;
+      padding: 24px;
+      overflow: auto;
+    }
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4);
+      transition: width 0.25s ease;
+    }
+    iframe.mobile {
+      width: 390px;
+    }
+  </style>
+</head>
+<body>
+
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h1>📧 Email Template Studio</h1>
+      <p>15 Templates • Edit any .html file &amp; see changes live</p>
+    </div>
+    <div class="template-list" id="templateList"></div>
+  </aside>
+
+  <main class="main">
+    <header class="toolbar">
+      <div class="toolbar-info">
+        <span class="toolbar-title" id="currentTitle">01. Admin Welcome Email</span>
+        <span class="toolbar-source" id="currentSource">src/services/adminWelcomeEmail.service.ts</span>
+      </div>
+      <div class="toolbar-actions">
+        <a class="btn" style="background:#f59e0b; border-color:#fbbf24; color:#090d16; font-weight:700;" href="logo-showcase.html" target="_blank">⚖️ View New 60-30-10 Logo Studio</a>
+        <button class="btn active" id="btnDesktop" onclick="setViewport('desktop')">🖥️ Desktop</button>
+        <button class="btn" id="btnMobile" onclick="setViewport('mobile')">📱 Mobile (390px)</button>
+        <a class="btn" id="btnOpenDirect" href="01-admin-welcome.html" target="_blank">↗ Open HTML Directly</a>
+      </div>
+    </header>
+    <div class="preview-stage">
+      <iframe id="previewFrame" src="01-admin-welcome.html"></iframe>
+    </div>
+  </main>
+
+  <script>
+    const templates = [
+      { file: "logo-showcase.html", title: "⭐ NEW: MI Law Brand Logo (60-30-10)", source: "email-previews/mi-law-logo.svg" },
+      { file: "01-admin-welcome.html", title: "01. Admin Welcome & Credentials", source: "src/services/adminWelcomeEmail.service.ts" },
+      { file: "02-advocate-welcome.html", title: "02. Advocate Welcome & Account", source: "src/services/advocateEmail.service.ts" },
+      { file: "03-appointment-scheduled.html", title: "03. Appointment Scheduled", source: "src/services/appointmentEmail.service.ts" },
+      { file: "04-appointment-cancelled.html", title: "04. Appointment Cancelled", source: "src/services/appointmentEmail.service.ts" },
+      { file: "05-advocate-case-assigned.html", title: "05. Advocate Case Assigned / Transfer", source: "src/services/caseAssignmentNotification.service.ts" },
+      { file: "06-client-welcome.html", title: "06. Client Portal Welcome", source: "src/services/clientEmail.service.ts" },
+      { file: "07-client-case-notification.html", title: "07. Client Case Update Notice", source: "src/services/clientNotificationEmail.service.ts" },
+      { file: "08-contact-inquiry-reply.html", title: "08. Contact Inquiry Support Reply", source: "src/services/contactInquiryReplyEmail.service.ts" },
+      { file: "09-email-otp.html", title: "09. Email Verification OTP", source: "src/services/emailOtp.service.ts" },
+      { file: "10-law-firm-welcome.html", title: "10. Law Firm Workspace Provisioned", source: "src/services/lawFirmWelcomeEmail.service.ts" },
+      { file: "11-ocr-success.html", title: "11. OCR Indexing Complete", source: "src/services/ocrEmail.service.ts" },
+      { file: "12-ocr-failure.html", title: "12. OCR Indexing Failed Alert", source: "src/services/ocrEmail.service.ts" },
+      { file: "13-hearing-reminder.html", title: "13. Case Hearing / Reminder", source: "src/services/reminderEmailWorker.service.ts" },
+      { file: "14-task-assignment.html", title: "14. Chamber Task Assignment", source: "src/services/taskEmail.service.ts" },
+      { file: "15-task-deadline-reminder.html", title: "15. Task Deadline Reminder (24H)", source: "src/services/taskEmail.service.ts" }
+    ];
+
+    const listEl = document.getElementById("templateList");
+    const frameEl = document.getElementById("previewFrame");
+    const titleEl = document.getElementById("currentTitle");
+    const sourceEl = document.getElementById("currentSource");
+    const openDirectEl = document.getElementById("btnOpenDirect");
+
+    function selectTemplate(index) {
+      const item = templates[index];
+      frameEl.src = item.file;
+      titleEl.textContent = item.title;
+      sourceEl.textContent = item.source;
+      openDirectEl.href = item.file;
+
+      document.querySelectorAll(".template-item").forEach((btn, idx) => {
+        btn.classList.toggle("active", idx === index);
+      });
+    }
+
+    function setViewport(mode) {
+      const isMobile = mode === "mobile";
+      frameEl.classList.toggle("mobile", isMobile);
+      document.getElementById("btnDesktop").classList.toggle("active", !isMobile);
+      document.getElementById("btnMobile").classList.toggle("active", isMobile);
+    }
+
+    templates.forEach((tpl, idx) => {
+      const btn = document.createElement("button");
+      btn.className = "template-item" + (idx === 0 ? " active" : "");
+      btn.innerHTML = `
+        <span class="template-title">${tpl.title}</span>
+        <span class="template-meta">${tpl.file}</span>
+      `;
+      btn.onclick = () => selectTemplate(idx);
+      listEl.appendChild(btn);
+    });
+  </script>
+</body>
+</html>
+

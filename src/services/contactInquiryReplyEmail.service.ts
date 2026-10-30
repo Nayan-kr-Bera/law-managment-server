@@ -1,134 +1,139 @@
 import nodemailer from "nodemailer";
 import { config } from "../config/index.js";
+import {
+  buildMiLawEmailHtml,
+  escapeHtml,
+  getMiLawLogoAttachments,
+} from "./emailBrandLayout.js";
 
-const port = Number(process.env.SMTP_PORT) || 2525;
-const isSecure = port === 465 || process.env.SMTP_SRC === "true";
-
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || "mail.smtp2go.com",
-  port,
-  secure: isSecure,
-  ...(isSecure ? {} : { requireTLS: true }),
-  auth: {
-    user: process.env.SMTP_USER || process.env.SMTP_MAIL,
-    pass: process.env.SMTP_PASSWORD || process.env.SMTP_PASS,
-  },
-});
-
-export interface ContactInquiryReplyParams {
+export interface ContactInquiryReplyEmailParams {
   recipientName: string;
   recipientEmail: string;
   subject: string;
   replyMessage: string;
-  originalMessage?: string;
-  originalSubject?: string;
+  originalMessage?: string | null;
+  originalSubject?: string | null;
   adminName?: string;
+  inquiryId?: string | number;
 }
 
-export const sendContactInquiryReplyEmail = async ({
-  recipientName,
-  recipientEmail,
-  subject,
-  replyMessage,
-  originalMessage,
-  originalSubject,
-  adminName = "Support Team",
-}: ContactInquiryReplyParams): Promise<boolean> => {
+const createTransporter = () => {
+  const port = Number(config.SMTP_PORT) || 587;
+  const secure =
+    String(config.SMTP_SRC).toLowerCase() === "true" || port === 465;
+
+  return nodemailer.createTransport({
+    host: config.SMTP_HOST,
+    port,
+    secure,
+    auth: {
+      user: config.SMTP_MAIL,
+      pass: config.SMTP_PASS,
+    },
+  });
+};
+
+export const sendContactInquiryReplyEmail = async (
+  params: ContactInquiryReplyEmailParams,
+): Promise<boolean> => {
   try {
-    const formattedReply = replyMessage.replace(/\n/g, "<br/>");
-    const formattedOriginal = originalMessage ? originalMessage.replace(/\n/g, "<br/>") : "";
+    const transporter = createTransporter();
+    const formattedReply = escapeHtml(params.replyMessage).replace(
+      /\n/g,
+      "<br/>",
+    );
+    const formattedOriginal = params.originalMessage
+      ? escapeHtml(params.originalMessage).replace(/\n/g, "<br/>")
+      : null;
 
-    const mailOptions = {
-      from: `"${config.APP_NAME || "MI Law Platform Support"}" <${config.SMTP_MAIL}>`,
-      to: recipientEmail,
-      subject: subject || `Re: ${originalSubject || "Inquiry with MI Law Support"}`,
-      html: `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Response to your Inquiry</title>
-</head>
-<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
-  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #f8fafc; padding: 32px 16px;">
-    <tr>
-      <td align="center">
-        <table width="100%" max-width="600" style="max-width: 600px; background-color: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
-          <!-- Header -->
-          <tr>
-            <td style="padding: 28px 32px; background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);">
-              <table width="100%" border="0" cellspacing="0" cellpadding="0">
-                <tr>
-                  <td>
-                    <span style="display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: #a5b4fc; background-color: rgba(255, 255, 255, 0.12); padding: 4px 10px; border-radius: 9999px;">
-                      Platform Support Response
-                    </span>
-                    <h1 style="margin: 12px 0 0 0; color: #ffffff; font-size: 20px; font-weight: 700; line-height: 1.3;">
-                      ${subject}
-                    </h1>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
+    const responderName = params.adminName || "MI Law Support & Advisory Desk";
+    const respondedOn = new Date().toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
 
-          <!-- Content Body -->
-          <tr>
-            <td style="padding: 32px;">
-              <p style="margin: 0 0 16px 0; font-size: 15px; color: #334155; line-height: 1.6;">
-                Dear <strong>${recipientName}</strong>,
-              </p>
-              
-              <div style="margin: 20px 0; font-size: 14px; line-height: 1.7; color: #0f172a; white-space: normal;">
-                ${formattedReply}
-              </div>
+    const badgeHtml = `<span style="display:inline-block;background-color:#eef2ff;color:#4f46e5;font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;text-transform:uppercase;letter-spacing:0.6px;border:1px solid #c7d2fe;">Support &amp; Advisory Desk</span>`;
 
-              <!-- Original Inquiry Quote Box -->
-              ${
-                formattedOriginal
-                  ? `
-              <div style="margin-top: 28px; padding: 16px 20px; background-color: #f1f5f9; border-left: 4px solid #6366f1; border-radius: 6px;">
-                <p style="margin: 0 0 6px 0; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b;">
-                  Your Original Inquiry:
-                </p>
-                <p style="margin: 0; font-size: 13px; color: #475569; font-style: italic; line-height: 1.5;">
-                  ${formattedOriginal}
-                </p>
-              </div>
-              `
-                  : ""
-              }
+    const bodyHtml = `
+      <p style="margin:0 0 12px;color:#0f172a;font-size:15px;">
+        Dear <strong>${escapeHtml(params.recipientName)}</strong>,
+      </p>
+      <p style="margin:0 0 20px;color:#475569;font-size:14px;line-height:1.6;">
+        Thank you for reaching out to <strong>MI Law</strong>. Our team has reviewed your inquiry and provided the following response:
+      </p>
 
-              <div style="margin-top: 32px; padding-top: 24px; border-top: 1px solid #f1f5f9; font-size: 13px; color: #64748b; line-height: 1.6;">
-                <p style="margin: 0;">Warm regards,</p>
-                <p style="margin: 4px 0 0 0; font-weight: 600; color: #1e293b;">${adminName}</p>
-                <p style="margin: 2px 0 0 0; font-size: 12px; color: #64748b;">MI Law Platform Operations & Support Team</p>
-              </div>
-            </td>
-          </tr>
+      <!-- Official Reply Box -->
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-left:4px solid #4f46e5;border-radius:10px;margin-bottom:24px;">
+        <tr>
+          <td style="padding:20px 22px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:10px;">
+              <tr>
+                <td style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#4f46e5;">
+                  Official Response from ${escapeHtml(responderName)}
+                </td>
+                <td align="right" style="font-size:11px;color:#64748b;font-weight:600;">
+                  ${escapeHtml(respondedOn)}${params.inquiryId ? ` • Ref #${escapeHtml(String(params.inquiryId))}` : ""}
+                </td>
+              </tr>
+            </table>
+            <div style="color:#0f172a;font-size:14px;line-height:1.7;">
+              ${formattedReply}
+            </div>
+          </td>
+        </tr>
+      </table>
 
-          <!-- Footer -->
-          <tr>
-            <td style="background-color: #f8fafc; padding: 20px 32px; border-top: 1px solid #e2e8f0; text-align: center;">
-              <p style="margin: 0; font-size: 12px; color: #94a3b8;">
-                This response was sent directly from the MI Law Platform Support Console.
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-      `,
-    };
+      ${
+        formattedOriginal
+          ? `<!-- Quoted Original Inquiry -->
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:20px;">
+              <tr>
+                <td style="padding:16px 20px;">
+                  <p style="margin:0 0 8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#94a3b8;">
+                    Your Original Inquiry${params.originalSubject ? ` — ${escapeHtml(params.originalSubject)}` : ""}
+                  </p>
+                  <div style="color:#64748b;font-size:13px;line-height:1.6;font-style:italic;">
+                    "${formattedOriginal}"
+                  </div>
+                </td>
+              </tr>
+            </table>`
+          : ""
+      }
 
-    await transporter.sendMail(mailOptions);
+      <p style="margin:20px 0 0;color:#475569;font-size:13px;line-height:1.6;">
+        If you have any follow-up questions, simply reply directly to this email and our team will be glad to assist you.
+      </p>
+      <p style="margin:14px 0 0;color:#0f172a;font-size:14px;font-weight:700;">
+        Warm regards,<br />
+        <span style="color:#4f46e5;">${escapeHtml(responderName)}</span>
+      </p>
+    `;
+
+    const html = buildMiLawEmailHtml({
+      documentTitle: params.subject,
+      brandSubtitle: "Support & Client Relations Desk",
+      badgeHtml,
+      heading: "Response to Your Inquiry",
+      subheading: escapeHtml(params.subject),
+      bodyHtml,
+      footerReason: "Sent by the MI Law Support & Client Relations Team",
+    });
+
+    await transporter.sendMail({
+      from: `"MI Law Support" <${config.SMTP_MAIL}>`,
+      to: params.recipientEmail,
+      subject: params.subject,
+      html,
+      attachments: getMiLawLogoAttachments(),
+    });
+
     return true;
   } catch (error) {
-    console.error("Failed to send contact inquiry reply email:", error);
+    console.error("[ContactInquiryReplyEmail] Error sending email:", error);
     return false;
   }
 };
+
+export default sendContactInquiryReplyEmail;

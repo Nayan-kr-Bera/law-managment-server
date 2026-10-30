@@ -1,0 +1,163 @@
+<!--
+  SOURCE FILE: src/services/ocrEmail.service.ts
+  FUNCTION: ocrEmailService.sendOcrSuccessEmail
+  VARIABLES:
+    - ${userName}          (e.g. "Adv. Vikramaditya Verma")
+    - ${fileName}          (e.g. "Written_Statement_CS_OS_412_2026.pdf")
+    - ${warningBannerHtml} (optional warning when pagesSkipped > 0)
+    - ${pageCount}         (e.g. 42)
+    - ${totalPages}        (optional, e.g. 45)
+    - ${pagesSkipped}      (optional, e.g. 3)
+    - ${charCount}         (e.g. "128,450")
+    - ${monthlyPagesUsed}  (e.g. 450)
+    - ${monthlyPagesLimit} (e.g. 500)
+    - ${remainingPages}    (e.g. 50)
+    - ${snippet}           (extracted text preview)
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OCR Indexing Complete — MI Law</title>
+</head>
+<body style="margin:0; padding:0; background-color:#f3f4f6; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color:#1e293b; -webkit-font-smoothing:antialiased;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f3f4f6; padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:600px; background-color:#ffffff; border-radius:12px; overflow:hidden; border:1px solid #e5e7eb; box-shadow:0 1px 3px rgba(0, 0, 0, 0.04);">
+
+          <!-- UNIFIED CLEAN BRAND HEADER -->
+          <tr>
+            <td style="padding:28px 40px 22px; background-color:#ffffff; border-bottom:1px solid #f1f5f9;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td width="44" valign="middle">
+                    <img src="mi-law-icon-only.svg" alt="MI LAW" width="44" height="44" style="display:block; width:44px; height:44px; border-radius:10px;" />
+                  </td>
+                  <td valign="middle" style="padding-left:12px;">
+                    <div style="font-size:17px; font-weight:700; color:#0f172a; letter-spacing:-0.02em; line-height:1.2;">
+                      MI Law
+                    </div>
+                    <div style="font-size:12px; font-weight:500; color:#64748b; margin-top:2px;">
+                      Legal Practice Management Suite
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- PURPOSE-BASED INNER BODY -->
+          <tr>
+            <td style="padding:36px 40px;">
+              <span style="display:inline-block; padding:4px 10px; background-color:#ecfdf5; color:#059669; border-radius:6px; font-size:11px; font-weight:600; letter-spacing:0.03em; text-transform:uppercase; margin-bottom:14px;">
+                Digital Briefcase &bull; OCR Complete
+              </span>
+
+              <h1 style="margin:0 0 14px; font-size:22px; font-weight:700; color:#0f172a; letter-spacing:-0.02em; line-height:1.3;">
+                Document indexing completed
+              </h1>
+
+              <p style="margin:0 0 12px; font-size:15px; color:#334155;">
+                Hello <strong>Adv. Vikramaditya Verma</strong>,
+              </p>
+
+              <p style="margin:0 0 22px; font-size:14px; line-height:1.7; color:#475569;">
+                Your document <strong>Written_Statement_CS_OS_412_2026.pdf</strong> has been processed through the Hindi &amp; English OCR indexing pipeline and is now searchable in your Document Library.
+              </p>
+
+              <!-- Optional Warning Banner (shown when pagesSkipped > 0) -->
+              <div style="background-color:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:14px 16px; margin-bottom:22px;">
+                <div style="font-size:12px; font-weight:700; color:#92400e; margin-bottom:4px;">
+                  Partial Indexing Notice
+                </div>
+                <p style="margin:0; font-size:12px; line-height:1.6; color:#92400e;">
+                  Document contains 45 pages. The first 42 pages were indexed and are fully searchable. The last 3 pages were skipped because your monthly quota limit was reached.
+                </p>
+              </div>
+
+              <!-- OCR Summary Card -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; margin-bottom:24px;">
+                <tr>
+                  <td style="padding:20px 24px;">
+                    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:13px; color:#334155;">
+                      <tr>
+                        <td width="42%" style="padding:8px 0; color:#64748b; border-bottom:1px solid #e2e8f0;">Document File</td>
+                        <td style="padding:8px 0; font-weight:600; color:#0f172a; border-bottom:1px solid #e2e8f0;">Written_Statement_CS_OS_412_2026.pdf</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:8px 0; color:#64748b; border-bottom:1px solid #e2e8f0;">Pages Indexed</td>
+                        <td style="padding:8px 0; font-weight:600; color:#4f46e5; border-bottom:1px solid #e2e8f0;">42 pages (of 45 total)</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:8px 0; color:#64748b; border-bottom:1px solid #e2e8f0;">Pages Skipped</td>
+                        <td style="padding:8px 0; font-weight:600; color:#d97706; border-bottom:1px solid #e2e8f0;">3 pages</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:8px 0; color:#64748b; border-bottom:1px solid #e2e8f0;">Extracted Characters</td>
+                        <td style="padding:8px 0; font-weight:600; color:#0f172a; border-bottom:1px solid #e2e8f0;">128,450 chars</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:8px 0 2px; color:#64748b;">Monthly Quota Usage</td>
+                        <td style="padding:8px 0 2px; font-weight:600; color:#059669;">450 / 500 pages used (50 remaining)</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <div style="margin-bottom:24px;">
+                <div style="font-size:11px; font-weight:700; margin-bottom:8px; color:#64748b; text-transform:uppercase; letter-spacing:0.05em;">
+                  Extracted Text Preview
+                </div>
+                <div style="background-color:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:14px 16px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:11px; color:#334155; line-height:1.6; white-space:pre-wrap;">IN THE HIGH COURT OF DELHI AT NEW DELHI
+ORDINARY ORIGINAL CIVIL JURISDICTION
+CS(OS) NO. 412 OF 2026
+IN THE MATTER OF:
+ANANYA DESHMUKH ...PLAINTIFF
+VERSUS
+APEX BUILDERS PVT. LTD. ...DEFENDANT...</div>
+              </div>
+
+              <p style="margin:0; font-size:14px; line-height:1.6; color:#475569;">
+                Best regards,<br />
+                <strong style="color:#0f172a;">The MI Law Team</strong>
+              </p>
+            </td>
+          </tr>
+
+          <!-- UNIFIED COMPANY FOOTER -->
+          <tr>
+            <td style="background-color:#f8fafc; padding:28px 40px; border-top:1px solid #e5e7eb;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="padding-bottom:12px;">
+                    <img src="mi-law-logo.svg" alt="MI Law" width="20" height="20" style="display:inline-block; vertical-align:middle; width:20px; height:20px; border-radius:4px;" />
+                    <span style="display:inline-block; vertical-align:middle; margin-left:6px; font-size:13px; font-weight:700; color:#0f172a;">
+                      MI Law Chambers
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding-bottom:12px; font-size:12px; color:#64748b; line-height:1.6;">
+                    Digital Case Management, Client Portal &amp; Legal Chamber Operations.<br />
+                    Need help? Contact our support desk at <a href="mailto:support@milaw.in" style="color:#4f46e5; text-decoration:none;">support@milaw.in</a>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="font-size:11px; color:#94a3b8; line-height:1.6;">
+                    This is an automated transactional message from MI Law. Please do not reply directly to this email.<br />
+                    &copy; 2026 MI Law Practice System. All rights reserved.
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

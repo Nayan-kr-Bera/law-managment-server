@@ -4,6 +4,11 @@ import { config } from "../config/index.js";
 import { consumeFromQueue, REMINDER_EMAIL_QUEUE } from "../lib/rabbitmq.js";
 import db from "../db/index.js";
 import { notificationLogs, notificationQueue } from "../db/schema/index.js";
+import {
+  buildMiLawEmailHtml,
+  escapeHtml,
+  getMiLawLogoAttachments,
+} from "./emailBrandLayout.js";
 
 const port = Number(process.env.SMTP_PORT) || 2525;
 const isSecure = port === 465 || process.env.SMTP_SRC === "true";
@@ -34,9 +39,12 @@ export interface ReminderEmailJob {
   daysRemaining?: number;
   googleCalendarUrl?: string;
   isHearingReminder?: boolean;
+  firmName?: string | null;
 }
 
-export async function sendReminderEmail(job: ReminderEmailJob): Promise<boolean> {
+export async function sendReminderEmail(
+  job: ReminderEmailJob,
+): Promise<boolean> {
   const {
     recipients,
     reminderText,
@@ -51,6 +59,7 @@ export async function sendReminderEmail(job: ReminderEmailJob): Promise<boolean>
     isHearingReminder,
     tenantId,
     officeId,
+    firmName,
   } = job;
 
   if (!recipients || recipients.length === 0) {
@@ -58,82 +67,150 @@ export async function sendReminderEmail(job: ReminderEmailJob): Promise<boolean>
     return false;
   }
 
-  const subject = isHearingReminder
-    ? `[Hearing Reminder] ${caseNo ? `Case ${caseNo}: ` : ""}${daysRemaining === 0
-      ? "TODAY"
+  const dashboardUrl =
+    config.ORIGIN_CLIENT || config.ORIGIN_FRONTEND || "http://localhost:5173";
+
+  const formattedHearingDate = hearingDate
+    ? new Date(hearingDate).toLocaleDateString("en-IN", {
+        weekday: "long",
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+    : null;
+
+  const isUrgent = daysRemaining !== undefined && daysRemaining <= 1;
+
+  const urgencyText =
+    daysRemaining === 0
+      ? "Hearing is TODAY"
       : daysRemaining === 1
-        ? "Tomorrow"
-        : `${daysRemaining} Days Away`
-    }`
-    : `[Reminder] ${caseNo ? `Case ${caseNo}: ` : ""}${reminderText.slice(0, 50)}`;
+        ? "Hearing is TOMORROW"
+        : daysRemaining !== undefined
+          ? `Upcoming in ${daysRemaining} Days`
+          : frequency || "Scheduled Reminder";
 
-  const daysBadge =
-    daysRemaining !== undefined
-      ? daysRemaining === 0
-        ? '<span style="background:#dc2626; color:#fff; padding:4px 10px; border-radius:12px; font-weight:bold; font-size:12px;">HEARING TODAY</span>'
-        : daysRemaining === 1
-          ? '<span style="background:#ea580c; color:#fff; padding:4px 10px; border-radius:12px; font-weight:bold; font-size:12px;">HEARING TOMORROW</span>'
-          : `<span style="background:#2563eb; color:#fff; padding:4px 10px; border-radius:12px; font-weight:bold; font-size:12px;">${daysRemaining} DAYS REMAINING</span>`
-      : "";
+  const badgeStyle = isUrgent
+    ? "background-color:#fef2f2;color:#dc2626;border:1px solid #fecaca;"
+    : "background-color:#fffbeb;color:#d97706;border:1px solid #fde68a;";
 
-  const googleCalButtonHtml = googleCalendarUrl
+  const badgeHtml = `<span style="display:inline-block;${badgeStyle}font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;text-transform:uppercase;letter-spacing:0.6px;">⏰ ${escapeHtml(urgencyText)}</span>`;
+
+  const hasCaseMetadata = Boolean(
+    caseNo || clientName || stage || courtNo || formattedHearingDate,
+  );
+
+  const caseTableHtml = hasCaseMetadata
     ? `
-      <div style="text-align: center; margin: 24px 0;">
-        <a href="${googleCalendarUrl}" target="_blank" style="display: inline-block; background-color: #1a73e8; color: #ffffff; font-weight: bold; font-size: 15px; text-decoration: none; padding: 12px 24px; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.15);">
-          📅 Add to Google Calendar
-        </a>
-      </div>
-    `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:24px;">
+      <tr>
+        <td style="padding:18px 20px;">
+          <p style="margin:0 0 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#64748b;">
+            Court Cause-List &amp; Matter Particulars
+          </p>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            ${
+              formattedHearingDate
+                ? `<tr>
+                    <td style="padding:7px 0;color:#64748b;font-size:13px;width:140px;border-bottom:1px solid #f1f5f9;">Hearing Date</td>
+                    <td style="padding:7px 0;color:${isUrgent ? "#dc2626" : "#0f172a"};font-size:14px;font-weight:800;border-bottom:1px solid #f1f5f9;">${escapeHtml(formattedHearingDate)} (${escapeHtml(urgencyText)})</td>
+                  </tr>`
+                : ""
+            }
+            ${
+              caseNo
+                ? `<tr>
+                    <td style="padding:7px 0;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;">Case Number</td>
+                    <td style="padding:7px 0;color:#0f172a;font-size:13px;font-weight:700;font-family:monospace;border-bottom:1px solid #f1f5f9;">${escapeHtml(caseNo)}</td>
+                  </tr>`
+                : ""
+            }
+            ${
+              clientName
+                ? `<tr>
+                    <td style="padding:7px 0;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;">Client / Party</td>
+                    <td style="padding:7px 0;color:#0f172a;font-size:13px;font-weight:600;border-bottom:1px solid #f1f5f9;">${escapeHtml(clientName)}</td>
+                  </tr>`
+                : ""
+            }
+            ${
+              stage
+                ? `<tr>
+                    <td style="padding:7px 0;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;">Stage / Fixed For</td>
+                    <td style="padding:7px 0;color:#4f46e5;font-size:13px;font-weight:700;border-bottom:1px solid #f1f5f9;">${escapeHtml(stage)}</td>
+                  </tr>`
+                : ""
+            }
+            ${
+              courtNo
+                ? `<tr>
+                    <td style="padding:7px 0;color:#64748b;font-size:13px;">Court / Room No.</td>
+                    <td style="padding:7px 0;color:#0f172a;font-size:13px;font-weight:600;">${escapeHtml(courtNo)}</td>
+                  </tr>`
+                : ""
+            }
+          </table>
+        </td>
+      </tr>
+    </table>`
     : "";
 
-  const htmlBody = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8" />
-  <title>Law Practice System Reminder</title>
-</head>
-<body style="font-family: Arial, sans-serif; background: #f5f6f8; margin: 0; padding: 20px; color: #333;">
-  <table width="100%" max-width="600px" style="background: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb; margin: 0 auto; padding: 24px;">
-    <tr>
-      <td style="background: #5b2d8e; color: #fff; padding: 16px 24px; border-radius: 6px 6px 0 0; text-align: center;">
-        <h2 style="margin: 0; font-size: 20px;">Law Practice System — ${isHearingReminder ? "Case Hearing Reminder" : "Reminder Notification"
-    }</h2>
-      </td>
-    </tr>
-    <tr>
-      <td style="padding: 24px 12px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-          <p style="font-size: 15px; line-height: 1.6; margin: 0;">Hello,</p>
-          ${daysBadge}
-        </div>
-        <p style="font-size: 15px; line-height: 1.6;">This is an automated advance reminder for an upcoming case hearing:</p>
+  const bodyHtml = `
+    <p style="margin:0 0 16px;color:#475569;font-size:14px;line-height:1.6;">
+      This is an automated legal docket reminder from your <strong>MI Law Chamber Workspace</strong>. Please review the matter details and schedule below:
+    </p>
 
-        <div style="background: #f8f6fb; border-left: 4px solid #5b2d8e; padding: 16px; margin: 20px 0; border-radius: 4px;">
-          <p style="margin: 0 0 8px 0; font-size: 16px; font-weight: bold; color: #5b2d8e;">Reminder:</p>
-          <p style="margin: 0; font-size: 15px; line-height: 1.5; color: #222;">${reminderText}</p>
-        </div>
+    <!-- Reminder Note Callout -->
+    <div style="background:${isUrgent ? "#fef2f2" : "#fffbeb"};border-left:4px solid ${isUrgent ? "#dc2626" : "#f59e0b"};padding:14px 18px;border-radius:8px;margin-bottom:22px;">
+      <p style="margin:0 0 4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:${isUrgent ? "#b91c1c" : "#b45309"};">
+        Reminder Note (${escapeHtml(frequency || "Scheduled Alert")})
+      </p>
+      <p style="margin:0;color:#0f172a;font-size:14px;font-weight:600;line-height:1.6;">
+        ${escapeHtml(reminderText)}
+      </p>
+    </div>
 
-        <table width="100%" style="font-size: 14px; color: #555; margin-bottom: 20px; border-collapse: collapse;">
-          ${caseNo ? `<tr><td width="35%" style="padding: 6px 0; border-bottom: 1px solid #f0f0f0;"><strong>Case Number:</strong></td><td style="padding: 6px 0; border-bottom: 1px solid #f0f0f0;">${caseNo}</td></tr>` : ""}
-          ${hearingDate ? `<tr><td width="35%" style="padding: 6px 0; border-bottom: 1px solid #f0f0f0;"><strong>Hearing Date:</strong></td><td style="padding: 6px 0; border-bottom: 1px solid #f0f0f0;">${hearingDate}</td></tr>` : ""}
-          ${stage ? `<tr><td width="35%" style="padding: 6px 0; border-bottom: 1px solid #f0f0f0;"><strong>Stage:</strong></td><td style="padding: 6px 0; border-bottom: 1px solid #f0f0f0;">${stage}</td></tr>` : ""}
-          ${courtNo ? `<tr><td width="35%" style="padding: 6px 0; border-bottom: 1px solid #f0f0f0;"><strong>Court / Room:</strong></td><td style="padding: 6px 0; border-bottom: 1px solid #f0f0f0;">${courtNo}</td></tr>` : ""}
-          ${clientName ? `<tr><td width="35%" style="padding: 6px 0; border-bottom: 1px solid #f0f0f0;"><strong>Client:</strong></td><td style="padding: 6px 0; border-bottom: 1px solid #f0f0f0;">${clientName}</td></tr>` : ""}
-          <tr><td width="35%" style="padding: 6px 0;"><strong>Notification:</strong></td><td style="padding: 6px 0;">${frequency}</td></tr>
-        </table>
+    ${caseTableHtml}
 
-        ${googleCalButtonHtml}
+    <!-- Action Buttons -->
+    <div style="text-align:center;margin:26px 0 8px;">
+      <a href="${escapeHtml(dashboardUrl)}" style="display:inline-block;background-color:#0f172a;color:#ffffff;text-decoration:none;padding:12px 26px;border-radius:8px;font-size:14px;font-weight:600;margin:4px 6px;">
+        Open Case Docket &rarr;
+      </a>
+      ${
+        googleCalendarUrl
+          ? `<a href="${escapeHtml(googleCalendarUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background-color:#ffffff;color:#0f172a;text-decoration:none;padding:11px 22px;border-radius:8px;font-size:14px;font-weight:600;border:1px solid #cbd5e1;margin:4px 6px;">
+              📅 Add to Google Calendar
+            </a>`
+          : ""
+      }
+    </div>
+  `;
 
-        <p style="font-size: 13px; color: #888; margin-top: 30px; border-top: 1px solid #eee; padding-top: 16px;">
-          This email was sent automatically by your Law Practice Management System. Please do not reply directly.
-        </p>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-`;
+  const subject = isHearingReminder
+    ? `[Hearing Reminder] ${caseNo ? `Case ${caseNo}: ` : ""}${
+        daysRemaining === 0
+          ? "TODAY"
+          : daysRemaining === 1
+            ? "Tomorrow"
+            : `${daysRemaining} Days Away`
+      }`
+    : `[Reminder] ${caseNo ? `Case ${caseNo}: ` : ""}${reminderText.slice(0, 50)}`;
+
+  const htmlBody = buildMiLawEmailHtml({
+    documentTitle: subject,
+    brandSubtitle: firmName || "Court Cause-List & Hearing Desk",
+    badgeHtml,
+    heading: isHearingReminder
+      ? "Upcoming Court Hearing Reminder"
+      : "Scheduled Chamber Reminder",
+    subheading: caseNo
+      ? `Case #${escapeHtml(caseNo)}${clientName ? ` • ${escapeHtml(clientName)}` : ""}`
+      : "Automated Legal Docket Alert",
+    bodyHtml,
+    footerReason: `Automated ${escapeHtml(frequency || "Scheduled")} Alert from MI Law`,
+    firmName,
+  });
 
   let successCount = 0;
 
@@ -142,7 +219,6 @@ export async function sendReminderEmail(job: ReminderEmailJob): Promise<boolean>
     if (!cleanRecipient) continue;
 
     try {
-      // 1. Insert into notificationQueue
       const [queueItem] = await db
         .insert(notificationQueue)
         .values({
@@ -150,20 +226,24 @@ export async function sendReminderEmail(job: ReminderEmailJob): Promise<boolean>
           officeId: officeId || null,
           channel: "email",
           recipient: cleanRecipient,
-          payload: { reminderId: job.reminderId, subject, body: reminderText, googleCalendarUrl },
+          payload: {
+            reminderId: job.reminderId,
+            subject,
+            body: reminderText,
+            googleCalendarUrl,
+          },
           status: "pending",
         })
         .returning();
 
-      // 2. Send email via Nodemailer
       const info = await transporter.sendMail({
-        from: config.SMTP_MAIL,
+        from: `"${firmName || config.APP_NAME || "MI Law Docket Alerts"}" <${config.SMTP_MAIL}>`,
         to: cleanRecipient,
         subject,
         html: htmlBody,
+        attachments: getMiLawLogoAttachments(),
       });
 
-      // 3. Log success
       if (queueItem) {
         await db
           .update(notificationQueue)
@@ -178,10 +258,15 @@ export async function sendReminderEmail(job: ReminderEmailJob): Promise<boolean>
         });
       }
 
-      console.log(`✉️ [Email Worker] Email delivered successfully to: ${cleanRecipient} (Subject: "${subject}")`);
+      console.log(
+        `✉️ [Email Worker] Email delivered successfully to: ${cleanRecipient} (Subject: "${subject}")`,
+      );
       successCount++;
     } catch (err) {
-      console.error(`❌ [Email Worker] Failed to deliver email to ${cleanRecipient}:`, err);
+      console.error(
+        `❌ [Email Worker] Failed to deliver email to ${cleanRecipient}:`,
+        err,
+      );
     }
   }
 
@@ -189,9 +274,18 @@ export async function sendReminderEmail(job: ReminderEmailJob): Promise<boolean>
 }
 
 export function startReminderWorker(): void {
-  console.log(`⚙️ [Email Worker] Initializing RabbitMQ reminder email consumer...`);
-  void consumeFromQueue<ReminderEmailJob>(REMINDER_EMAIL_QUEUE, async (job) => {
-    console.log(`\n📨 [Email Worker Task] Processing reminder job [ID: ${job.reminderId}] for ${job.recipients?.length || 0} recipient(s) (Case: ${job.caseNo || "N/A"})`);
-    await sendReminderEmail(job);
-  });
+  console.log(
+    `⚙️ [Email Worker] Initializing RabbitMQ reminder email consumer...`,
+  );
+  void consumeFromQueue<ReminderEmailJob>(
+    REMINDER_EMAIL_QUEUE,
+    async (job: ReminderEmailJob) => {
+      console.log(
+        `\n📨 [Email Worker Task] Processing reminder job [ID: ${job.reminderId}] for ${job.recipients?.length || 0} recipient(s) (Case: ${job.caseNo || "N/A"})`,
+      );
+      await sendReminderEmail(job);
+    },
+  );
 }
+
+export const startReminderEmailWorker = startReminderWorker;

@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MI LAW — Official Brand Logo Suite (3 SVG Assets)</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+      background-color: #070E1C;
+      color: #f8fafc;
+      -webkit-font-smoothing: antialiased;
+    }
+    .topbar {
+      background: rgba(7, 14, 28, 0.92);
+      backdrop-filter: blur(12px);
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #1e293b;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+    .topbar-left h1 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: #fff;
+    }
+    .topbar-left span {
+      font-size: 12px;
+      color: #94a3b8;
+    }
+    .topbar-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .btn {
+      background: #1e293b;
+      color: #f8fafc;
+      border: 1px solid #334155;
+      padding: 9px 16px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+    }
+    .btn:hover { background: #334155; }
+    .btn-crimson {
+      background: linear-gradient(135deg, #FF3B3F 0%, #DC1E28 100%);
+      border-color: #EF4444;
+      color: #ffffff;
+      font-weight: 700;
+    }
+    .btn-crimson:hover { opacity: 0.92; }
+
+    .container {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 44px 24px 96px;
+    }
+    .hero-head {
+      text-align: center;
+      max-width: 760px;
+      margin: 0 auto 38px;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 999px;
+      background: rgba(220, 30, 40, 0.14);
+      border: 1px solid rgba(255, 59, 63, 0.35);
+      color: #FCA5A5;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+    .eyebrow-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #FF3B3F;
+      display: inline-block;
+    }
+    .hero-head h2 {
+      margin: 0 0 12px;
+      font-size: 34px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      color: #ffffff;
+    }
+    .hero-head p {
+      margin: 0;
+      font-size: 15px;
+      color: #94a3b8;
+      line-height: 1.6;
+    }
+
+    /* 60-30-10 Bar */
+    .rule-bar {
+      display: flex;
+      height: 70px;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid #334155;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
+      margin-bottom: 44px;
+    }
+    .r60 {
+      width: 60%;
+      background: linear-gradient(135deg, #FFFFFF 0%, #F1F5F9 100%);
+      color: #0B1336;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+    }
+    .r30 {
+      width: 30%;
+      background: linear-gradient(135deg, #0B1336 0%, #152254 100%);
+      color: #FFFFFF;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      border-left: 1px solid #334155;
+    }
+    .r10 {
+      width: 10%;
+      background: linear-gradient(135deg, #FF3B3F 0%, #DC1E28 100%);
+      color: #FFFFFF;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 0 8px;
+    }
+    .pct { font-size: 19px; font-weight: 900; letter-spacing: -0.03em; }
+    .lbl { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.85; }
+
+    /* Top 2 SVG Cards + Full-Width Horizontal SVG Card */
+    .concept-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+    @media (max-width: 900px) {
+      .concept-grid { grid-template-columns: 1fr; }
+    }
+    .concept-card {
+      background: #0F172A;
+      border: 1px solid #1E293B;
+      border-radius: 20px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .concept-card.featured {
+      border: 2px solid #FF3B3F;
+      box-shadow: 0 20px 50px rgba(220, 30, 40, 0.16);
+    }
+    .stage {
+      height: 350px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      background: radial-gradient(circle at center, #1E293B 0%, #090F1D 100%);
+      border-bottom: 1px solid #1E293B;
+      padding: 24px;
+    }
+    .stage-badge {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      padding: 5px 11px;
+      border-radius: 6px;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      background: #DC1E28;
+      color: #ffffff;
+    }
+    .card-body {
+      padding: 22px 24px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .card-body h3 {
+      margin: 0 0 6px;
+      font-size: 18px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .card-body p {
+      margin: 0 0 18px;
+      font-size: 13.5px;
+      color: #94a3b8;
+      line-height: 1.55;
+    }
+    .card-actions {
+      display: flex;
+      gap: 10px;
+    }
+    .card-actions .btn {
+      flex: 1;
+      justify-content: center;
+    }
+
+    /* Full Horizontal Lockup Card */
+    .lockup-panel {
+      background: #0F172A;
+      border: 2px solid #FF3B3F;
+      border-radius: 20px;
+      padding: 28px 32px;
+      margin-bottom: 48px;
+      box-shadow: 0 20px 50px rgba(220, 30, 40, 0.12);
+    }
+    .lockup-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .lockup-header h3 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .lockup-header p {
+      margin: 4px 0 0;
+      font-size: 13px;
+      color: #94a3b8;
+    }
+    .lockup-stage {
+      background: radial-gradient(circle at center, #1E293B 0%, #090F1D 100%);
+      border: 1px solid #334155;
+      border-radius: 16px;
+      padding: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Real-World Context Previews */
+    .context-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+    @media (max-width: 900px) {
+      .context-grid { grid-template-columns: 1fr; }
+    }
+    .context-card {
+      background: #0F172A;
+      border: 1px solid #1E293B;
+      border-radius: 16px;
+      padding: 20px;
+    }
+    .context-card h4 {
+      margin: 0 0 14px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #94a3b8;
+    }
+    .mock-email-header {
+      background: #ffffff;
+      border-radius: 10px;
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 3px solid #e2e8f0;
+    }
+    .mock-phone-home {
+      background: linear-gradient(145deg, #1e293b 0%, #0f172a 100%);
+      border-radius: 12px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+    .mock-navbar {
+      background: #070E1C;
+      border: 1px solid #1e293b;
+      border-radius: 10px;
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="topbar">
+    <div class="topbar-left">
+      <h1>MI LAW — Official Brand Logo Suite (3 Master SVGs)</h1>
+      <span>1. <code>mi-law-logo.svg</code> &bull; 2. <code>mi-law-icon-only.svg</code> &bull; 3. <code>mi-law-logo-horizontal.svg</code></span>
+    </div>
+    <div class="topbar-actions">
+      <a href="index.html" class="btn">&larr; Back to Email Previews</a>
+      <a href="mi-law-logo.svg" download="mi-law-logo.svg" class="btn btn-crimson">Download All 3 SVGs Below</a>
+    </div>
+  </div>
+
+  <div class="container">
+
+    <div class="hero-head">
+      <span class="eyebrow"><span class="eyebrow-dot"></span> Finalized Brand Identity • 60–30–10 Color Rule</span>
+      <h2>Your 3 Official MI LAW SVG Logos</h2>
+      <p>
+        All extra test files have been removed. Only your <strong>3 official SVG logos</strong> remain and are used across all 15 email templates and brand touchpoints.
+      </p>
+    </div>
+
+    <!-- 60-30-10 Color Proportion Bar -->
+    <div class="rule-bar">
+      <div class="r60">
+        <div>
+          <div class="pct">60% Dominant</div>
+          <div class="lbl">Crisp Platinum-White Surface (#FFFFFF &rarr; #F8FAFC)</div>
+        </div>
+        <span style="font-size:12px;font-weight:700;color:#475569;">Seal Canvas &amp; Clarity</span>
+      </div>
+      <div class="r30">
+        <div>
+          <div class="pct">30% Secondary</div>
+          <div class="lbl">Maity Midnight Navy (#0B1336)</div>
+        </div>
+      </div>
+      <div class="r10">
+        <div class="pct" style="font-size:16px;">10%</div>
+        <div class="lbl" style="font-size:9px;">Crimson</div>
+      </div>
+    </div>
+
+    <!-- SVG 1 & SVG 2 -->
+    <div class="concept-grid">
+
+      <!-- ==================== SVG 1: mi-law-logo.svg ==================== -->
+      <div class="concept-card featured">
+        <div class="stage">
+          <span class="stage-badge">SVG 01 &bull; mi-law-logo.svg</span>
+          <img src="mi-law-logo.svg" width="250" height="250" style="filter:drop-shadow(0 20px 40px rgba(0,0,0,0.45));" alt="mi-law-logo.svg" />
+        </div>
+        <div class="card-body">
+          <div>
+            <h3>1. Primary Vertical Crest (`mi-law-logo.svg`)</h3>
+            <p>
+              Full vertical emblem featuring the <strong>Laurel Wreath &amp; Scales of Justice Seal</strong>, bold <strong>MI LAW</strong> serif title tucked tightly beneath the wreath, and <strong>10% Crimson Red</strong> fulcrum &amp; underline.
+            </p>
+          </div>
+          <div class="card-actions">
+            <a href="mi-law-logo.svg" download="mi-law-logo.svg" class="btn">Download .SVG</a>
+            <button class="btn btn-crimson" onclick="downloadSvgAsPng('mi-law-logo.svg', 'mi-law-logo.png', 1024, 1024)">Download .PNG</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== SVG 2: mi-law-icon-only.svg ==================== -->
+      <div class="concept-card featured">
+        <div class="stage">
+          <span class="stage-badge">SVG 02 &bull; mi-law-icon-only.svg</span>
+          <img src="mi-law-icon-only.svg" width="250" height="250" style="filter:drop-shadow(0 20px 40px rgba(0,0,0,0.45));" alt="mi-law-icon-only.svg" />
+        </div>
+        <div class="card-body">
+          <div>
+            <h3>2. Square Seal App Icon (`mi-law-icon-only.svg`)</h3>
+            <p>
+              Standalone square <strong>Laurel Wreath &amp; Scales of Justice Seal</strong> without bottom text. Ideal for iOS/Android app icons, browser favicons, and compact square badges where <strong>MI LAW</strong> is written beside it.
+            </p>
+          </div>
+          <div class="card-actions">
+            <a href="mi-law-icon-only.svg" download="mi-law-icon-only.svg" class="btn">Download .SVG</a>
+            <button class="btn btn-crimson" onclick="downloadSvgAsPng('mi-law-icon-only.svg', 'mi-law-icon-only.png', 1024, 1024)">Download .PNG</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ==================== SVG 3: mi-law-logo-horizontal.svg ==================== -->
+    <div class="lockup-panel">
+      <div class="lockup-header">
+        <div>
+          <span style="display:inline-block;background:#DC1E28;color:#fff;font-size:10px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:6px;">SVG 03 &bull; mi-law-logo-horizontal.svg</span>
+          <h3>3. Horizontal Brand Lockup (`mi-law-logo-horizontal.svg`)</h3>
+          <p>Pairs the <strong>Laurel Wreath &amp; Scales Seal</strong> on the left with <strong>MI LAW &bull; LEGAL PRACTICE SUITE</strong> on the right — used in Email Headers &amp; Website Navbars</p>
+        </div>
+        <div style="display:flex;gap:10px;">
+          <a href="mi-law-logo-horizontal.svg" download="mi-law-logo-horizontal.svg" class="btn">Download .SVG</a>
+          <button class="btn btn-crimson" onclick="downloadSvgAsPng('mi-law-logo-horizontal.svg', 'mi-law-logo-horizontal.png', 1520, 400)">Download .PNG</button>
+        </div>
+      </div>
+
+      <div class="lockup-stage">
+        <img src="mi-law-logo-horizontal.svg" style="max-width:100%;height:130px;filter:drop-shadow(0 16px 36px rgba(0,0,0,0.45));" alt="mi-law-logo-horizontal.svg" />
+      </div>
+    </div>
+
+    <!-- Live Context Mockups Using the 3 SVGs -->
+    <div class="context-grid">
+      <div class="context-card">
+        <h4>1. Email Header (`mi-law-logo-horizontal.svg`)</h4>
+        <div class="mock-email-header">
+          <img src="mi-law-logo-horizontal.svg" height="48" alt="MI LAW" />
+          <span style="font-size:10px;font-weight:700;color:#0B1336;background:#f1f5f9;padding:4px 8px;border-radius:999px;">OFFICIAL</span>
+        </div>
+      </div>
+
+      <div class="context-card">
+        <h4>2. Mobile App Icon (`mi-law-icon-only.svg`)</h4>
+        <div class="mock-phone-home">
+          <img src="mi-law-icon-only.svg" width="68" height="68" style="filter:drop-shadow(0 10px 20px rgba(0,0,0,0.45));" alt="MI LAW App" />
+          <span style="font-size:11px;font-weight:600;color:#e2e8f0;">MI LAW</span>
+        </div>
+      </div>
+
+      <div class="context-card">
+        <h4>3. Login / Splash Crest (`mi-law-logo.svg`)</h4>
+        <div class="mock-navbar" style="justify-content:center;padding:12px;">
+          <img src="mi-law-logo.svg" height="74" alt="MI LAW Crest" />
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    function downloadSvgAsPng(svgFile, pngFilename, width, height) {
+      const img = new Image();
+      img.onload = function () {
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob(function (blob) {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = pngFilename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, "image/png");
+      };
+      img.src = svgFile;
+    }
+  </script>
+</body>
+</html>

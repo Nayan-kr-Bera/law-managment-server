@@ -1128,6 +1128,7 @@ const adminSupportController = {
         originalMessage: existing.message,
         originalSubject: existing.subject,
         adminName,
+        inquiryId: existing.id,
       });
 
       // 2. Prepare timestamped note

@@ -5,16 +5,18 @@ import {
   advocates,
   cases,
   clients,
-  courts,
-  tenants,
 } from "../db/schema/index.js";
-import users from "../db/schema/users.js";
 import { config } from "../config/index.js";
 import {
   createClientNotification,
   createNotification,
 } from "./notification.service.js";
 import { sendClientCaseNotificationEmail } from "./clientNotificationEmail.service.js";
+import {
+  buildMiLawEmailHtml,
+  escapeHtml,
+  getMiLawLogoAttachments,
+} from "./emailBrandLayout.js";
 
 const port = Number(process.env.SMTP_PORT) || 2525;
 const isSecure = port === 465 || process.env.SMTP_SRC === "true";
@@ -30,7 +32,7 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-interface AdvocateEmailPayload {
+export interface AdvocateEmailPayload {
   advocateName: string;
   advocateEmail: string;
   caseTitle: string;
@@ -45,7 +47,7 @@ interface AdvocateEmailPayload {
 }
 
 /**
- * Sends a high-polish HTML email to an advocate when assigned, unassigned, or reassigned to a case matter.
+ * Sends a modern MI Law HTML email to an advocate when assigned, unassigned, or reassigned to a case matter.
  */
 export const sendAdvocateCaseEmail = async ({
   advocateName,
@@ -56,38 +58,55 @@ export const sendAdvocateCaseEmail = async ({
   courtNumber,
   parties,
   nextHearingDate,
-  firmName = "Law Practice System",
+  firmName = "MI Law Chamber",
   action,
   transferredToOrFromName,
 }: AdvocateEmailPayload) => {
   try {
-    const isAssigned = action === "assigned";
     const isReassigned = action === "reassigned";
     const isUnassigned = action === "unassigned";
 
-    let subjectPrefix = "New Case Assigned";
-    let headerTag = "Case Matter Assignment";
-    let accentColor = "#2563eb"; // blue
-    let actionDescription = `You have been officially assigned as legal counsel to the following case matter by ${firmName}.`;
+    const badgeStyle = isUnassigned
+      ? "background-color:#fef2f2;color:#dc2626;border:1px solid #fecaca;"
+      : isReassigned
+        ? "background-color:#fffbeb;color:#d97706;border:1px solid #fde68a;"
+        : "background-color:#eef2ff;color:#4f46e5;border:1px solid #c7d2fe;";
 
-    if (isReassigned) {
-      subjectPrefix = "Case Matter Reassigned";
-      headerTag = "Case Matter Transfer";
-      accentColor = "#7c3aed"; // purple
-      actionDescription = `The legal matter below has been reassigned to you${
-        transferredToOrFromName ? ` from ${transferredToOrFromName}` : ""
-      }.`;
-    } else if (isUnassigned) {
-      subjectPrefix = "Notice: Case Matter Unassigned";
-      headerTag = "Matter Assignment Update";
-      accentColor = "#dc2626"; // red
-      actionDescription = `Please be advised that you have been unassigned from the case matter below${
-        transferredToOrFromName ? ` (transferred to ${transferredToOrFromName})` : ""
-      }.`;
-    }
+    const badgeLabel = isUnassigned
+      ? "Case Unassigned"
+      : isReassigned
+        ? "Case Reassigned to You"
+        : "New Case Assigned";
+
+    const heading = isUnassigned
+      ? "Removed from Case Roster"
+      : isReassigned
+        ? "Case File Reassigned to You"
+        : "New Case Assigned to Your Roster";
+
+    const subjectPrefix = isUnassigned
+      ? "Notice: Case Matter Unassigned"
+      : isReassigned
+        ? "Case Matter Reassigned"
+        : "New Case Assigned";
+
+    const actionDescription = isUnassigned
+      ? `Please be advised that you have been unassigned from the case matter below${
+          transferredToOrFromName
+            ? ` (transferred to <strong>${escapeHtml(transferredToOrFromName)}</strong>)`
+            : ""
+        }.`
+      : isReassigned
+        ? `The legal matter below has been reassigned to your active roster${
+            transferredToOrFromName
+              ? ` from <strong>${escapeHtml(transferredToOrFromName)}</strong>`
+              : ""
+          }.`
+        : `You have been officially assigned as legal counsel to the following case matter by <strong>${escapeHtml(firmName)}</strong>.`;
 
     const emailSubject = `${subjectPrefix}: ${caseNumber || caseTitle}`;
-    const portalUrl = config.ORIGIN_CLIENT || "http://localhost:5173";
+    const portalUrl =
+      config.ORIGIN_CLIENT || config.ORIGIN_FRONTEND || "http://localhost:5173";
 
     const formattedHearing = nextHearingDate
       ? new Date(nextHearingDate).toLocaleDateString("en-IN", {
@@ -97,137 +116,107 @@ export const sendAdvocateCaseEmail = async ({
         })
       : "Not yet scheduled";
 
-    const mailOptions = {
-      from: config.SMTP_MAIL || process.env.SMTP_MAIL,
-      to: advocateEmail,
-      subject: emailSubject,
-      html: `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>${emailSubject}</title>
-</head>
-<body style="margin: 0; padding: 0; background: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
-  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background: #f8fafc; padding: 32px 16px;">
-    <tr>
-      <td align="center">
-        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width: 600px; background: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
-          
-          <!-- Header Banner -->
-          <tr>
-            <td style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 30px 36px; text-align: left; border-bottom: 4px solid ${accentColor};">
-              <p style="margin: 0 0 6px; color: #94a3b8; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;">${headerTag}</p>
-              <h1 style="margin: 0; color: #ffffff; font-size: 20px; font-weight: 700;">${firmName}</h1>
-            </td>
-          </tr>
+    const badgeHtml = `<span style="display:inline-block;${badgeStyle}font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;text-transform:uppercase;letter-spacing:0.6px;">${badgeLabel}</span>`;
 
-          <!-- Main Content -->
-          <tr>
-            <td style="padding: 32px 36px;">
-              <p style="margin: 0 0 16px; font-size: 15px; color: #334155;">
-                Dear <strong>${advocateName}</strong>,
-              </p>
-              
-              <p style="margin: 0 0 24px; font-size: 14px; line-height: 1.6; color: #475569;">
-                ${actionDescription}
-              </p>
+    const bodyHtml = `
+      <p style="margin:0 0 12px;color:#0f172a;font-size:15px;">
+        Dear Adv. <strong>${escapeHtml(advocateName)}</strong>,
+      </p>
+      <p style="margin:0 0 24px;color:#475569;font-size:14px;line-height:1.6;">
+        ${actionDescription}
+      </p>
 
-              <!-- Matter Details Card -->
-              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 26px; overflow: hidden;">
-                <tr>
-                  <td colspan="2" style="background: #f1f5f9; padding: 12px 18px; border-bottom: 1px solid #e2e8f0;">
-                    <p style="margin: 0; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #475569;">Matter Details</p>
-                  </td>
-                </tr>
-                <tr>
-                  <td width="35%" style="padding: 10px 18px; font-size: 13px; color: #64748b; border-bottom: 1px solid #e2e8f0;">Case Title:</td>
-                  <td style="padding: 10px 18px; font-size: 13px; font-weight: 600; color: #0f172a; border-bottom: 1px solid #e2e8f0;">
-                    ${caseTitle}
-                  </td>
-                </tr>
-                ${
-                  caseNumber
-                    ? `
-                <tr>
-                  <td style="padding: 10px 18px; font-size: 13px; color: #64748b; border-bottom: 1px solid #e2e8f0;">Case Number:</td>
-                  <td style="padding: 10px 18px; font-size: 13px; font-weight: 600; color: #0f172a; border-bottom: 1px solid #e2e8f0;">${caseNumber}</td>
-                </tr>`
-                    : ""
-                }
-                <tr>
-                  <td style="padding: 10px 18px; font-size: 13px; color: #64748b; border-bottom: 1px solid #e2e8f0;">Court:</td>
-                  <td style="padding: 10px 18px; font-size: 13px; font-weight: 600; color: #0f172a; border-bottom: 1px solid #e2e8f0;">
-                    ${courtName || "Court of Record"}${courtNumber ? ` (Court No. ${courtNumber})` : ""}
-                  </td>
-                </tr>
-                ${
-                  parties
-                    ? `
-                <tr>
-                  <td style="padding: 10px 18px; font-size: 13px; color: #64748b; border-bottom: 1px solid #e2e8f0;">Parties:</td>
-                  <td style="padding: 10px 18px; font-size: 13px; font-weight: 600; color: #0f172a; border-bottom: 1px solid #e2e8f0;">${parties}</td>
-                </tr>`
-                    : ""
-                }
-                <tr>
-                  <td style="padding: 10px 18px; font-size: 13px; color: #64748b;">Next Hearing Date:</td>
-                  <td style="padding: 10px 18px; font-size: 13px; font-weight: 700; color: ${accentColor};">
-                    ${formattedHearing}
-                  </td>
-                </tr>
-              </table>
-
+      <!-- Case Dossier Card -->
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:24px;">
+        <tr>
+          <td style="padding:18px 20px;">
+            <p style="margin:0 0 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#64748b;">
+              Case Dossier Summary
+            </p>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="padding:7px 0;color:#64748b;font-size:13px;width:140px;border-bottom:1px solid #f1f5f9;">Case Title</td>
+                <td style="padding:7px 0;color:#0f172a;font-size:14px;font-weight:700;border-bottom:1px solid #f1f5f9;">${escapeHtml(caseTitle)}</td>
+              </tr>
               ${
-                !isUnassigned
-                  ? `
-              <!-- CTA Button -->
-              <div style="text-align: center; margin: 30px 0 15px;">
-                <a href="${portalUrl}/cases" style="display: inline-block; background: ${accentColor}; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 8px; font-size: 13px; font-weight: 600; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);">
-                  Open Case in Dashboard &rarr;
-                </a>
-              </div>`
+                caseNumber
+                  ? `<tr>
+                      <td style="padding:7px 0;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;">Case Number</td>
+                      <td style="padding:7px 0;color:#0f172a;font-size:13px;font-weight:700;font-family:monospace;border-bottom:1px solid #f1f5f9;">${escapeHtml(caseNumber)}</td>
+                    </tr>`
                   : ""
               }
+              <tr>
+                <td style="padding:7px 0;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;">Court / Forum</td>
+                <td style="padding:7px 0;color:#0f172a;font-size:13px;font-weight:600;border-bottom:1px solid #f1f5f9;">
+                  ${escapeHtml(courtName || "Court of Record")}${courtNumber ? ` (Court No. ${escapeHtml(courtNumber)})` : ""}
+                </td>
+              </tr>
+              ${
+                parties
+                  ? `<tr>
+                      <td style="padding:7px 0;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;">Parties</td>
+                      <td style="padding:7px 0;color:#0f172a;font-size:13px;font-weight:600;border-bottom:1px solid #f1f5f9;">${escapeHtml(parties)}</td>
+                    </tr>`
+                  : ""
+              }
+              <tr>
+                <td style="padding:7px 0;color:#64748b;font-size:13px;">Next Hearing Date</td>
+                <td style="padding:7px 0;color:#4f46e5;font-size:13px;font-weight:700;">${escapeHtml(formattedHearing)}</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
 
-              <p style="margin: 22px 0 0; font-size: 12px; line-height: 1.6; color: #64748b; text-align: center;">
-                Please coordinate with your chamber partner or managing clerk for any docket files or instructions.
-              </p>
-            </td>
-          </tr>
+      ${
+        !isUnassigned
+          ? `<div style="text-align:center;margin:28px 0 12px;">
+              <a href="${escapeHtml(portalUrl.replace(/\/$/, ""))}/cases" style="display:inline-block;background-color:#0f172a;color:#ffffff;text-decoration:none;padding:13px 32px;border-radius:8px;font-size:14px;font-weight:600;">
+                Open Case in Dashboard &rarr;
+              </a>
+            </div>`
+          : ""
+      }
 
-          <!-- Footer -->
-          <tr>
-            <td style="padding: 20px 36px; background: #f8fafc; border-top: 1px solid #e2e8f0; text-align: center;">
-              <p style="margin: 0; font-size: 11px; color: #94a3b8;">
-                This notice was automatically dispatched by ${firmName}. Confidential & Legal Privileged.
-              </p>
-            </td>
-          </tr>
+      <p style="margin:18px 0 0;font-size:12px;line-height:1.6;color:#64748b;text-align:center;">
+        Please coordinate with your chamber partner or managing clerk for any docket files or instructions.
+      </p>
+    `;
 
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-`,
-    };
+    const html = buildMiLawEmailHtml({
+      documentTitle: emailSubject,
+      brandSubtitle: firmName,
+      badgeHtml,
+      heading,
+      subheading: `${escapeHtml(caseNumber || "Matter")} — ${escapeHtml(caseTitle)}`,
+      bodyHtml,
+      footerReason: `Automated Case Roster Notification from ${escapeHtml(firmName)}`,
+      firmName,
+    });
 
-    const info = await transporter.sendMail(mailOptions);
+    const info = await transporter.sendMail({
+      from: `"${firmName || config.APP_NAME || "MI Law"}" <${config.SMTP_MAIL || process.env.SMTP_MAIL}>`,
+      to: advocateEmail,
+      subject: emailSubject,
+      html,
+      attachments: getMiLawLogoAttachments(),
+    });
+
     console.log(
-      `✅ [SMTP] Advocate case notification email sent to ${advocateEmail}. MessageId: ${info.messageId}`
+      `✅ [SMTP] Advocate case notification email sent to ${advocateEmail}. MessageId: ${info.messageId}`,
     );
     return { success: true };
   } catch (error) {
     console.error(
       `❌ [SMTP] Advocate case notification email failed for ${advocateEmail}:`,
-      error
+      error,
     );
     return { success: false, error };
   }
 };
+
+export const sendAdvocateCaseAssignmentEmail = sendAdvocateCaseEmail;
 
 /**
  * 1. Notify Advocates when assigned to a newly created case
@@ -235,12 +224,11 @@ export const sendAdvocateCaseEmail = async ({
 export const notifyAdvocatesOnCaseCreation = async (
   caseId: string,
   tenantId: string,
-  advocateIds: string[]
+  advocateIds: string[],
 ) => {
   try {
     if (!advocateIds || advocateIds.length === 0) return;
 
-    // Fetch case info
     const caseRecord = await db.query.cases.findFirst({
       where: and(eq(cases.id, caseId), eq(cases.tenantId, tenantId)),
       with: {
@@ -251,12 +239,11 @@ export const notifyAdvocatesOnCaseCreation = async (
 
     if (!caseRecord) return;
 
-    const firmName = caseRecord.tenant?.name || "Law Chamber";
+    const firmName = caseRecord.tenant?.name || "MI Law Chamber";
     const parties = [caseRecord.firstParty, caseRecord.oppositeParty]
       .filter(Boolean)
       .join(" vs ");
 
-    // Fetch advocates and their underlying users
     for (const advId of advocateIds) {
       const adv = await db.query.advocates.findFirst({
         where: eq(advocates.id, advId),
@@ -267,7 +254,6 @@ export const notifyAdvocatesOnCaseCreation = async (
 
       if (!adv?.user) continue;
 
-      // 1. In-app notification
       await createNotification({
         tenantId,
         officeId: caseRecord.officeId,
@@ -279,7 +265,6 @@ export const notifyAdvocatesOnCaseCreation = async (
         type: "case",
       });
 
-      // 2. Email alert
       if (adv.user.email) {
         await sendAdvocateCaseEmail({
           advocateName: adv.user.name,
@@ -306,7 +291,7 @@ export const notifyAdvocatesOnCaseCreation = async (
 export const notifyClientsOnCaseCreation = async (
   caseId: string,
   tenantId: string,
-  clientIds: string[]
+  clientIds: string[],
 ) => {
   try {
     if (!clientIds || clientIds.length === 0) return;
@@ -321,7 +306,7 @@ export const notifyClientsOnCaseCreation = async (
 
     if (!caseRecord) return;
 
-    const firmName = caseRecord.tenant?.name || "Law Chamber";
+    const firmName = caseRecord.tenant?.name || "MI Law Chamber";
 
     for (const cid of clientIds) {
       const client = await db.query.clients.findFirst({
@@ -335,7 +320,6 @@ export const notifyClientsOnCaseCreation = async (
         `${client.firstName} ${client.lastName || ""}`.trim() ||
         "Client";
 
-      // 1. Client Portal notification queue
       const caseUrl = `/cases/${caseRecord.id}`;
       await createClientNotification({
         tenantId,
@@ -362,7 +346,6 @@ export const notifyClientsOnCaseCreation = async (
         },
       });
 
-      // 2. Email alert
       if (client.email) {
         await sendClientCaseNotificationEmail({
           clientName: clientDisplayName,
@@ -392,7 +375,7 @@ export const notifyClientsOnCaseCreation = async (
 export const notifyAdvocateCasesAssigned = async (
   advocateId: string,
   tenantId: string,
-  caseIds: string[]
+  caseIds: string[],
 ) => {
   try {
     if (!caseIds || caseIds.length === 0) return;
@@ -410,10 +393,9 @@ export const notifyAdvocateCasesAssigned = async (
     });
 
     for (const c of caseList) {
-      const firmName = c.tenant?.name || "Law Chamber";
+      const firmName = c.tenant?.name || "MI Law Chamber";
       const parties = [c.firstParty, c.oppositeParty].filter(Boolean).join(" vs ");
 
-      // In-app notification
       await createNotification({
         tenantId,
         officeId: c.officeId,
@@ -425,7 +407,6 @@ export const notifyAdvocateCasesAssigned = async (
         type: "case",
       });
 
-      // Email alert
       if (adv.user.email) {
         await sendAdvocateCaseEmail({
           advocateName: adv.user.name,
@@ -452,7 +433,7 @@ export const notifyAdvocateCasesAssigned = async (
 export const notifyAdvocateCasesRevoked = async (
   advocateId: string,
   tenantId: string,
-  caseIds: string[]
+  caseIds: string[],
 ) => {
   try {
     if (!caseIds || caseIds.length === 0) return;
@@ -470,10 +451,9 @@ export const notifyAdvocateCasesRevoked = async (
     });
 
     for (const c of caseList) {
-      const firmName = c.tenant?.name || "Law Chamber";
+      const firmName = c.tenant?.name || "MI Law Chamber";
       const parties = [c.firstParty, c.oppositeParty].filter(Boolean).join(" vs ");
 
-      // In-app notification
       await createNotification({
         tenantId,
         officeId: c.officeId,
@@ -485,7 +465,6 @@ export const notifyAdvocateCasesRevoked = async (
         type: "case",
       });
 
-      // Email alert
       if (adv.user.email) {
         await sendAdvocateCaseEmail({
           advocateName: adv.user.name,
@@ -513,7 +492,7 @@ export const notifyCasesReassigned = async (
   fromAdvocateId: string,
   toAdvocateId: string,
   tenantId: string,
-  caseIds: string[]
+  caseIds: string[],
 ) => {
   try {
     if (!caseIds || caseIds.length === 0) return;
@@ -538,10 +517,9 @@ export const notifyCasesReassigned = async (
     const fromAdvName = fromAdv?.user?.name || "previous counsel";
 
     for (const c of caseList) {
-      const firmName = c.tenant?.name || "Law Chamber";
+      const firmName = c.tenant?.name || "MI Law Chamber";
       const parties = [c.firstParty, c.oppositeParty].filter(Boolean).join(" vs ");
 
-      // Alert the previous advocate (unassigned)
       if (fromAdv?.user) {
         await createNotification({
           tenantId,
@@ -569,7 +547,6 @@ export const notifyCasesReassigned = async (
         }
       }
 
-      // Alert the new advocate (reassigned to them)
       if (toAdv?.user) {
         await createNotification({
           tenantId,
@@ -608,7 +585,7 @@ export const notifyCasesReassigned = async (
 export const notifyClientAddedToCase = async (
   caseId: string,
   clientId: string,
-  tenantId: string
+  tenantId: string,
 ) => {
   try {
     await notifyClientsOnCaseCreation(caseId, tenantId, [clientId]);
@@ -623,7 +600,7 @@ export const notifyClientAddedToCase = async (
 export const notifyClientRemovedFromCase = async (
   caseId: string,
   clientId: string,
-  tenantId: string
+  tenantId: string,
 ) => {
   try {
     const [caseRecord, client] = await Promise.all([
@@ -638,13 +615,12 @@ export const notifyClientRemovedFromCase = async (
 
     if (!caseRecord || !client) return;
 
-    const firmName = caseRecord.tenant?.name || "Law Chamber";
+    const firmName = caseRecord.tenant?.name || "MI Law Chamber";
     const clientDisplayName =
       client.companyName ||
       `${client.firstName} ${client.lastName || ""}`.trim() ||
       "Client";
 
-    // Portal notification
     await createClientNotification({
       tenantId,
       officeId: caseRecord.officeId,
@@ -667,7 +643,6 @@ export const notifyClientRemovedFromCase = async (
       },
     });
 
-    // Email
     if (client.email) {
       await sendClientCaseNotificationEmail({
         clientName: clientDisplayName,

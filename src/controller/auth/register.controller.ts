@@ -220,6 +220,8 @@ const registerController = {
       await emailOtpService({
         id: result.user.id,
         email: result.user.email,
+        userName: result.user.name,
+        purpose: "law firm registration",
       });
 
       // 6. RESPONSE

@@ -1,21 +1,12 @@
 import nodemailer from "nodemailer";
 import { config } from "../config/index.js";
+import {
+  buildMiLawEmailHtml,
+  escapeHtml,
+  getMiLawLogoAttachments,
+} from "./emailBrandLayout.js";
 
-const port = Number(process.env.SMTP_PORT) || 2525;
-const isSecure = port === 465 || process.env.SMTP_SRC === "true";
-
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || "mail.smtp2go.com",
-  port,
-  secure: isSecure,
-  ...(isSecure ? {} : { requireTLS: true }),
-  auth: {
-    user: process.env.SMTP_USER || process.env.SMTP_MAIL,
-    pass: process.env.SMTP_PASSWORD || process.env.SMTP_PASS,
-  },
-});
-
-export interface AdminWelcomeEmailParams {
+interface AdminWelcomeEmailParams {
   adminName: string;
   adminEmail: string;
   password: string;
@@ -25,160 +16,167 @@ export interface AdminWelcomeEmailParams {
   loginUrl?: string;
 }
 
+const createTransporter = () => {
+  const port = Number(config.SMTP_PORT) || 587;
+  const secure =
+    String(config.SMTP_SRC).toLowerCase() === "true" || port === 465;
+
+  return nodemailer.createTransport({
+    host: config.SMTP_HOST,
+    port,
+    secure,
+    auth: {
+      user: config.SMTP_MAIL,
+      pass: config.SMTP_PASS,
+    },
+  });
+};
+
 export const sendAdminWelcomeEmail = async ({
   adminName,
   adminEmail,
   password,
   roleName,
-  roleSlug,
+  roleSlug = "admin",
   grantedPermissions = [],
   loginUrl,
-}: AdminWelcomeEmailParams): Promise<boolean> => {
+}: AdminWelcomeEmailParams): Promise<{ success: boolean; error?: string }> => {
   try {
-    const adminConsoleUrl =
-      loginUrl || config.ORIGIN_ADMIN || "https://law-management-admin.vercel.app";
+    if (!config.SMTP_HOST || !config.SMTP_MAIL || !config.SMTP_PASS) {
+      console.warn(
+        "[AdminWelcomeEmail] SMTP configuration missing. Skipping email dispatch.",
+      );
+      return { success: false, error: "SMTP not configured" };
+    }
 
-    const permissionHighlights =
-      grantedPermissions.includes("*") || roleSlug === "super_admin"
-        ? "Full Master Administrative Control (Unrestricted)"
-        : grantedPermissions.length > 0
-          ? `${grantedPermissions.length} granular operational permissions granted`
-          : "Standard platform management access";
+    const transporter = createTransporter();
+    const portalUrl =
+      loginUrl ||
+      (config.ORIGIN_ADMIN
+        ? `${config.ORIGIN_ADMIN.replace(/\/$/, "")}/login`
+        : "http://localhost:5175/login");
 
-    const mailOptions = {
-      from: `"${config.APP_NAME || "Legal Management Platform"}" <${config.SMTP_MAIL}>`,
+    const isSuperAdmin =
+      roleSlug === "super-admin" || roleSlug === "super_admin";
+
+    const permissionsChipsHtml = isSuperAdmin
+      ? `<div style="display:inline-block;padding:8px 14px;background:#fef3c7;border:1px solid #fde68a;border-radius:8px;color:#92400e;font-size:13px;font-weight:700;">
+           ★ Unrestricted Super Admin Access (All Modules &amp; System Settings)
+         </div>`
+      : grantedPermissions.length > 0
+        ? grantedPermissions
+            .map(
+              (perm) =>
+                `<span style="display:inline-block;margin:3px 4px 3px 0;padding:4px 10px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;color:#1e293b;font-size:12px;font-weight:600;font-family:monospace;">${escapeHtml(perm)}</span>`,
+            )
+            .join("")
+        : `<span style="color:#64748b;font-size:13px;">Standard Read-Only Dashboard Access</span>`;
+
+    const badgeHtml = `<span style="display:inline-block;background-color:#eef2ff;color:#4f46e5;font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;text-transform:uppercase;letter-spacing:0.6px;border:1px solid #c7d2fe;">Admin Portal Provisioned</span>`;
+
+    const bodyHtml = `
+      <p style="margin:0 0 12px;color:#0f172a;font-size:15px;">
+        Dear <strong>${escapeHtml(adminName)}</strong>,
+      </p>
+      <p style="margin:0 0 24px;color:#475569;font-size:14px;line-height:1.6;">
+        You have been appointed to the <strong>MI Law Platform Administration Team</strong>. Your account is now active and configured with the role and module permissions detailed below.
+      </p>
+
+      <!-- Credentials Box -->
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:24px;">
+        <tr>
+          <td style="padding:18px 20px;">
+            <p style="margin:0 0 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#64748b;">
+              Your Login Credentials
+            </p>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="padding:7px 0;color:#64748b;font-size:13px;width:130px;border-bottom:1px solid #f1f5f9;">Portal URL</td>
+                <td style="padding:7px 0;color:#0f172a;font-size:13px;font-weight:600;border-bottom:1px solid #f1f5f9;">
+                  <a href="${escapeHtml(portalUrl)}" style="color:#4f46e5;text-decoration:none;">${escapeHtml(portalUrl)}</a>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:7px 0;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;">Email Address</td>
+                <td style="padding:7px 0;color:#0f172a;font-size:13px;font-weight:700;border-bottom:1px solid #f1f5f9;">${escapeHtml(adminEmail)}</td>
+              </tr>
+              <tr>
+                <td style="padding:10px 0 4px;color:#64748b;font-size:13px;">Temp Password</td>
+                <td style="padding:10px 0 4px;">
+                  <code style="background:#0f172a;color:#f8fafc;padding:5px 12px;border-radius:6px;font-size:14px;font-weight:700;letter-spacing:0.6px;font-family:'Courier New',monospace;">${escapeHtml(password)}</code>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+
+      <!-- Assigned Role & Access Scope -->
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:28px;">
+        <tr>
+          <td style="padding:18px 20px;">
+            <p style="margin:0 0 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#64748b;">
+              Assigned Role &amp; Access Scope
+            </p>
+            <div style="margin-bottom:14px;">
+              <span style="font-size:13px;color:#64748b;margin-right:8px;">Assigned Role:</span>
+              <span style="display:inline-block;padding:4px 12px;background:#eef2ff;color:#4f46e5;border:1px solid #c7d2fe;border-radius:999px;font-size:13px;font-weight:700;">
+                ${escapeHtml(roleName)} (${escapeHtml(roleSlug)})
+              </span>
+            </div>
+            <div>
+              <p style="margin:0 0 8px;font-size:12px;color:#64748b;font-weight:600;">Granted Permission Keys (${isSuperAdmin ? "All" : grantedPermissions.length}):</p>
+              <div style="line-height:1.8;">
+                ${permissionsChipsHtml}
+              </div>
+            </div>
+          </td>
+        </tr>
+      </table>
+
+      <!-- CTA Button -->
+      <div style="text-align:center;margin:28px 0;">
+        <a href="${escapeHtml(portalUrl)}" style="display:inline-block;background-color:#0f172a;color:#ffffff;text-decoration:none;padding:13px 32px;border-radius:8px;font-size:14px;font-weight:600;letter-spacing:0.2px;">
+          Sign In to Admin Console &rarr;
+        </a>
+      </div>
+
+      <!-- Security Warning -->
+      <div style="background:#fffbeb;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:6px;">
+        <p style="margin:0;color:#92400e;font-size:12px;line-height:1.5;">
+          <strong>Security Notice:</strong> Please sign in and update your password immediately after your first login. Never share your administrative credentials with anyone.
+        </p>
+      </div>
+    `;
+
+    const htmlContent = buildMiLawEmailHtml({
+      documentTitle: "Welcome to MI Law Admin Console",
+      brandSubtitle: "Platform Governance & Administration",
+      badgeHtml,
+      heading: "Welcome to the Admin Console",
+      subheading: "Your administrative account and role permissions are ready",
+      bodyHtml,
+      footerReason: "Automated Administrative Provisioning Notification",
+    });
+
+    await transporter.sendMail({
+      from: `"MI Law Platform Admin" <${config.SMTP_MAIL}>`,
       to: adminEmail,
-      subject: `Platform Administrator Account Provisioned - ${roleName}`,
-      html: `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Admin Credentials</title>
-</head>
-<body style="margin:0; padding:0; background:#0f172a; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color:#334155;">
-  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0f172a; padding:40px 15px;">
-    <tr>
-      <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:600px; background:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.2);">
-          
-          <!-- HEADER -->
-          <tr>
-            <td style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding:32px 36px; text-align:left; border-bottom:3px solid #3b82f6;">
-              <div style="display:inline-block; padding:4px 10px; background:rgba(59, 130, 246, 0.2); border:1px solid rgba(59, 130, 246, 0.4); border-radius:6px; color:#93c5fd; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:12px;">
-                Platform Operations
-              </div>
-              <h1 style="margin:0; color:#ffffff; font-size:22px; font-weight:700; letter-spacing:-0.02em;">
-                Administrative Access Granted
-              </h1>
-              <p style="margin:6px 0 0; color:#94a3b8; font-size:13px;">
-                Your platform operator credentials for the Admin Console
-              </p>
-            </td>
-          </tr>
+      subject: `Welcome to MI Law Admin Console — Assigned Role: ${roleName}`,
+      html: htmlContent,
+      attachments: getMiLawLogoAttachments(),
+    });
 
-          <!-- MAIN CONTENT -->
-          <tr>
-            <td style="padding:36px 36px 24px;">
-              <p style="margin:0 0 16px; font-size:15px; color:#1e293b; line-height:1.6;">
-                Hello <strong>${adminName}</strong>,
-              </p>
-              <p style="margin:0 0 24px; font-size:14px; color:#475569; line-height:1.6;">
-                You have been provisioned as an administrative operator on the platform. Below are your official system credentials to log into the Admin Console.
-              </p>
-
-              <!-- CREDENTIALS CARD -->
-              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; margin-bottom:28px;">
-                <tr>
-                  <td style="padding:20px 24px;">
-                    <table width="100%" cellpadding="6" cellspacing="0" border="0">
-                      <tr>
-                        <td width="35%" style="font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; padding-left:0;">
-                          Portal Role
-                        </td>
-                        <td style="font-size:13px; font-weight:700; color:#0f172a;">
-                          <span style="display:inline-block; padding:3px 8px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:4px; color:#1d4ed8; font-size:12px;">
-                            ${roleName}
-                          </span>
-                        </td>
-                      </tr>
-                      <tr>
-                        <td width="35%" style="font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; padding-left:0;">
-                          Login Email
-                        </td>
-                        <td style="font-size:14px; font-weight:600; color:#0f172a; font-family:monospace;">
-                          ${adminEmail}
-                        </td>
-                      </tr>
-                      <tr>
-                        <td width="35%" style="font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; padding-left:0;">
-                          Temporary Password
-                        </td>
-                        <td style="font-size:14px; font-weight:700; color:#b91c1c; font-family:monospace; background:#fef2f2; padding:6px 10px; border-radius:6px; border:1px dashed #fca5a5;">
-                          ${password}
-                        </td>
-                      </tr>
-                      <tr>
-                        <td width="35%" style="font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; padding-left:0;">
-                          Scope Scope
-                        </td>
-                        <td style="font-size:12px; color:#475569;">
-                          ${permissionHighlights}
-                        </td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-              </table>
-
-              <!-- CTA BUTTON -->
-              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
-                <tr>
-                  <td align="center">
-                    <a href="${adminConsoleUrl}" target="_blank" style="display:inline-block; background:#0f172a; color:#ffffff; font-size:14px; font-weight:600; text-decoration:none; padding:14px 32px; border-radius:8px; box-shadow:0 4px 6px -1px rgba(0, 0, 0, 0.1);">
-                      Access Admin Console &rarr;
-                    </a>
-                  </td>
-                </tr>
-              </table>
-
-              <!-- SECURITY WARNING -->
-              <div style="background:#fffbeb; border:1px solid #fef3c7; border-left:4px solid #f59e0b; padding:14px 16px; border-radius:6px; margin-bottom:20px;">
-                <p style="margin:0; font-size:12px; color:#92400e; line-height:1.5;">
-                  <strong>Important Security Notice:</strong> This account has elevated platform administrative privileges. You must never share these credentials with unauthorized individuals. For optimal security, please update your password immediately upon first sign-in.
-                </p>
-              </div>
-
-              <p style="margin:0; font-size:12px; color:#94a3b8; line-height:1.5;">
-                Direct URL: <a href="${adminConsoleUrl}" style="color:#2563eb; text-decoration:none;">${adminConsoleUrl}</a>
-              </p>
-            </td>
-          </tr>
-
-          <!-- FOOTER -->
-          <tr>
-            <td style="background:#f8fafc; padding:20px 36px; border-top:1px solid #e2e8f0; text-align:center;">
-              <p style="margin:0; font-size:11px; color:#94a3b8;">
-                This is an automated system notification from your Platform Security Administration. Please do not reply directly to this email.
-              </p>
-            </td>
-          </tr>
-
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-      `,
-    };
-
-    const info = await transporter.sendMail(mailOptions);
-    console.log(`✅ [Admin Email] Welcome email dispatched to ${adminEmail} (MsgId: ${info.messageId})`);
-    return true;
-  } catch (error) {
-    console.error("❌ [Admin Email] Failed to send administrator welcome email:", error);
-    return false;
+    return { success: true };
+  } catch (err: unknown) {
+    const errorMessage =
+      err instanceof Error ? err.message : "Unknown email dispatch error";
+    console.error(
+      "[AdminWelcomeEmail] Failed to send admin welcome email:",
+      errorMessage,
+    );
+    return { success: false, error: errorMessage };
   }
 };
+
+export default sendAdminWelcomeEmail;

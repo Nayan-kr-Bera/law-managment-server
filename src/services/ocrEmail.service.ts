@@ -1,23 +1,32 @@
 import nodemailer from "nodemailer";
 import { config } from "../config/index.js";
+import {
+  buildMiLawEmailHtml,
+  escapeHtml,
+  getMiLawLogoAttachments,
+} from "./emailBrandLayout.js";
 
-const port = Number(process.env.SMTP_PORT) || 2525;
-const isSecure = port === 465 || process.env.SMTP_SRC === "true";
+const createTransporter = () => {
+  const port = Number(config.SMTP_PORT) || 2525;
+  const secure = config.SMTP_SRC === "true" || port === 465;
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || "mail.smtp2go.com",
-  port,
-  secure: isSecure,
-  ...(isSecure ? {} : { requireTLS: true }),
-  auth: {
-    user: process.env.SMTP_USER || process.env.SMTP_MAIL,
-    pass: process.env.SMTP_PASSWORD || process.env.SMTP_PASS,
-  },
-});
+  return nodemailer.createTransport({
+    host: config.SMTP_HOST,
+    port,
+    secure,
+    auth: {
+      user: config.SMTP_MAIL,
+      pass: config.SMTP_PASS,
+    },
+    tls: {
+      rejectUnauthorized: false,
+    },
+  });
+};
 
 export interface OcrCompletionEmailData {
   toEmail: string;
-  userName?: string;
+  userName: string;
   fileName: string;
   pageCount: number;
   totalPages?: number;
@@ -28,177 +37,246 @@ export interface OcrCompletionEmailData {
   previewText?: string;
   documentUrl?: string;
   warning?: string;
+  firmName?: string;
 }
 
-export interface OcrFailureEmailData {
-  toEmail: string;
-  userName?: string;
-  fileName: string;
-  errorReason: string;
-}
-
-export const ocrEmailService = {
+class OcrEmailService {
   /**
-   * Send notification email when OCR finishes successfully
+   * Sends an email notification when background OCR processing finishes successfully
    */
-  async sendOcrSuccessEmail(data: OcrCompletionEmailData): Promise<boolean> {
-    const {
-      toEmail,
-      userName = "Advocate",
-      fileName,
-      pageCount,
-      totalPages,
-      pagesSkipped = 0,
-      charCount,
-      monthlyPagesUsed,
-      monthlyPagesLimit,
-      previewText = "",
-      warning,
-    } = data;
+  public async sendOcrSuccessEmail(
+    data: OcrCompletionEmailData,
+  ): Promise<boolean> {
+    if (!config.SMTP_MAIL || !config.SMTP_PASS) {
+      console.warn(
+        "[OcrEmailService] SMTP credentials not configured. Skipping OCR email.",
+      );
+      return false;
+    }
 
-    if (!toEmail) return false;
+    try {
+      const transporter = createTransporter();
+      const {
+        toEmail,
+        userName,
+        fileName,
+        pageCount,
+        totalPages,
+        pagesSkipped = 0,
+        charCount,
+        monthlyPagesUsed,
+        monthlyPagesLimit,
+        previewText,
+        documentUrl,
+        warning,
+        firmName,
+      } = data;
 
-    const remainingPages = Math.max(0, monthlyPagesLimit - monthlyPagesUsed);
-    const snippet = previewText ? previewText.slice(0, 240) + "..." : "Text extracted and indexed into database.";
+      const isUnlimited = monthlyPagesLimit === -1;
+      const quotaDisplay = isUnlimited
+        ? `${monthlyPagesUsed} pages used (Unlimited Plan)`
+        : `${monthlyPagesUsed} / ${monthlyPagesLimit} pages (${Math.min(
+            100,
+            Math.round((monthlyPagesUsed / monthlyPagesLimit) * 100),
+          )}%)`;
 
-    const warningBannerHtml =
-      pagesSkipped > 0 || warning
+      const pagesDisplay =
+        totalPages && totalPages > pageCount
+          ? `${pageCount} of ${totalPages} page(s) (${pagesSkipped} skipped)`
+          : `${pageCount} page(s)`;
+
+      const snippet = previewText
+        ? previewText.slice(0, 380).trim() +
+          (previewText.length > 380 ? "..." : "")
+        : "Text extracted and indexed successfully.";
+
+      const workspaceDocsUrl =
+        documentUrl ||
+        `${(config.ORIGIN_CLIENT || config.ORIGIN_FRONTEND || "http://localhost:5173").replace(/\/$/, "")}/documents`;
+
+      const isPartial = Boolean(warning || pagesSkipped > 0);
+      const badgeHtml = isPartial
+        ? `<span style="display:inline-block;background-color:#fffbeb;color:#d97706;font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;text-transform:uppercase;letter-spacing:0.6px;border:1px solid #fde68a;">⚠ Partial OCR Extraction</span>`
+        : `<span style="display:inline-block;background-color:#ecfdf5;color:#047857;font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;text-transform:uppercase;letter-spacing:0.6px;border:1px solid #a7f3d0;">✓ OCR Extraction Complete</span>`;
+
+      const warningBannerHtml = isPartial
         ? `
-      <div style="background-color: #fffaf0; border-left: 4px solid #dd6b20; border-radius: 4px; padding: 14px 16px; margin: 18px 0; color: #7b341e;">
-        <p style="margin: 0; font-size: 13px; font-weight: 600;">⚠️ Partial Indexing Notice</p>
-        <p style="margin: 6px 0 0 0; font-size: 12px; line-height: 1.5;">
-          ${
-            warning ||
-            `Document contains ${totalPages || pageCount + pagesSkipped} pages. The first ${pageCount} pages were indexed and are fully searchable. The last ${pagesSkipped} pages were skipped because your monthly quota limit was reached.`
-          }
-        </p>
-      </div>`
+        <div style="background:#fffbeb;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:6px;margin-bottom:20px;">
+          <p style="margin:0;color:#92400e;font-size:13px;line-height:1.5;">
+            <strong>Partial Extraction Notice:</strong> ${escapeHtml(
+              warning ||
+                `Processed first ${pageCount} of ${totalPages} pages. Remaining ${pagesSkipped} page(s) were skipped due to OCR credit limit.`,
+            )}
+          </p>
+        </div>`
         : "";
 
-    const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>OCR Indexing Complete</title>
-</head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f7f6f2; margin: 0; padding: 24px; color: #2c2b29;">
-  <div style="max-width: 580px; margin: 0 auto; background: #ffffff; border-radius: 8px; border: 1px solid #e5dfd5; overflow: hidden; box-shadow: 0 4px 14px rgba(0,0,0,0.05);">
-    <div style="background-color: #1a202c; padding: 20px 24px; color: #ffffff;">
-      <h2 style="margin: 0; font-size: 18px; font-weight: 600; letter-spacing: 0.5px;">⚖️ Digital Briefcase — OCR Indexing Complete</h2>
-    </div>
-    
-    <div style="padding: 24px;">
-      <p style="margin-top: 0; font-size: 14px;">Hello <strong>${userName}</strong>,</p>
-      <p style="font-size: 13px; line-height: 1.6; color: #4a5568;">
-        Your document <strong>${fileName}</strong> has been processed through the Hindi &amp; English OCR indexing pipeline.
-      </p>
+      const bodyHtml = `
+        <p style="margin:0 0 12px;color:#0f172a;font-size:15px;">
+          Hello <strong>${escapeHtml(userName || "Advocate")}</strong>,
+        </p>
+        <p style="margin:0 0 20px;color:#475569;font-size:14px;line-height:1.6;">
+          Your legal document has finished background AI OCR processing and is now searchable inside your <strong>MI Law Document Library</strong>.
+        </p>
 
-      ${warningBannerHtml}
+        ${warningBannerHtml}
 
-      <div style="background-color: #fdfbf7; border: 1px solid #e8e2d7; border-radius: 6px; padding: 16px; margin: 20px 0;">
-        <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+        <!-- Extraction Metrics Table -->
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:20px;">
           <tr>
-            <td style="padding: 6px 0; color: #718096; width: 45%;">Document:</td>
-            <td style="padding: 6px 0; font-weight: 600; color: #2d3748;">${fileName}</td>
-          </tr>
-          <tr>
-            <td style="padding: 6px 0; color: #718096;">Pages Indexed:</td>
-            <td style="padding: 6px 0; font-weight: 600; color: #2b6cb0;">
-              ${pageCount} page${pageCount > 1 ? "s" : ""} ${totalPages && totalPages > pageCount ? `(of ${totalPages} total)` : ""}
-            </td>
-          </tr>
-          ${
-            pagesSkipped > 0
-              ? `<tr>
-            <td style="padding: 6px 0; color: #dd6b20;">Pages Skipped:</td>
-            <td style="padding: 6px 0; font-weight: 600; color: #dd6b20;">${pagesSkipped} pages</td>
-          </tr>`
-              : ""
-          }
-          <tr>
-            <td style="padding: 6px 0; color: #718096;">Extracted Characters:</td>
-            <td style="padding: 6px 0; font-weight: 600; color: #2d3748;">${charCount.toLocaleString()} chars</td>
-          </tr>
-          <tr>
-            <td style="padding: 6px 0; color: #718096;">Monthly Quota Usage:</td>
-            <td style="padding: 6px 0; font-weight: 600; color: ${monthlyPagesUsed >= monthlyPagesLimit ? "#e53e3e" : "#38a169"};">
-              ${monthlyPagesUsed} / ${monthlyPagesLimit} pages used (${remainingPages} remaining)
+            <td style="padding:18px 20px;">
+              <p style="margin:0 0 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#64748b;">
+                OCR Extraction Summary
+              </p>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="padding:7px 0;color:#64748b;font-size:13px;width:155px;border-bottom:1px solid #f1f5f9;">Document Name</td>
+                  <td style="padding:7px 0;color:#0f172a;font-size:13px;font-weight:700;border-bottom:1px solid #f1f5f9;">${escapeHtml(fileName)}</td>
+                </tr>
+                <tr>
+                  <td style="padding:7px 0;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;">Pages Processed</td>
+                  <td style="padding:7px 0;color:#047857;font-size:13px;font-weight:700;border-bottom:1px solid #f1f5f9;">${escapeHtml(pagesDisplay)}</td>
+                </tr>
+                <tr>
+                  <td style="padding:7px 0;color:#64748b;font-size:13px;border-bottom:1px solid #f1f5f9;">Characters Indexed</td>
+                  <td style="padding:7px 0;color:#0f172a;font-size:13px;font-weight:600;border-bottom:1px solid #f1f5f9;">${charCount.toLocaleString()} characters</td>
+                </tr>
+                <tr>
+                  <td style="padding:7px 0;color:#64748b;font-size:13px;">Monthly Quota Usage</td>
+                  <td style="padding:7px 0;color:#4f46e5;font-size:13px;font-weight:700;">${escapeHtml(quotaDisplay)}</td>
+                </tr>
+              </table>
             </td>
           </tr>
         </table>
-      </div>
 
-      <div style="margin-top: 16px;">
-        <p style="font-size: 12px; font-weight: 600; margin-bottom: 6px; color: #718096; text-transform: uppercase; letter-spacing: 0.5px;">Extracted Text Preview:</p>
-        <div style="background-color: #f7fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 12px; font-family: monospace; font-size: 11px; color: #4a5568; line-height: 1.5; white-space: pre-wrap;">
-${snippet}
+        <!-- Extracted Text Preview -->
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:24px;">
+          <tr>
+            <td style="padding:16px 20px;">
+              <p style="margin:0 0 8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#64748b;">
+                Extracted Text Snippet
+              </p>
+              <div style="font-family:'Courier New',monospace;font-size:12px;color:#334155;line-height:1.6;white-space:pre-wrap;background:#f8fafc;padding:12px;border-radius:6px;border:1px solid #f1f5f9;">${escapeHtml(snippet)}</div>
+            </td>
+          </tr>
+        </table>
+
+        <!-- CTA Button -->
+        <div style="text-align:center;margin:24px 0 8px;">
+          <a href="${escapeHtml(workspaceDocsUrl)}" style="display:inline-block;background-color:#0f172a;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-size:14px;font-weight:600;">
+            View Document in Workspace &rarr;
+          </a>
         </div>
-      </div>
+      `;
 
-      <p style="font-size: 12px; color: #a0aec0; margin-top: 24px; border-top: 1px solid #edf2f7; pt: 16px;">
-        You can now search any word or section inside this brief directly from the Document Library.
-      </p>
-    </div>
-  </div>
-</body>
-</html>
-`;
-
-    try {
-      await transporter.sendMail({
-        from: config.SMTP_MAIL,
-        to: toEmail,
-        subject: `✅ OCR Indexing Completed: ${fileName}`,
-        html,
+      const html = buildMiLawEmailHtml({
+        documentTitle: `OCR Completed — ${fileName}`,
+        brandSubtitle: "Document Intelligence & OCR Engine",
+        badgeHtml,
+        heading: isPartial
+          ? "OCR Completed (Partial Pages)"
+          : "Document OCR Completed",
+        subheading: escapeHtml(fileName),
+        bodyHtml,
+        footerReason:
+          "Automated Document Intelligence Notification from MI Law",
+        firmName,
       });
-      console.log(`[ocrEmailService] OCR completion email sent to ${toEmail}`);
+
+      await transporter.sendMail({
+        from: `"${config.APP_NAME || "MI Law Document AI"}" <${config.SMTP_MAIL}>`,
+        to: toEmail,
+        subject: `${isPartial ? "OCR Completed (Partial)" : "OCR Completed"}: ${fileName} (${pagesDisplay})`,
+        html,
+        attachments: getMiLawLogoAttachments(),
+      });
+
       return true;
     } catch (err) {
-      console.error("[ocrEmailService] Failed to send OCR success email:", err);
+      console.error("[OcrEmailService] Failed to send OCR success email:", err);
       return false;
     }
-  },
+  }
 
   /**
-   * Send notification email when OCR fails
+   * Sends an email notification if OCR fails (e.g., quota exceeded or unreadable file)
    */
-  async sendOcrFailureEmail(data: OcrFailureEmailData): Promise<boolean> {
-    const { toEmail, userName = "Advocate", fileName, errorReason } = data;
-    if (!toEmail) return false;
-
-    const html = `
-<!DOCTYPE html>
-<html>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f7f6f2; padding: 24px; color: #2c2b29;">
-  <div style="max-width: 580px; margin: 0 auto; background: #ffffff; border-radius: 8px; border: 1px solid #e5dfd5; padding: 24px;">
-    <h3 style="color: #c53030; margin-top: 0;">❌ OCR Processing Alert</h3>
-    <p>Hello ${userName},</p>
-    <p>We encountered an issue while processing OCR indexing for <strong>${fileName}</strong>:</p>
-    <p style="background: #fff5f5; border: 1px solid #fed7d7; padding: 12px; border-radius: 4px; color: #9b2c2c; font-size: 12px;">
-      ${errorReason}
-    </p>
-    <p style="font-size: 12px; color: #718096;">
-      No monthly page quota was deducted for this attempt. You can retry indexing or re-upload the document.
-    </p>
-  </div>
-</body>
-</html>
-`;
+  public async sendOcrFailureEmail(params: {
+    toEmail: string;
+    userName: string;
+    fileName: string;
+    errorReason: string;
+    firmName?: string;
+  }): Promise<boolean> {
+    if (!config.SMTP_MAIL || !config.SMTP_PASS) return false;
 
     try {
+      const transporter = createTransporter();
+      const { toEmail, userName, fileName, errorReason, firmName } = params;
+      const workspaceDocsUrl = `${(config.ORIGIN_CLIENT || config.ORIGIN_FRONTEND || "http://localhost:5173").replace(/\/$/, "")}/documents`;
+
+      const badgeHtml = `<span style="display:inline-block;background-color:#fef2f2;color:#dc2626;font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;text-transform:uppercase;letter-spacing:0.6px;border:1px solid #fecaca;">✕ OCR Processing Failed</span>`;
+
+      const bodyHtml = `
+        <p style="margin:0 0 12px;color:#0f172a;font-size:15px;">
+          Hello <strong>${escapeHtml(userName || "Advocate")}</strong>,
+        </p>
+        <p style="margin:0 0 20px;color:#475569;font-size:14px;line-height:1.6;">
+          We were unable to complete background OCR text extraction for your uploaded document <strong>${escapeHtml(fileName)}</strong>.
+        </p>
+
+        <!-- Error Details Box -->
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fef2f2;border:1px solid #fecaca;border-left:4px solid #dc2626;border-radius:10px;margin-bottom:24px;">
+          <tr>
+            <td style="padding:18px 20px;">
+              <p style="margin:0 0 6px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:#b91c1c;">
+                Diagnostic Reason
+              </p>
+              <p style="margin:0;color:#7f1d1d;font-size:13px;line-height:1.6;font-weight:600;">
+                ${escapeHtml(errorReason)}
+              </p>
+            </td>
+          </tr>
+        </table>
+
+        <p style="margin:0 0 24px;color:#475569;font-size:13px;line-height:1.6;">
+          Please verify that the uploaded file is a valid, unencrypted PDF or clear image scan, and ensure your workspace has sufficient OCR credits before retrying.
+        </p>
+
+        <!-- CTA Button -->
+        <div style="text-align:center;margin:24px 0 8px;">
+          <a href="${escapeHtml(workspaceDocsUrl)}" style="display:inline-block;background-color:#0f172a;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-size:14px;font-weight:600;">
+            Manage Documents &amp; Credits &rarr;
+          </a>
+        </div>
+      `;
+
+      const html = buildMiLawEmailHtml({
+        documentTitle: `OCR Processing Failed — ${fileName}`,
+        brandSubtitle: "Document Intelligence & OCR Engine",
+        badgeHtml,
+        heading: "Document OCR Could Not Complete",
+        subheading: escapeHtml(fileName),
+        bodyHtml,
+        footerReason: "Automated Document Intelligence Alert from MI Law",
+        firmName,
+      });
+
       await transporter.sendMail({
-        from: config.SMTP_MAIL,
+        from: `"${config.APP_NAME || "MI Law Document AI"}" <${config.SMTP_MAIL}>`,
         to: toEmail,
-        subject: `❌ OCR Indexing Failed: ${fileName}`,
+        subject: `OCR Processing Failed: ${fileName}`,
         html,
+        attachments: getMiLawLogoAttachments(),
       });
       return true;
     } catch (err) {
-      console.error("[ocrEmailService] Failed to send OCR failure email:", err);
+      console.error("[OcrEmailService] Failed to send OCR failure email:", err);
       return false;
     }
-  },
-};
+  }
+}
 
+export const ocrEmailService = new OcrEmailService();
 export default ocrEmailService;
