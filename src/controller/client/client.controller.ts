@@ -14,6 +14,10 @@ import {
 } from "../../db/schema/index.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import clientEmailService from "../../services/clientEmail.service.js";
+import {
+  notifyClientAddedToCase,
+  notifyClientRemovedFromCase,
+} from "../../services/caseAssignmentNotification.service.js";
 
 const clientController = {
   async getClients(req: Request, res: Response, next: NextFunction) {
@@ -325,6 +329,15 @@ const clientController = {
 
       if (rows.length > 0) {
         await db.insert(caseClients).values(rows);
+
+        const tenantId = req.user?.tenantId;
+        if (tenantId) {
+          for (const row of rows) {
+            notifyClientAddedToCase(row.caseId, clientId, tenantId).catch((err) =>
+              console.error("Error notifying client on case assignment:", err),
+            );
+          }
+        }
       }
 
       return res.status(200).json({
@@ -360,6 +373,18 @@ const clientController = {
         .returning({
           caseId: caseClients.caseId,
         });
+
+      const tenantId = req.user?.tenantId;
+      if (tenantId && removedCases.length > 0) {
+        for (const removed of removedCases) {
+          if (removed.caseId) {
+            notifyClientRemovedFromCase(removed.caseId, clientId, tenantId).catch(
+              (err) =>
+                console.error("Error notifying client on case removal:", err),
+            );
+          }
+        }
+      }
 
       return res.status(200).json({
         success: true,

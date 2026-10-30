@@ -315,9 +315,14 @@ export const notifyClientsOnCaseCreation = async (
 
       if (!client) continue;
 
+      const fullName = [client.firstName, client.lastName]
+        .map((v) => (v || "").trim())
+        .filter((v) => v && v.toLowerCase() !== "n/a")
+        .join(" ");
+
       const clientDisplayName =
-        client.companyName ||
-        `${client.firstName} ${client.lastName || ""}`.trim() ||
+        fullName ||
+        client.companyName?.trim() ||
         "Client";
 
       const caseUrl = `/cases/${caseRecord.id}`;
@@ -616,9 +621,14 @@ export const notifyClientRemovedFromCase = async (
     if (!caseRecord || !client) return;
 
     const firmName = caseRecord.tenant?.name || "MI Law Chamber";
+    const fullName = [client.firstName, client.lastName]
+      .map((v) => (v || "").trim())
+      .filter((v) => v && v.toLowerCase() !== "n/a")
+      .join(" ");
+
     const clientDisplayName =
-      client.companyName ||
-      `${client.firstName} ${client.lastName || ""}`.trim() ||
+      fullName ||
+      client.companyName?.trim() ||
       "Client";
 
     await createClientNotification({

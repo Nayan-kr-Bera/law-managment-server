@@ -1,32 +1,13 @@
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
-
 export const MI_LAW_LOGO_CID = "milawlogo@milaw.in";
+export const MI_LAW_LOGO_URL =
+  "https://res.cloudinary.com/dprkgukne/image/upload/v1793364463/mi-law-brand/mi-law-email-icon-v2.png";
 
 /**
- * Returns the Nodemailer inline CID attachment for the MI LAW Laurel Wreath & Scales seal.
- * Safe fallback: if the PNG file isn't found on disk, returns an empty array so email dispatch never crashes.
+ * Returns the Nodemailer inline attachment array.
+ * Since we now use a globally cached HTTPS Cloudinary CDN URL for 100% Gmail/Outlook compatibility,
+ * no extra MIME file attachment is required.
  */
 export function getMiLawLogoAttachments() {
-  const currentDir = path.dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    path.resolve(process.cwd(), "email-previews", "mi-law-email-icon.png"),
-    path.resolve(currentDir, "../../email-previews/mi-law-email-icon.png"),
-  ];
-
-  for (const filePath of candidates) {
-    if (fs.existsSync(filePath)) {
-      return [
-        {
-          filename: "mi-law-email-icon.png",
-          path: filePath,
-          cid: MI_LAW_LOGO_CID,
-        },
-      ];
-    }
-  }
-
   return [];
 }
 
@@ -108,7 +89,7 @@ export function buildMiLawEmailHtml(options: MiLawEmailLayoutOptions): string {
                     <table role="presentation" cellpadding="0" cellspacing="0">
                       <tr>
                         <td style="padding-right:12px;vertical-align:middle;">
-                          <img src="cid:${MI_LAW_LOGO_CID}" width="44" height="44" alt="MI Law" style="display:block;width:44px;height:44px;border-radius:10px;border:1px solid #e2e8f0;" />
+                          <img src="${MI_LAW_LOGO_URL}" width="48" height="48" alt="MI Law" style="display:block;width:48px;height:48px;border:0;outline:none;text-decoration:none;" />
                         </td>
                         <td style="vertical-align:middle;">
                           <div style="font-size:17px;font-weight:800;color:#0b1336;letter-spacing:0.6px;line-height:1.2;font-family:Georgia,'Times New Roman',serif;">MI LAW</div>
