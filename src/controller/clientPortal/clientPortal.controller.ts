@@ -423,11 +423,16 @@ const clientPortalController = {
               clientId: cc.clientId,
               title: `New Note on Case #${caseExists.caseNumber || caseExists.title}`,
               message: `${clientDisplayName}: "${content.trim().slice(0, 120)}${content.trim().length > 120 ? "..." : ""}"`,
+              link: `/cases/${caseExists.id}?tab=remarks`,
+              actionUrl: `/cases/${caseExists.id}?tab=remarks`,
               payload: {
                 caseId: caseExists.id,
                 type: "case_remark",
                 tab: "remarks",
                 remarkId: newNote.id,
+                link: `/cases/${caseExists.id}?tab=remarks`,
+                actionUrl: `/cases/${caseExists.id}?tab=remarks`,
+                actionLabel: "View Case Remark",
               },
             }).catch((err) => console.error("Error notifying co-client of remark:", err));
           }

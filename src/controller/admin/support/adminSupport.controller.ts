@@ -523,6 +523,7 @@ const adminSupportController = {
           status === "closed"
             ? `Your support ticket #${existing.ticketNumber} has been resolved and closed.`
             : `Your support ticket #${existing.ticketNumber} status has been updated to "${statusLabel}".`;
+        const ticketUrl = `/support?ticketId=${existing.id}`;
 
         createClientNotification({
           tenantId: existing.tenantId || null,
@@ -532,11 +533,16 @@ const adminSupportController = {
           channel: "push",
           title: `Ticket #${existing.ticketNumber} Status: ${statusLabel}`,
           message: statusMessage,
+          link: ticketUrl,
+          actionUrl: ticketUrl,
           payload: {
             ticketId: existing.id,
             ticketNumber: existing.ticketNumber,
             type: "support_status",
             status,
+            link: ticketUrl,
+            actionUrl: ticketUrl,
+            actionLabel: "View Ticket",
           },
         }).catch((err) =>
           console.error("Failed to send admin status push notification:", err)
@@ -625,6 +631,7 @@ const adminSupportController = {
       if (targetClientId) {
         const messagePreview =
           message.length > 80 ? `${message.substring(0, 77)}...` : message;
+        const ticketUrl = `/support?ticketId=${existing.id}`;
 
         createClientNotification({
           tenantId: existing.tenantId || null,
@@ -634,11 +641,16 @@ const adminSupportController = {
           channel: "push",
           title: `Response on Ticket #${existing.ticketNumber}`,
           message: `${senderName}: "${messagePreview}"`,
+          link: ticketUrl,
+          actionUrl: ticketUrl,
           payload: {
             ticketId: existing.id,
             ticketNumber: existing.ticketNumber,
             type: "support_reply",
             senderName,
+            link: ticketUrl,
+            actionUrl: ticketUrl,
+            actionLabel: "View Ticket",
           },
         }).catch((err) =>
           console.error("Failed to send admin reply push notification:", err)

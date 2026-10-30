@@ -1930,11 +1930,16 @@ const caseController = {
                 clientId: cc.clientId,
                 title: `New Message on Case ${caseLabel}`,
                 message: `${authorDisplayName}: "${content.trim().slice(0, 120)}${content.trim().length > 120 ? "..." : ""}"`,
+                link: `/cases/${caseExists.id}?tab=remarks`,
+                actionUrl: `/cases/${caseExists.id}?tab=remarks`,
                 payload: {
                   caseId: caseExists.id,
                   type: "case_remark",
                   tab: "remarks",
                   remarkId: newNote.id,
+                  link: `/cases/${caseExists.id}?tab=remarks`,
+                  actionUrl: `/cases/${caseExists.id}?tab=remarks`,
+                  actionLabel: "View Case Remark",
                 },
               }).catch((err) =>
                 console.error("Error creating client notification for advocate remark:", err)

@@ -495,6 +495,7 @@ const supportTicketController = {
       if (targetClientId && (senderType === "advocate" || req.user?.userId)) {
         const messagePreview =
           message.length > 80 ? `${message.substring(0, 77)}...` : message;
+        const ticketUrl = `/support?ticketId=${ticketRecord.id}`;
 
         createClientNotification({
           tenantId: ticketRecord.tenantId || null,
@@ -504,11 +505,16 @@ const supportTicketController = {
           channel: "push",
           title: `Response on Ticket #${ticketRecord.ticketNumber}`,
           message: `${senderName}: "${messagePreview}"`,
+          link: ticketUrl,
+          actionUrl: ticketUrl,
           payload: {
             ticketId: ticketRecord.id,
             ticketNumber: ticketRecord.ticketNumber,
             type: "support_reply",
             senderName,
+            link: ticketUrl,
+            actionUrl: ticketUrl,
+            actionLabel: "View Ticket",
           },
         }).catch((err) =>
           console.error("Failed to push support ticket reply notification:", err)
@@ -749,6 +755,7 @@ const supportTicketController = {
           status === "closed"
             ? `Your support ticket #${ticketRecord.ticketNumber} has been resolved and closed.`
             : `Your support ticket #${ticketRecord.ticketNumber} status is now "${statusLabel}".`;
+        const ticketUrl = `/support?ticketId=${ticketRecord.id}`;
 
         createClientNotification({
           tenantId: ticketRecord.tenantId || null,
@@ -758,11 +765,16 @@ const supportTicketController = {
           channel: "push",
           title: `Ticket #${ticketRecord.ticketNumber} Status: ${statusLabel}`,
           message: statusMessage,
+          link: ticketUrl,
+          actionUrl: ticketUrl,
           payload: {
             ticketId: ticketRecord.id,
             ticketNumber: ticketRecord.ticketNumber,
             type: "support_status",
             status,
+            link: ticketUrl,
+            actionUrl: ticketUrl,
+            actionLabel: "View Ticket",
           },
         }).catch((err) =>
           console.error("Failed to push support ticket status notification:", err)

@@ -26,6 +26,8 @@ export interface CreateClientNotificationParams {
   recipient?: string | null;
   title: string;
   message: string;
+  link?: string;
+  actionUrl?: string;
   payload?: Record<string, unknown>;
 }
 
@@ -34,6 +36,13 @@ export interface CreateClientNotificationParams {
  */
 export const createClientNotification = async (params: CreateClientNotificationParams) => {
   try {
+    const targetLink =
+      params.link ||
+      params.actionUrl ||
+      (params.payload?.link as string) ||
+      (params.payload?.actionUrl as string) ||
+      null;
+
     const [queueItem] = await db
       .insert(notificationQueue)
       .values({
@@ -47,6 +56,8 @@ export const createClientNotification = async (params: CreateClientNotificationP
           title: params.title,
           message: params.message,
           caseId: params.caseId || null,
+          link: targetLink,
+          actionUrl: targetLink,
           ...(params.payload || {}),
         },
         status: "sent",
@@ -64,6 +75,8 @@ export const createClientNotification = async (params: CreateClientNotificationP
         data: {
           caseId: params.caseId || null,
           notificationId: queueItem.id,
+          link: targetLink,
+          actionUrl: targetLink,
           ...(params.payload || {}),
         },
       }).catch((err) =>

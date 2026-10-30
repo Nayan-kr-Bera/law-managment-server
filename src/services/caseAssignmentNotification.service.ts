@@ -336,6 +336,7 @@ export const notifyClientsOnCaseCreation = async (
         "Client";
 
       // 1. Client Portal notification queue
+      const caseUrl = `/cases/${caseRecord.id}`;
       await createClientNotification({
         tenantId,
         officeId: caseRecord.officeId,
@@ -347,12 +348,17 @@ export const notifyClientsOnCaseCreation = async (
         message: `Your legal matter "${caseRecord.title}" (${
           caseRecord.caseNumber || "Registration In Progress"
         }) has been registered with our chamber.`,
+        link: caseUrl,
+        actionUrl: caseUrl,
         payload: {
           caseId: caseRecord.id,
           caseTitle: caseRecord.title,
           caseNumber: caseRecord.caseNumber,
           court: caseRecord.court?.name,
           nextHearingDate: caseRecord.nextHearingDate,
+          link: caseUrl,
+          actionUrl: caseUrl,
+          actionLabel: "View Matter",
         },
       });
 
@@ -648,11 +654,16 @@ export const notifyClientRemovedFromCase = async (
       recipient: client.email || "",
       title: `Notice: Matter Unlinked`,
       message: `Your profile has been unlinked from matter "${caseRecord.title}".`,
+      link: "/cases",
+      actionUrl: "/cases",
       payload: {
         type: "case_unlinked",
         caseId: caseRecord.id,
         caseTitle: caseRecord.title,
         unlinked: true,
+        link: "/cases",
+        actionUrl: "/cases",
+        actionLabel: "View Cases",
       },
     });
 
