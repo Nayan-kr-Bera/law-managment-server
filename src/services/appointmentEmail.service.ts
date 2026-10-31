@@ -98,10 +98,9 @@ export const appointmentEmailService = async ({
     const { formattedDate, formattedTime } = formatDateTime(appointmentDate);
     const modeLabel = formatModeLabel(mode);
     const resolvedPortalUrl =
-      portalUrl ||
-      config.ORIGIN_CLIENT ||
-      config.ORIGIN_FRONTEND ||
-      "http://localhost:5174";
+      (portalUrl ||
+        config.ORIGIN_CLIENT ||
+        "https://law-managment-clint-portal.vercel.app").replace(/\/$/, "");
 
     const badgeHtml = `<span style="display:inline-block;background-color:#ecfdf5;color:#047857;font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;text-transform:uppercase;letter-spacing:0.6px;border:1px solid #a7f3d0;">✓ Confirmed Appointment</span>`;
 
@@ -253,10 +252,9 @@ export const appointmentCancellationEmailService = async ({
     const transporter = createTransporter();
     const { formattedDate, formattedTime } = formatDateTime(appointmentDate);
     const resolvedPortalUrl =
-      portalUrl ||
-      config.ORIGIN_CLIENT ||
-      config.ORIGIN_FRONTEND ||
-      "http://localhost:5174";
+      (portalUrl ||
+        config.ORIGIN_CLIENT ||
+        "https://law-managment-clint-portal.vercel.app").replace(/\/$/, "");
 
     const badgeHtml = `<span style="display:inline-block;background-color:#fef2f2;color:#dc2626;font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;text-transform:uppercase;letter-spacing:0.6px;border:1px solid #fecaca;">✕ Appointment Cancelled</span>`;
 

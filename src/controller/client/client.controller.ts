@@ -1,4 +1,5 @@
 import bcrypt from "bcrypt";
+import crypto from "crypto";
 import { and, desc, eq, ilike, inArray, isNotNull, or, sql, SQL } from "drizzle-orm";
 import { NextFunction, Request, Response } from "express";
 import db from "../../db/index.js";
@@ -10,7 +11,9 @@ import {
   clientProfiles,
   clients,
   invoices,
+  offices,
   payments,
+  tenants,
 } from "../../db/schema/index.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import clientEmailService from "../../services/clientEmail.service.js";
@@ -18,6 +21,34 @@ import {
   notifyClientAddedToCase,
   notifyClientRemovedFromCase,
 } from "../../services/caseAssignmentNotification.service.js";
+
+function generateRandomClientPassword(): string {
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const lower = "abcdefghijkmnopqrstuvwxyz";
+  const digits = "23456789";
+  const symbols = "@#$!";
+  const all = upper + lower + digits;
+
+  const chars = [
+    upper[crypto.randomInt(0, upper.length)],
+    lower[crypto.randomInt(0, lower.length)],
+    lower[crypto.randomInt(0, lower.length)],
+    digits[crypto.randomInt(0, digits.length)],
+    digits[crypto.randomInt(0, digits.length)],
+    symbols[crypto.randomInt(0, symbols.length)],
+  ];
+
+  for (let i = 0; i < 4; i++) {
+    chars.push(all[crypto.randomInt(0, all.length)]);
+  }
+
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(0, i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+
+  return chars.join("");
+}
 
 const clientController = {
   async getClients(req: Request, res: Response, next: NextFunction) {
@@ -192,10 +223,16 @@ const clientController = {
         });
 
         let isNewIdentity = false;
+        let plainPasswordToSend = "";
 
         if (!identity) {
-          // New identity — create client with portal credentials
-          const passwordHash = password ? await bcrypt.hash(password, 10) : null;
+          // Automatically generate a random password on the backend if none was provided
+          plainPasswordToSend =
+            typeof password === "string" && password.trim().length > 0
+              ? password.trim()
+              : generateRandomClientPassword();
+
+          const passwordHash = await bcrypt.hash(plainPasswordToSend, 10);
           const [newClient] = await tx
             .insert(clients)
             .values({
@@ -216,6 +253,22 @@ const clientController = {
             .returning();
 
           identity = newClient;
+          isNewIdentity = true;
+        } else if (!identity.passwordHash) {
+          // Existing identity that had no password set yet — generate random password & email credentials
+          plainPasswordToSend =
+            typeof password === "string" && password.trim().length > 0
+              ? password.trim()
+              : generateRandomClientPassword();
+
+          const passwordHash = await bcrypt.hash(plainPasswordToSend, 10);
+          const [updatedClient] = await tx
+            .update(clients)
+            .set({ passwordHash })
+            .where(eq(clients.id, identity.id))
+            .returning();
+
+          identity = updatedClient;
           isNewIdentity = true;
         }
 
@@ -251,12 +304,21 @@ const clientController = {
           })
           .returning();
 
-        // Send welcome email only for brand-new identities
-        if (isNewIdentity && email) {
+        // Send welcome email with random password & Client Portal landing page link
+        if (isNewIdentity && email && plainPasswordToSend) {
+          const [tenantRow, officeRow] = await Promise.all([
+            tx.query.tenants.findFirst({ where: eq(tenants.id, tenantId) }),
+            officeId
+              ? tx.query.offices.findFirst({ where: eq(offices.id, officeId) })
+              : Promise.resolve(undefined),
+          ]);
+
           await clientEmailService({
             clientName: `${firstName} ${lastName ?? ""}`.trim(),
             clientEmail: email,
-            password,
+            password: plainPasswordToSend,
+            firmName: tenantRow?.name,
+            officeName: officeRow?.name,
           });
         }
 

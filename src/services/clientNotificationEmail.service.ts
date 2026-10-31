@@ -54,7 +54,7 @@ export const sendClientCaseNotificationEmail = async (
       : "To Be Announced";
 
     const portalUrl =
-      config.ORIGIN_CLIENT || config.ORIGIN_FRONTEND || "http://localhost:5174";
+      (config.ORIGIN_CLIENT || "https://law-managment-clint-portal.vercel.app").replace(/\/$/, "");
     const emailSubject =
       params.subject?.trim() ||
       `Case Status Update: ${params.caseNumber ? `[${params.caseNumber}] ` : ""}${params.caseTitle}`;

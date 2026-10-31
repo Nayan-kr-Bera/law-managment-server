@@ -42,9 +42,9 @@ export const clientEmailService = async ({
     const transporter = createTransporter();
 
     const basePortalUrl =
-      config.ORIGIN_CLIENT || config.ORIGIN_FRONTEND || "http://localhost:5174";
+      config.ORIGIN_CLIENT || "https://law-managment-clint-portal.vercel.app";
     const resolvedLoginUrl =
-      loginUrl || `${basePortalUrl.replace(/\/$/, "")}/login`;
+      (loginUrl || basePortalUrl).replace(/\/$/, "");
 
     const badgeHtml = `<span style="display:inline-block;background-color:#ecfdf5;color:#047857;font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;text-transform:uppercase;letter-spacing:0.6px;border:1px solid #a7f3d0;">Client Portal Access</span>`;
 
