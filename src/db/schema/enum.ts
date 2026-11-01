@@ -215,6 +215,7 @@ export const appointmentModeEnum = pgEnum("appointment_mode", [
   "phone",
 ]);
 export const appointmentStatusEnum = pgEnum("appointment_status", [
+  "pending",
   "scheduled",
   "completed",
   "cancelled",

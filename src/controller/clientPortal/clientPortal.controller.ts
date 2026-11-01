@@ -17,6 +17,8 @@ import supportTickets from "../../db/schema/support/supportTickets.js";
 import supportTicketMessages from "../../db/schema/support/supportTicketMessages.js";
 import notificationQueue from "../../db/schema/notifications/notificationQueue.js";
 import clientPushTokens from "../../db/schema/clients/clientPushTokens.js";
+import appointments from "../../db/schema/task/appointments.js";
+import userScopes from "../../db/schema/userScope.js";
 import JwtService from "../../utils/jwtServices.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import ResponseHandler from "../../utils/responseHandler.js";
@@ -1677,6 +1679,281 @@ const clientPortalController = {
       );
     } catch (error) {
       console.error("Register push token error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  // ─── Client Appointments (Book, View, Cancel) ───────────────────────────────
+  async getAppointments(req: Request, res: Response, next: NextFunction) {
+    try {
+      const clientId = req.clientUser?.clientId;
+      if (!clientId) {
+        return next(CustomErrorHandler.unAuthorized("Client ID not found"));
+      }
+
+      const tenantId =
+        (req.query.tenantId as string) ||
+        (req.headers["x-tenant-id"] as string) ||
+        req.clientUser?.tenantId ||
+        undefined;
+
+      const conditions = [eq(appointments.clientId, clientId)];
+      if (tenantId) {
+        conditions.push(eq(appointments.tenantId, tenantId));
+      }
+
+      const items = await db.query.appointments.findMany({
+        where: and(...conditions),
+        with: {
+          case: true,
+          office: true,
+          tenant: true,
+          assignee: true,
+        },
+        orderBy: [desc(appointments.date)],
+      });
+
+      const statusCounts = {
+        pending: 0,
+        scheduled: 0,
+        completed: 0,
+        cancelled: 0,
+      };
+
+      const formatted = items.map((item) => {
+        if (
+          item.status === "pending" ||
+          item.status === "scheduled" ||
+          item.status === "completed" ||
+          item.status === "cancelled"
+        ) {
+          statusCounts[item.status] += 1;
+        }
+        return {
+          id: item.id,
+          tenantId: item.tenantId,
+          officeId: item.officeId,
+          clientId: item.clientId,
+          caseId: item.caseId,
+          assignedTo: item.assignedTo,
+          date: item.date,
+          mode: item.mode,
+          purpose: item.purpose,
+          location: item.location,
+          status: item.status,
+          createdAt: item.createdAt,
+          updatedAt: item.updatedAt,
+          caseNumber: item.case?.caseNumber ?? null,
+          caseTitle: item.case?.title ?? null,
+          officeName: item.office?.name ?? null,
+          firmName: item.tenant?.name ?? null,
+          advocateName: item.assignee?.name ?? null,
+          case: item.case
+            ? {
+                id: item.case.id,
+                caseNumber: item.case.caseNumber,
+                title: item.case.title,
+              }
+            : null,
+          office: item.office
+            ? {
+                id: item.office.id,
+                name: item.office.name,
+              }
+            : null,
+          tenant: item.tenant
+            ? {
+                id: item.tenant.id,
+                name: item.tenant.name,
+              }
+            : null,
+          assignee: item.assignee
+            ? {
+                id: item.assignee.id,
+                name: item.assignee.name,
+              }
+            : null,
+        };
+      });
+
+      return res.status(200).json(
+        ResponseHandler(200, "Client appointments fetched successfully", {
+          appointments: formatted,
+          statusCounts,
+        })
+      );
+    } catch (error) {
+      console.error("Get client appointments error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  async createAppointment(req: Request, res: Response, next: NextFunction) {
+    try {
+      const clientId = req.clientUser?.clientId;
+      if (!clientId) {
+        return next(CustomErrorHandler.unAuthorized("Client ID not found"));
+      }
+
+      const { caseId, date, mode, purpose, location } = req.body;
+
+      if (!date) {
+        return next(CustomErrorHandler.badRequest("Appointment date and time are required"));
+      }
+
+      const parsedDate = new Date(date);
+      if (Number.isNaN(parsedDate.getTime())) {
+        return next(CustomErrorHandler.badRequest("Invalid appointment date or time"));
+      }
+
+      const validModes = ["in_person", "online", "phone"] as const;
+      if (!mode || !validModes.includes(mode)) {
+        return next(CustomErrorHandler.badRequest("Valid consultation mode is required"));
+      }
+
+      if (!purpose || !String(purpose).trim()) {
+        return next(CustomErrorHandler.badRequest("Purpose / Agenda is required"));
+      }
+
+      let resolvedTenantId: string | null | undefined =
+        (req.headers["x-tenant-id"] as string) ||
+        req.clientUser?.tenantId ||
+        undefined;
+      let resolvedOfficeId: string | null | undefined =
+        (req.headers["x-office-id"] as string) ||
+        req.clientUser?.officeId ||
+        null;
+
+      if (caseId) {
+        const caseRecord = await db.query.cases.findFirst({
+          where: eq(cases.id, caseId),
+        });
+        if (caseRecord) {
+          resolvedTenantId = caseRecord.tenantId;
+          resolvedOfficeId = caseRecord.officeId ?? resolvedOfficeId;
+        }
+      }
+
+      if (!resolvedTenantId) {
+        const activeProfile = await db.query.clientProfiles.findFirst({
+          where: eq(clientProfiles.identityId, clientId),
+        });
+        if (activeProfile) {
+          resolvedTenantId = activeProfile.tenantId;
+          resolvedOfficeId = activeProfile.officeId ?? resolvedOfficeId;
+        }
+      }
+
+      if (!resolvedTenantId) {
+        return next(CustomErrorHandler.badRequest("Active law firm profile not found for this booking"));
+      }
+
+      const [created] = await db
+        .insert(appointments)
+        .values({
+          tenantId: resolvedTenantId,
+          officeId: resolvedOfficeId || null,
+          clientId,
+          caseId: caseId || null,
+          assignedTo: null,
+          date: parsedDate,
+          mode,
+          purpose: String(purpose).trim(),
+          location: location ? String(location).trim() : null,
+          status: "pending",
+          sendEmail: true,
+          sendWhatsApp: false,
+        })
+        .returning();
+
+      // Notify law firm users / advocates about the new appointment request
+      try {
+        const [clientRow, scopes] = await Promise.all([
+          db.query.clients.findFirst({
+            where: eq(clients.id, clientId),
+            columns: { firstName: true, lastName: true },
+          }),
+          db.query.userScopes.findMany({
+            where: eq(userScopes.tenantId, resolvedTenantId),
+            columns: { userId: true },
+          }),
+        ]);
+
+        const clientName =
+          `${clientRow?.firstName ?? ""} ${clientRow?.lastName ?? ""}`.trim() ||
+          "A client";
+        const formattedDate = parsedDate.toLocaleDateString("en-IN", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        });
+        const formattedTime = parsedDate.toLocaleTimeString("en-IN", {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+
+        const uniqueUserIds = Array.from(new Set(scopes.map((s) => s.userId)));
+        for (const uid of uniqueUserIds) {
+          await createNotification({
+            tenantId: resolvedTenantId,
+            officeId: resolvedOfficeId || null,
+            userId: uid,
+            title: `New Appointment Request from ${clientName}`,
+            body: `${clientName} requested a ${mode === "online" ? "Video" : mode === "phone" ? "Phone" : "In-Person"} consultation on ${formattedDate} at ${formattedTime} for "${String(purpose).trim()}".`,
+            type: "appointment",
+          });
+        }
+      } catch (notifErr) {
+        console.error("Failed to notify firm of client appointment request:", notifErr);
+      }
+
+      return res.status(201).json(
+        ResponseHandler(
+          201,
+          "Appointment request submitted! Your legal counsel will review and confirm the schedule.",
+          created
+        )
+      );
+    } catch (error) {
+      console.error("Create client appointment error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  async cancelAppointment(req: Request, res: Response, next: NextFunction) {
+    try {
+      const clientId = req.clientUser?.clientId;
+      const { id } = req.params;
+
+      if (!clientId) {
+        return next(CustomErrorHandler.unAuthorized("Client ID not found"));
+      }
+
+      const existing = await db.query.appointments.findFirst({
+        where: and(
+          eq(appointments.id, id),
+          eq(appointments.clientId, clientId)
+        ),
+      });
+
+      if (!existing) {
+        return next(CustomErrorHandler.notFound("Appointment not found"));
+      }
+
+      const [updated] = await db
+        .update(appointments)
+        .set({
+          status: "cancelled",
+          updatedAt: new Date(),
+        })
+        .where(eq(appointments.id, id))
+        .returning();
+
+      return res.status(200).json(
+        ResponseHandler(200, "Appointment cancelled successfully", updated)
+      );
+    } catch (error) {
+      console.error("Cancel client appointment error:", error);
       return next(CustomErrorHandler.serverError());
     }
   },

@@ -59,6 +59,10 @@ router.get("/profile", clientAuth, clientPortalController.getProfile);
 router.put("/profile", clientAuth, clientPortalController.updateProfile);
 router.post("/change-password", clientAuth, clientPortalController.changePassword);
 
+router.get("/appointments", clientAuth, clientPortalController.getAppointments);
+router.post("/appointments", clientAuth, clientPortalController.createAppointment);
+router.patch("/appointments/:id/cancel", clientAuth, clientPortalController.cancelAppointment);
+
 router.get("/notifications/stream", clientAuth, clientPortalController.streamNotifications);
 router.get("/notifications", clientAuth, clientPortalController.getNotifications);
 router.post("/notifications/push-token", clientAuth, clientPortalController.registerPushToken);
