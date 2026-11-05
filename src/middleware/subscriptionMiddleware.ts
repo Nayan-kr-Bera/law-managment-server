@@ -13,10 +13,6 @@ const subscriptionMiddleware = async (
   next: NextFunction,
 ) => {
   try {
-    // ============================================================
-    // GET TENANT FROM AUTHENTICATED USER
-    // ============================================================
-
     const tenantId = req.user?.tenantId;
 
     if (!tenantId) {
@@ -28,10 +24,6 @@ const subscriptionMiddleware = async (
 
     console.log("[subscriptionMiddleware] Checking subscription for tenantId:", tenantId);
 
-    // ============================================================
-    // FIND ACTIVE SUBSCRIPTION
-    // ============================================================
-
     const subscription = await db.query.tenantSubscriptions.findFirst({
       where: and(
         eq(tenantSubscriptions.tenantId, tenantId),
@@ -41,10 +33,6 @@ const subscriptionMiddleware = async (
         plan: true,
       },
     });
-
-    // ============================================================
-    // NO SUBSCRIPTION
-    // ============================================================
 
     if (!subscription) {
       console.warn("[subscriptionMiddleware] 403 Forbidden: No active/trial subscription found for tenantId:", tenantId);
@@ -63,20 +51,7 @@ const subscriptionMiddleware = async (
       nextBillingDate: subscription.nextBillingDate,
     });
 
-    // ============================================================
-    // INTERNAL PLAN
-    // code === "internal" NEVER EXPIRES
-    // ============================================================
-
     const isInternalPlan = subscription.plan.code === "internal";
-
-    // ============================================================
-    // CHECK EXPIRY
-    //
-    // Internal plan -> skip expiry
-    // Free trial   -> expires normally
-    // Paid plans   -> expires normally
-    // ============================================================
 
     if (!isInternalPlan) {
       const today = new Date();
@@ -92,10 +67,6 @@ const subscriptionMiddleware = async (
         );
       }
     }
-
-    // ============================================================
-    // ATTACH SUBSCRIPTION TO REQUEST
-    // ============================================================
 
     req.subscription = {
       tenantId,
@@ -116,10 +87,6 @@ const subscriptionMiddleware = async (
       nextBillingDate: subscription.nextBillingDate,
       autoRenew: subscription.autoRenew,
     };
-
-    // ============================================================
-    // CONTINUE
-    // ============================================================
 
     return next();
   } catch (error) {

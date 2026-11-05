@@ -6,7 +6,6 @@ import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import ResponseHandler from "../../utils/responseHandler.js";
 
 const auditLogController = {
-  // 1. GET AUDIT LOGS (Tenant & Office based)
   async getAuditLogs(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
     try {
       const tenantId = req.user?.tenantId;
@@ -25,25 +24,20 @@ const auditLogController = {
         officeId?: string;
       };
 
-      // Base condition: always filter by tenantId (unless super admin)
       const conditions: SQL<unknown>[] = [eq(auditLogs.tenantId, tenantId)];
 
-      // Office-based filtering (if provided)
       if (officeId && officeId.trim() !== "" && officeId !== "all") {
         conditions.push(eq(auditLogs.officeId, officeId));
       }
 
-      // Module filter (Cases, Documents, Billing, Users, Settings, Tasks)
       if (module && module.trim() !== "" && module !== "all") {
         conditions.push(ilike(auditLogs.entity, module));
       }
 
-      // Action filter (CREATE, UPDATE, DELETE, LOGIN, EXPORT)
       if (action && action.trim() !== "" && action !== "all") {
         conditions.push(eq(auditLogs.action, action.toUpperCase()));
       }
 
-      // Search filter across description, IP, action, or user name/email
       if (search && search.trim() !== "") {
         const queryTerm = `%${search.trim()}%`;
         const searchCond = or(
@@ -60,7 +54,6 @@ const auditLogController = {
 
       const whereClause = and(...conditions);
 
-      // Check count
       const [totalResult] = await db
         .select({ total: count() })
         .from(auditLogs)
@@ -69,7 +62,6 @@ const auditLogController = {
 
       const total = totalResult?.total || 0;
 
-      // Fetch paginated logs
       const rawLogs = await db
         .select({
           id: auditLogs.id,
@@ -119,7 +111,6 @@ const auditLogController = {
     }
   },
 
-  // 2. EXPORT AUDIT LOGS
   async exportAuditLogs(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
     try {
       const tenantId = req.user?.tenantId;

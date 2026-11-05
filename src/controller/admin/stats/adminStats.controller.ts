@@ -21,7 +21,6 @@ import CustomErrorHandler from "../../../utils/customErrorHandler.js";
 const adminStatsController = {
   async getAdminStats(req: Request, res: Response, next: NextFunction) {
     try {
-      // 1. Tenants count (excluding internal platform system tenant)
       const [totalTenantsRes] = await db
         .select({ count: count() })
         .from(tenants)
@@ -40,7 +39,6 @@ const adminStatsController = {
         .where(and(eq(tenants.status, "trial"), ne(tenants.slug, "system")));
       const trialTenants = trialTenantsRes?.count || 0;
 
-      // 2. Active Subscriptions count (business tenants only)
       const [totalSubscribersRes] = await db
         .select({ count: count() })
         .from(tenantSubscriptions)
@@ -48,7 +46,6 @@ const adminStatsController = {
         .where(and(sql`${tenantSubscriptions.status} IN ('active', 'trial')`, ne(tenants.slug, "system")));
       const totalSubscribers = totalSubscribersRes?.count || 0;
 
-      // 3. System-wide Business Users / Advocates (excluding platform system tenant staff)
       const [totalUsersRes] = await db
         .select({ count: sql<number>`COUNT(DISTINCT ${userScopes.userId})` })
         .from(userScopes)
@@ -73,7 +70,6 @@ const adminStatsController = {
         .where(ne(tenants.slug, "system"));
       const totalOffices = totalOfficesRes?.count || 0;
 
-      // 4. Support Tickets & Problem Solving Metrics (Platform level only - Advocate to Admin)
       const platformTicketCondition = and(
         isNull(supportTickets.caseId),
         isNull(supportTickets.clientId),
@@ -141,7 +137,6 @@ const adminStatsController = {
       const csatScore = totalTickets > 0 ? Number((4.0 + (resolutionRate / 100) * 0.9).toFixed(1)) : 5.0;
       const avgResolutionTimeHours = totalTickets > 0 ? 2.4 : 0;
 
-      // 5. Revenue from Payment History & Plans
       const [paymentRevenueRes] = await db
         .select({
           totalRevenue: sql<string>`COALESCE(SUM(CAST(${subscriptionPaymentHistory.amount} AS NUMERIC)), 0)`,
@@ -154,7 +149,6 @@ const adminStatsController = {
       const annualRevenue = Math.round(monthlyRevenue * 12);
       const arpu = activeTenants > 0 && monthlyRevenue > 0 ? Math.round(monthlyRevenue / activeTenants) : 0;
 
-      // 6. Time-series Daily Onboarding (Last 30 Days)
       const tenantRows = await db
         .select({
           createdAt: tenants.createdAt,
@@ -173,7 +167,6 @@ const adminStatsController = {
         .where(ne(tenants.slug, "system"))
         .orderBy(user.createdAt);
 
-      // Bucket by day (last 30 days)
       const now = new Date();
       const dailyOnboarding: {
         date: string;
@@ -220,7 +213,6 @@ const adminStatsController = {
         });
       }
 
-      // 7. Dynamic Monthly Growth Trajectory (Last 6 Months from DB)
       const monthlyPaymentRows = await db
         .select({
           monthKey: sql<string>`TO_CHAR(${subscriptionPaymentHistory.transactionDate}, 'YYYY-MM')`,
@@ -270,7 +262,6 @@ const adminStatsController = {
         });
       }
 
-      // 8. Dynamic Plan Tier Distribution from DB
       const allPlans = await db
         .select({
           id: subscriptionPlans.id,

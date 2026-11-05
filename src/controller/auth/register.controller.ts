@@ -26,8 +26,6 @@ import { registerSchema } from "../../validators/auth/register.validatior.js";
 const registerController = {
   async userRegister(req: Request, res: Response, next: NextFunction) {
     try {
-      // 1. VALIDATE REQUEST
-
       const parsed = registerSchema.safeParse(req.body);
 
       if (!parsed.success) {
@@ -35,8 +33,6 @@ const registerController = {
       }
 
       const { name, email, password, phone } = parsed.data;
-
-      // 2. CHECK EXISTING USER (EMAIL & PHONE)
 
       const existEmail = await db.query.user.findFirst({
         where: eq(users.email, email),
@@ -64,15 +60,9 @@ const registerController = {
         }
       }
 
-      // 3. HASH PASSWORD
-
       const hashedPassword = await bcrypt.hash(password, Number(config.SALT));
 
-      // 4. CREATE EVERYTHING IN ONE TRANSACTION
-
       const result = await db.transaction(async (tx) => {
-        // 4.1 CREATE TENANT
-
         const baseSlug = slugify(name, {
           lower: true,
           strict: true,
@@ -99,7 +89,6 @@ const registerController = {
           })
           .returning();
 
-        // 4.2 FIND PUBLIC FREE TRIAL PLAN (Strictly the public 14-day trial pack, NEVER the secret internal plan)
         const freeTrialPlan = await tx.query.subscriptionPlans.findFirst({
           where: and(
             eq(subscriptionPlans.code, "free_trial"),
@@ -114,39 +103,24 @@ const registerController = {
           );
         }
 
-        // 4.3 CREATE FREE TRIAL SUBSCRIPTION
-
         const trialStartDate = new Date();
-
         const trialEndDate = new Date(trialStartDate);
-
-        // 14 DAYS FREE TRIAL
         trialEndDate.setDate(trialEndDate.getDate() + 14);
 
         const [subscription] = await tx
           .insert(tenantSubscriptions)
           .values({
             tenantId: tenant.id,
-
             planId: freeTrialPlan.id,
-
             status: "trial",
-
             billingCycle: "monthly",
-
             amount: "0.00",
-
             currency: freeTrialPlan.currency,
-
             startDate: trialStartDate.toISOString().split("T")[0],
-
             nextBillingDate: trialEndDate.toISOString().split("T")[0],
-
             autoRenew: false,
           })
           .returning();
-
-        // 4.4 CREATE HEAD OFFICE
 
         const [office] = await tx
           .insert(offices)
@@ -156,8 +130,6 @@ const registerController = {
             isHeadOffice: true,
           })
           .returning();
-
-        // 4.5 CREATE USER
 
         const [user] = await tx
           .insert(users)
@@ -169,8 +141,6 @@ const registerController = {
           })
           .returning();
 
-        // 4.6 CREATE DEFAULT USER SCOPE
-
         const [scope] = await tx
           .insert(userScopes)
           .values({
@@ -180,14 +150,10 @@ const registerController = {
           })
           .returning();
 
-        // 4.7 CONNECT SCOPE → OFFICE
-
         await tx.insert(userScopeOffices).values({
           userScopeId: scope.id,
           officeId: office.id,
         });
-
-        // 4.8 FIND TENANT ADMIN ROLE
 
         const adminRole = await tx.query.roles.findFirst({
           where: eq(roles.slug, "tenant_admin"),
@@ -197,14 +163,10 @@ const registerController = {
           throw CustomErrorHandler.serverError("Tenant Admin role not found.");
         }
 
-        // 4.9 ASSIGN TENANT ADMIN ROLE
-
         await tx.insert(userRoles).values({
           scopeId: scope.id,
           roleId: adminRole.id,
         });
-
-        // RETURN TRANSACTION RESULT
 
         return {
           user,
@@ -215,8 +177,6 @@ const registerController = {
         };
       });
 
-      // 5. SEND EMAIL OTP
-
       await emailOtpService({
         id: result.user.id,
         email: result.user.email,
@@ -224,37 +184,24 @@ const registerController = {
         purpose: "law firm registration",
       });
 
-      // 6. RESPONSE
-
       return res.status(201).send(
         ResponseHandler(201, "Registration successful", {
           id: result.user.id,
-
           name: result.user.name,
-
           email: result.user.email,
-
           tenantId: result.tenant.id,
-
           tenantName: result.tenant.name,
-
           email_verified: false,
-
           phone_verified: false,
-
           subscription: {
             id: result.subscription.id,
-
             status: result.subscription.status,
-
             plan: {
               id: result.plan.id,
               code: result.plan.code,
               name: result.plan.name,
             },
-
             startDate: result.subscription.startDate,
-
             nextBillingDate: result.subscription.nextBillingDate,
           },
         }),

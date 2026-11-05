@@ -18,7 +18,6 @@ interface InvoiceLineItemInput {
 }
 
 export const invoicesController = {
-  // GET ALL INVOICES FOR TENANT (Filtered by active office)
   async getInvoices(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -113,7 +112,6 @@ export const invoicesController = {
     }
   },
 
-  // CREATE INVOICE
   async createInvoice(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -163,7 +161,6 @@ export const invoicesController = {
         await db.insert(invoiceItems).values(itemRows);
       }
 
-      // Record in client ledger if clientId is provided
       if (clientId) {
         await db.insert(clientLedger).values({
           tenantId,
@@ -186,7 +183,6 @@ export const invoicesController = {
     }
   },
 
-  // GET INVOICE BY ID
   async getInvoiceById(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -217,7 +213,6 @@ export const invoicesController = {
     }
   },
 
-  // UPDATE INVOICE
   async updateInvoice(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -279,7 +274,7 @@ export const invoicesController = {
       if (caseId !== undefined) {
         updateData.caseId = targetCaseId;
       }
-      // Recalculate status based on actual payments vs updated total
+
       const existingPayments = await db.query.payments.findMany({
         where: eq(payments.invoiceId, id),
       });
@@ -317,7 +312,6 @@ export const invoicesController = {
         }
       }
 
-      // Upsert into client ledger debit entry
       if (targetClientId) {
         const existingLedger = await db.query.clientLedger.findFirst({
           where: and(
@@ -361,7 +355,6 @@ export const invoicesController = {
     }
   },
 
-  // DELETE INVOICE
   async deleteInvoice(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -380,36 +373,30 @@ export const invoicesController = {
       }
 
       await db.transaction(async (tx) => {
-        // 1. Fetch all payment IDs linked to this invoice
         const invoicePayments = await tx
           .select({ id: payments.id })
           .from(payments)
           .where(eq(payments.invoiceId, id));
         const paymentIds = invoicePayments.map((p) => p.id);
 
-        // 2. Delete client ledger records referencing those payments
         if (paymentIds.length > 0) {
           await tx
             .delete(clientLedger)
             .where(inArray(clientLedger.paymentId, paymentIds));
         }
 
-        // 3. Delete client ledger records referencing this invoice directly (e.g. invoice debit)
         await tx
           .delete(clientLedger)
           .where(eq(clientLedger.invoiceId, id));
 
-        // 4. Delete payments referencing this invoice
         await tx
           .delete(payments)
           .where(eq(payments.invoiceId, id));
 
-        // 5. Delete line items referencing this invoice
         await tx
           .delete(invoiceItems)
           .where(eq(invoiceItems.invoiceId, id));
 
-        // 6. Delete invoice record itself
         await tx
           .delete(invoices)
           .where(eq(invoices.id, id));
@@ -425,7 +412,6 @@ export const invoicesController = {
     }
   },
 
-  // GET ALL RECEIPTS / PAYMENTS (Filtered by active office)
   async getReceipts(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -525,7 +511,6 @@ export const invoicesController = {
     }
   },
 
-  // CREATE PAYMENT / RECEIPT / TDS
   async createReceipt(req: Request, res: Response, next: NextFunction) {
     try {
       const { invoiceId, amount, mode = "Bank Transfer", description } = req.body;
@@ -553,7 +538,6 @@ export const invoicesController = {
         })
         .returning();
 
-      // Check if invoice is now settled
       const currentPaid = (inv.payments || []).reduce(
         (sum, p) => sum + (Number(p.amount) || 0),
         0,
@@ -571,7 +555,6 @@ export const invoicesController = {
           .where(eq(invoices.id, invoiceId));
       }
 
-      // Record in client ledger
       if (inv.clientId) {
         await db.insert(clientLedger).values({
           tenantId,
@@ -595,7 +578,6 @@ export const invoicesController = {
     }
   },
 
-  // UPDATE RECEIPT
   async updateReceipt(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -614,7 +596,6 @@ export const invoicesController = {
         return next(CustomErrorHandler.notFound("Payment receipt not found"));
       }
 
-      // If processed through Razorpay online gateway, lock it permanently for financial audit compliance
       const isOnlineRazorpay = existing.paymentMethod?.toLowerCase().includes("razorpay");
       if (isOnlineRazorpay) {
         return next(
@@ -633,7 +614,6 @@ export const invoicesController = {
         .where(eq(payments.id, id))
         .returning();
 
-      // Update client ledger entry if exists
       if (existing.invoice?.clientId && amount !== undefined) {
         await db
           .update(clientLedger)
@@ -644,7 +624,6 @@ export const invoicesController = {
           .where(eq(clientLedger.paymentId, id));
       }
 
-      // Recalculate invoice status
       if (existing.invoiceId && existing.invoice) {
         const remainingPayments = await db.query.payments.findMany({
           where: eq(payments.invoiceId, existing.invoiceId),
@@ -671,7 +650,6 @@ export const invoicesController = {
     }
   },
 
-  // DELETE RECEIPT
   async deleteReceipt(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -687,7 +665,6 @@ export const invoicesController = {
         return next(CustomErrorHandler.notFound("Payment receipt not found"));
       }
 
-      // If processed through Razorpay online gateway, lock it permanently for financial audit compliance
       const isOnlineRazorpay = existing.paymentMethod?.toLowerCase().includes("razorpay");
       if (isOnlineRazorpay) {
         return next(
@@ -700,13 +677,10 @@ export const invoicesController = {
       const invoiceId = existing.invoiceId;
       const invoiceRecord = existing.invoice;
 
-      // Delete associated client ledger entries first
       await db.delete(clientLedger).where(eq(clientLedger.paymentId, id));
 
-      // Delete payment record
       await db.delete(payments).where(eq(payments.id, id));
 
-      // Recalculate invoice status and total settled
       if (invoiceId && invoiceRecord) {
         const remainingPayments = await db.query.payments.findMany({
           where: eq(payments.invoiceId, invoiceId),

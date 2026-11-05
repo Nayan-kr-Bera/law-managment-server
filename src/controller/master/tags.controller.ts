@@ -5,6 +5,7 @@ import db from "../../db/index.js";
 import { caseTags, tags } from "../../db/schema/index.js";
 import ResponseHandler from "../../utils/responseHandler.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
+
 const tagController = {
   async gettags(req: Request, res: Response, next: NextFunction) {
     const tenantId = req.user.tenantId;
@@ -12,8 +13,8 @@ const tagController = {
     try {
       const tagdata = await db.query.tags.findMany({
         where: or(
-          isNull(tags.tenantId), // Built-in tags
-          eq(tags.tenantId, tenantId), // Tenant-specific tags
+          isNull(tags.tenantId),
+          eq(tags.tenantId, tenantId),
         ),
         columns: {
           id: true,
@@ -45,7 +46,6 @@ const tagController = {
         return next(CustomErrorHandler.badRequest("tag name is required"));
       }
 
-      // Check duplicate name
       const existingtag = await db.query.tags.findFirst({
         where: eq(tags.name, name),
       });
@@ -87,7 +87,6 @@ const tagController = {
         return next(CustomErrorHandler.notFound("tag not found"));
       }
 
-      // Built-in tags cannot be modified
       if (tag.isBuiltIn) {
         return next(
           CustomErrorHandler.badRequest("Built-in tags cannot be modified"),
@@ -149,7 +148,6 @@ const tagController = {
         return next(CustomErrorHandler.notFound("tag not found"));
       }
 
-      // Built-in tags cannot be deleted
       if (tag.isBuiltIn) {
         return next(
           CustomErrorHandler.badRequest("Built-in tags cannot be deleted"),

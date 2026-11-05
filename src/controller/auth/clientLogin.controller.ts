@@ -7,10 +7,6 @@ import JwtService from "../../utils/jwtServices.js";
 import { IClientJwtPayload } from "../../@types/payload.types.js";
 import { config } from "../../index.js";
 
-/**
- * Builds a fully-scoped JWT token for a client who has selected
- * (or auto-selected) a specific firm profile.
- */
 function buildScopedToken(
   identityId: string,
   email: string,
@@ -30,17 +26,6 @@ function buildScopedToken(
 }
 
 const clientAuthController = {
-  /**
-   * POST /client-portal/auth/login
-   *
-   * Flow:
-   *  1. Find client by email (UNIQUE) → verify password
-   *  2. Load all client_profiles for this identity
-   *  3a. 0 profiles → error (firm must add the client first)
-   *  3b. 1 profile → issue full scoped token, auto-select
-   *  3c. N profiles → issue a short pre-auth token + return profile list
-   *                   → client picks a firm → calls /auth/select-profile
-   */
   async login(req: Request, res: Response, next: NextFunction) {
     try {
       const { email, password } = req.body;
@@ -52,7 +37,6 @@ const clientAuthController = {
         });
       }
 
-      // Step 1: find client (login credential & identity combined — email is UNIQUE)
       const client = await db.query.clients.findFirst({
         where: eq(clients.email, email),
       });
@@ -71,7 +55,6 @@ const clientAuthController = {
         });
       }
 
-      // Step 2: verify password
       const valid = await bcrypt.compare(password, client.passwordHash);
       if (!valid) {
         return res.status(401).json({
@@ -80,7 +63,6 @@ const clientAuthController = {
         });
       }
 
-      // Record last login
       await db
         .update(clients)
         .set({ lastLoginAt: new Date() })
@@ -88,7 +70,6 @@ const clientAuthController = {
 
       const identity = client;
 
-      // Step 3: load all profiles (firm memberships) for this identity
       const profiles = await db.query.clientProfiles.findMany({
         where: eq(clientProfiles.identityId, identity.id),
         with: {
@@ -106,7 +87,6 @@ const clientAuthController = {
         phone: identity.phone ?? "",
       };
 
-      // Step 3a: no profiles — firm has not added this client yet
       if (profiles.length === 0) {
         return res.status(403).json({
           success: false,
@@ -115,7 +95,6 @@ const clientAuthController = {
         });
       }
 
-      // Format profiles, offices, and tenants
       const formattedProfiles = profiles.map((p) => ({
         profileId: p.id,
         tenantId: p.tenantId,
@@ -145,7 +124,6 @@ const clientAuthController = {
         ).values()
       );
 
-      // Auto-select first active profile as default scope
       const activeProfile = profiles.find((p) => p.status === "active") || profiles[0];
       const { accessToken } = buildScopedToken(
         identity.id,
@@ -177,12 +155,6 @@ const clientAuthController = {
     }
   },
 
-  /**
-   * POST /client-portal/auth/select-profile
-   *
-   * Called when the client has multiple firm profiles and picks one.
-   * Accepts a preAuthToken + profileId → returns a full scoped token.
-   */
   async selectProfile(req: Request, res: Response, next: NextFunction) {
     try {
       const { preAuthToken, profileId } = req.body;
@@ -194,7 +166,6 @@ const clientAuthController = {
         });
       }
 
-      // Verify the pre-auth token
       let decoded: IClientJwtPayload;
       try {
         decoded = JwtService.verifyClient(preAuthToken, config.ACCESS_SECRET);
@@ -212,7 +183,6 @@ const clientAuthController = {
         });
       }
 
-      // Verify the requested profile belongs to this identity
       const profile = await db.query.clientProfiles.findFirst({
         where: eq(clientProfiles.id, profileId),
         with: { tenant: true, office: true },
@@ -232,7 +202,6 @@ const clientAuthController = {
         });
       }
 
-      // Load identity for user object
       const identity = await db.query.clients.findFirst({
         where: eq(clients.id, decoded.clientId),
       });
@@ -266,11 +235,6 @@ const clientAuthController = {
     }
   },
 
-  /**
-   * GET /client-portal/profiles
-   *
-   * Fetches all active firm and branch office engagements for the logged-in client.
-   */
   async getProfiles(req: Request, res: Response, next: NextFunction) {
     try {
       const clientId = req.clientUser?.clientId;
@@ -323,11 +287,6 @@ const clientAuthController = {
     }
   },
 
-  /**
-   * POST /client-portal/auth/switch-profile
-   *
-   * Switches the active law firm profile / office engagement and returns a new scoped token.
-   */
   async switchProfile(req: Request, res: Response, next: NextFunction) {
     try {
       const clientId = req.clientUser?.clientId;

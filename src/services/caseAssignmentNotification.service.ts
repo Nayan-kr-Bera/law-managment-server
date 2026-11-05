@@ -46,9 +46,6 @@ export interface AdvocateEmailPayload {
   transferredToOrFromName?: string;
 }
 
-/**
- * Sends a modern MI Law HTML email to an advocate when assigned, unassigned, or reassigned to a case matter.
- */
 export const sendAdvocateCaseEmail = async ({
   advocateName,
   advocateEmail,
@@ -218,9 +215,6 @@ export const sendAdvocateCaseEmail = async ({
 
 export const sendAdvocateCaseAssignmentEmail = sendAdvocateCaseEmail;
 
-/**
- * 1. Notify Advocates when assigned to a newly created case
- */
 export const notifyAdvocatesOnCaseCreation = async (
   caseId: string,
   tenantId: string,
@@ -285,9 +279,6 @@ export const notifyAdvocatesOnCaseCreation = async (
   }
 };
 
-/**
- * 2. Notify Clients when assigned to a newly created case
- */
 export const notifyClientsOnCaseCreation = async (
   caseId: string,
   tenantId: string,
@@ -374,9 +365,6 @@ export const notifyClientsOnCaseCreation = async (
   }
 };
 
-/**
- * 3. Notify an Advocate when existing cases are assigned to them (from Advocate assign modal)
- */
 export const notifyAdvocateCasesAssigned = async (
   advocateId: string,
   tenantId: string,
@@ -432,9 +420,6 @@ export const notifyAdvocateCasesAssigned = async (
   }
 };
 
-/**
- * 4. Notify an Advocate when cases are revoked/unassigned from them
- */
 export const notifyAdvocateCasesRevoked = async (
   advocateId: string,
   tenantId: string,
@@ -490,9 +475,6 @@ export const notifyAdvocateCasesRevoked = async (
   }
 };
 
-/**
- * 5. Notify Advocates when cases are reassigned from Advocate A to Advocate B
- */
 export const notifyCasesReassigned = async (
   fromAdvocateId: string,
   toAdvocateId: string,
@@ -584,9 +566,6 @@ export const notifyCasesReassigned = async (
   }
 };
 
-/**
- * 6. Notify Client when added to an existing case
- */
 export const notifyClientAddedToCase = async (
   caseId: string,
   clientId: string,
@@ -599,9 +578,6 @@ export const notifyClientAddedToCase = async (
   }
 };
 
-/**
- * 7. Notify Client when removed/unlinked from a case
- */
 export const notifyClientRemovedFromCase = async (
   caseId: string,
   clientId: string,

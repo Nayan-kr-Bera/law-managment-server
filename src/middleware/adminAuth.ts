@@ -40,7 +40,6 @@ export const adminAuth = async (
       throw new AppError("Unauthorized: Admin portal access only", 403);
     }
 
-    // Verify user exists in database
     const existingUser = await db.query.user.findFirst({
       where: eq(users.id, decoded.userId),
     });
@@ -53,7 +52,6 @@ export const adminAuth = async (
       throw new AppError("Admin email not verified", 403);
     }
 
-    // Refresh role & permissions if needed
     if (!decoded.permissions || decoded.isSuperAdmin === undefined || !decoded.role) {
       const scope = await db.query.userScopes.findFirst({
         where: eq(userScopes.userId, decoded.userId),
@@ -124,7 +122,6 @@ export const adminAuth = async (
       }
     }
 
-    // Super Admins or Users with Admin Portal permissions are allowed
     if (!decoded.isSuperAdmin && (!decoded.permissions || decoded.permissions.length === 0)) {
       throw new AppError(
         "Access Denied: You do not have permission to access the Admin Console.",

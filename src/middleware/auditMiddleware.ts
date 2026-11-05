@@ -5,7 +5,6 @@ import auditLogService, {
   resolveRequestTenantId,
 } from "../services/auditLog.service.js";
 
-// Standard module names mapped from URL segment
 const MODULE_NAME_MAP: Record<string, string> = {
   cases: "Cases",
   hearings: "Hearings",
@@ -34,7 +33,6 @@ const MODULE_NAME_MAP: Record<string, string> = {
   "case-actions": "Cases",
 };
 
-// Sensitive property keys to scrub from recorded details
 const SENSITIVE_KEYS = new Set([
   "password",
   "oldpassword",
@@ -42,15 +40,14 @@ const SENSITIVE_KEYS = new Set([
   "confirmpassword",
   "token",
   "refreshtoken",
+  "refresh_token",
+  "access_token",
   "accesstoken",
   "otp",
   "secret",
   "authorization",
 ]);
 
-/**
- * Strips sensitive credentials from request body before logging to JSONB
- */
 function sanitizeRequestBody(body: unknown): Record<string, unknown> | null {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return null;
@@ -70,15 +67,11 @@ function sanitizeRequestBody(body: unknown): Record<string, unknown> | null {
   return Object.keys(sanitized).length > 0 ? sanitized : null;
 }
 
-/**
- * Infers human-readable module name from Express request path
- */
 function resolveModuleName(req: Request): string {
   const segments = req.baseUrl
     ? req.baseUrl.split("/").filter(Boolean)
     : req.path.split("/").filter(Boolean);
 
-  // e.g. /api/cases -> segments = ['api', 'cases']
   const raw = segments[1] || segments[0] || "General";
   const normalized = raw.toLowerCase();
 
@@ -88,11 +81,6 @@ function resolveModuleName(req: Request): string {
   );
 }
 
-/**
- * Global Automatic Audit Middleware
- * Intercepts CREATE, UPDATE, DELETE, and EXPORT actions and records them with
- * tenantId, officeId, userId, and client IP without blocking or delaying the API response.
- */
 export const autoAuditMiddleware = (
   req: Request,
   res: Response,
@@ -102,7 +90,6 @@ export const autoAuditMiddleware = (
   const url = req.originalUrl || req.url;
   const isExport = url.toLowerCase().includes("export") || url.toLowerCase().includes("download");
 
-  // Determine action
   let action: string | null = null;
   if (isExport) {
     action = "EXPORT";
@@ -114,7 +101,6 @@ export const autoAuditMiddleware = (
     action = "DELETE";
   }
 
-  // Only audit state-changing mutations or exports
   if (!action) {
     return next();
   }
@@ -124,14 +110,11 @@ export const autoAuditMiddleware = (
     return next();
   }
 
-  // Skip authentication and OTP endpoints where user/tenant context is not yet established
   if (url.startsWith("/api/auth/login") || url.startsWith("/api/otp")) {
     return next();
   }
 
-  // Listen for response completion
   res.on("finish", () => {
-    // Only record successful operations (HTTP 200 - 299)
     if (res.statusCode < 200 || res.statusCode >= 300) {
       return;
     }
@@ -141,7 +124,6 @@ export const autoAuditMiddleware = (
       const officeId = resolveRequestOfficeId(req);
       const userId = req.user?.userId || null;
 
-      // Only record events that belong to a tenant or office context
       if (!tenantId && !officeId) {
         return;
       }
@@ -153,7 +135,6 @@ export const autoAuditMiddleware = (
         (req.body && typeof req.body.id === "string" ? req.body.id : null) ||
         null;
 
-      // Extract or generate friendly description
       let description = res.locals.auditDescription as string | undefined;
       if (!description) {
         const idSuffix = entityId ? ` (ID: ${entityId.slice(0, 8)})` : "";
@@ -180,7 +161,6 @@ export const autoAuditMiddleware = (
         res.locals.auditDetails ||
         (action !== "EXPORT" && req.body ? sanitizeRequestBody(req.body) : null);
 
-      // Asynchronous record (non-blocking)
       auditLogService.record({
         tenantId,
         officeId,

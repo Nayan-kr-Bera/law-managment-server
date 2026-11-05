@@ -22,13 +22,9 @@ const refreshController = {
 
       const { refresh_token } = parsed.data;
 
-      // console.log("refresh_token", refresh_token);
-
       const tokenDoc = await db.query.refreshTokens.findFirst({
         where: eq(refreshTokens.token, refresh_token),
       });
-
-      // console.log("DB:", tokenDoc?.token);
 
       if (!tokenDoc) {
         return next(CustomErrorHandler.unAuthorized("Invalid refresh token"));
@@ -46,7 +42,6 @@ const refreshController = {
         return next(CustomErrorHandler.unAuthorized("User not found"));
       }
 
-      // Default Scope
       const scope = await db.query.userScopes.findFirst({
         where: eq(userScopes.userId, user.id),
       });

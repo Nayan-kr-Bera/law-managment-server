@@ -13,9 +13,6 @@ import CustomErrorHandler from "../../../utils/customErrorHandler.js";
 import ResponseHandler from "../../../utils/responseHandler.js";
 
 const adminSubscriptionController = {
-  // =========================================================================
-  // GET ALL TENANT SUBSCRIPTIONS
-  // =========================================================================
   async getAllSubscriptions(req: Request, res: Response, next: NextFunction) {
     try {
       const { status, search } = req.query as {
@@ -74,9 +71,6 @@ const adminSubscriptionController = {
     }
   },
 
-  // =========================================================================
-  // GET PAYMENT TRANSACTIONS
-  // =========================================================================
   async getPaymentTransactions(req: Request, res: Response, next: NextFunction) {
     try {
       const payments = await db.query.subscriptionPaymentHistory.findMany({
@@ -116,9 +110,6 @@ const adminSubscriptionController = {
     }
   },
 
-  // =========================================================================
-  // ASSIGN / CHANGE TENANT PLAN
-  // =========================================================================
   async assignTenantPlan(req: Request, res: Response, next: NextFunction) {
     try {
       const { tenantId } = req.params;
@@ -185,9 +176,6 @@ const adminSubscriptionController = {
     }
   },
 
-  // =========================================================================
-  // CANCEL TENANT SUBSCRIPTION
-  // =========================================================================
   async cancelTenantSubscription(req: Request, res: Response, next: NextFunction) {
     try {
       const { tenantId } = req.params;

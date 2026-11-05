@@ -2,6 +2,7 @@ export interface IUserJwtPayload {
   userId: string;
   tenantId: string;
   scopeId: string;
+  officeId?: string;
   email: string;
   name?: string;
   role?: string;
@@ -9,6 +10,7 @@ export interface IUserJwtPayload {
   permissions: string[];
   isTenantAdmin?: boolean;
   portal?: "tenant";
+  sid?: string;
   iat?: number;
   exp?: number;
 }

@@ -97,7 +97,6 @@ const userController = {
       const { id } = req.params;
       const { name, email, phone } = req.body;
 
-      // 1. Find existing use
       const existingUser = await db.query.user.findFirst({
         where: and(eq(users.id, id), isNull(users.deletedAt)),
         columns: {
@@ -114,9 +113,7 @@ const userController = {
 
       let avatarUrl: string | undefined;
 
-      // 2. Handle avatar if uploaded
       if (req.file) {
-        // 3. Delete old avatar if it exists
         if (existingUser.avatar) {
           try {
             await deleteFileFromCloudinary(existingUser.avatar, "image");
@@ -125,7 +122,6 @@ const userController = {
           }
         }
 
-        // 4. Upload new avatar
         const uploadedFile = await uploadFileToCloudinary({
           buffer: req.file.buffer,
           originalName: req.file.originalname,
@@ -136,7 +132,6 @@ const userController = {
         avatarUrl = uploadedFile.secureUrl;
       }
 
-      // 5. Update database
       const [updatedUser] = await db
         .update(users)
         .set({
@@ -216,10 +211,6 @@ const userController = {
     try {
       const { id } = req.params;
 
-      // ---------------------------------------------------------
-      // 1. FIND USER
-      // ---------------------------------------------------------
-
       const existingUser = await db.query.user.findFirst({
         where: and(eq(users.id, id), isNull(users.deletedAt)),
         columns: {
@@ -234,17 +225,9 @@ const userController = {
         return next(CustomErrorHandler.notFound("User not found"));
       }
 
-      // ---------------------------------------------------------
-      // 2. DELETE AVATAR FROM CLOUDINARY
-      // ---------------------------------------------------------
-
       if (existingUser.avatar) {
         await deleteFileFromCloudinary(existingUser.avatar, "image");
       }
-
-      // ---------------------------------------------------------
-      // 3. SOFT DELETE USER
-      // ---------------------------------------------------------
 
       const [deletedUser] = await db
         .update(users)
@@ -263,10 +246,6 @@ const userController = {
       if (!deletedUser) {
         return next(CustomErrorHandler.notFound("User not found"));
       }
-
-      // ---------------------------------------------------------
-      // 4. RESPONSE
-      // ---------------------------------------------------------
 
       return res.status(200).json({
         success: true,

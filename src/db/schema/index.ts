@@ -7,6 +7,7 @@ export { default as offices } from "./offices.js";
 export { default as user } from "./users.js";
 export { default as userScopes } from "./userScope.js";
 export { default as refreshTokens } from "./refreshToken.js";
+export { default as mobileSessions } from "./mobileSession.js";
 export { default as emailOtp } from "./emailOtp.js";
 export { default as userScopeOffices } from "./userscopeoffices.js";
 
@@ -96,6 +97,10 @@ export { default as notificationLogs } from "./notifications/notificationLogs.js
 // AI
 
 export { default as aiDrafts } from "./ai/aiDrafts.js";
+export {
+  default as judgmentAiSessions,
+  type IJudgmentSessionMessage,
+} from "./ai/judgmentAiSessions.js";
 
 // Court Integration
 

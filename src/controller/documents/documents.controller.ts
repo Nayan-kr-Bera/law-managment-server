@@ -30,8 +30,6 @@ import ocrQueueService from "../../services/ocrQueue.service.js";
 import razorpayService from "../../services/razorpay.service.js";
 
 const caseDocumentController = {
-  // UPLOAD DOCUMENT
-
   async uploadDocument(req: Request, res: Response, next: NextFunction) {
     let uploadedFile: {
       publicId: string;
@@ -44,7 +42,6 @@ const caseDocumentController = {
       let officeId = req.officeId || req.body.officeId || null;
       const { caseId, folderId, isConfidential, isPrivate } = req.body;
 
-      // If client user context, verify client belongs to the case
       if (req.clientUser && caseId) {
         const clientAccess = await db.query.caseClients.findFirst({
           where: and(
@@ -61,7 +58,6 @@ const caseDocumentController = {
         }
       }
 
-      // Derive tenantId & officeId directly from target Case record if provided
       if (caseId) {
         const caseRecord = await db.query.cases.findFirst({
           where: eq(cases.id, caseId),
@@ -73,7 +69,6 @@ const caseDocumentController = {
         }
       }
 
-      // If client user context and still no tenantId, resolve from JWT token payload
       if (!tenantId && req.clientUser?.tenantId) {
         tenantId = req.clientUser.tenantId;
         officeId = officeId || req.clientUser.officeId || null;
@@ -90,8 +85,6 @@ const caseDocumentController = {
           CustomErrorHandler.unAuthorized("User information is missing"),
         );
       }
-
-      // FILE
 
       const file = req.file;
 
@@ -123,8 +116,6 @@ const caseDocumentController = {
         }
       }
 
-      // UPLOAD TO CLOUDINARY
-
       const cloudinaryResult = await uploadFileToCloudinary({
         buffer: file.buffer,
         originalName: file.originalname,
@@ -137,17 +128,7 @@ const caseDocumentController = {
         resourceType: cloudinaryResult.resourceType,
       };
 
-      // ACTUAL FILE SIZE
-
       const actualFileSize = cloudinaryResult.bytes;
-
-      // UPDATE TENANT STORAGE
-      //
-      // Middleware already checked the limit.
-      //
-      // This update only records the actual Cloudinary
-      // file size.
-      //
 
       await db
         .update(tenants)
@@ -160,55 +141,32 @@ const caseDocumentController = {
         })
         .where(eq(tenants.id, tenantId));
 
-      // SAVE DOCUMENT
-
       const [document] = await db
         .insert(caseDocuments)
         .values({
           tenantId,
-
           officeId: officeId || null,
-
           caseId: caseId || null,
-
-          // Optional
-          // null = document directly under case
-          // UUID = document belongs to folder
           folderId: folderId || null,
-
           uploadedBy: userId || null,
-
           fileName: file.originalname,
-
           originalName: file.originalname,
-
           fileUrl: cloudinaryResult.secureUrl,
-
           mimeType: file.mimetype,
-
           fileSize: actualFileSize,
-
           cloudinaryPublicId: cloudinaryResult.publicId,
-
           cloudinaryResourceType: cloudinaryResult.resourceType,
-
           isConfidential: isConfidential === "true" || isConfidential === true,
-
           isPrivate: isPrivate === "true" || isPrivate === true,
-
           version: 1,
         })
         .returning();
-
-      // RESPONSE
 
       return res
         .status(201)
         .send(ResponseHandler(201, "Document uploaded successfully", document));
     } catch (error) {
       console.error("Case document upload error:", error);
-
-      // CLOUDINARY CLEANUP
 
       if (uploadedFile) {
         try {
@@ -234,8 +192,6 @@ const caseDocumentController = {
         );
       }
 
-      // FIND DOCUMENT
-
       const [document] = await db
         .select({
           id: caseDocuments.id,
@@ -253,16 +209,12 @@ const caseDocumentController = {
         return next(CustomErrorHandler.notFound("Document not found"));
       }
 
-      // DELETE FROM CLOUDINARY
-
       if (document.cloudinaryPublicId && document.cloudinaryResourceType) {
         await deleteCloudinaryDocumentFile(
           document.cloudinaryPublicId,
           document.cloudinaryResourceType as "image",
         );
       }
-
-      // DECREASE TENANT STORAGE
 
       const fileSize = Number(document.fileSize ?? 0);
 
@@ -281,8 +233,6 @@ const caseDocumentController = {
           .where(eq(tenants.id, tenantId));
       }
 
-      // DELETE DATABASE RECORD
-
       const [deletedDocument] = await db
         .delete(caseDocuments)
         .where(
@@ -295,8 +245,6 @@ const caseDocumentController = {
       if (!deletedDocument) {
         return next(CustomErrorHandler.notFound("Document not found"));
       }
-
-      // RESPONSE
 
       return res
         .status(200)
@@ -314,7 +262,6 @@ const caseDocumentController = {
     }
   },
 
-  // GENERAL DOCUMENT EXPLORER
   async getGeneralDocuments(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -327,32 +274,24 @@ const caseDocumentController = {
 
       const { folderId } = req.query;
 
-      // FOLDER CONDITION
       const folderCondition = folderId
         ? eq(documentFolders.parentId, folderId as string)
         : isNull(documentFolders.parentId);
 
-      // GET FOLDERS
       const folders = await db
         .select()
         .from(documentFolders)
         .where(
           and(
             eq(documentFolders.tenantId, tenantId),
-
-            // General folders only
             isNull(documentFolders.caseId),
-
             folderCondition,
           ),
         );
 
-      // DOCUMENT CONDITION
       const documentCondition = folderId
         ? eq(caseDocuments.folderId, folderId as string)
         : isNull(caseDocuments.folderId);
-
-      // GET DOCUMENTS
 
       const documents = await db
         .select()
@@ -360,15 +299,11 @@ const caseDocumentController = {
         .where(
           and(
             eq(caseDocuments.tenantId, tenantId),
-
-            // General documents only
             isNull(caseDocuments.caseId),
-
             documentCondition,
           ),
         );
 
-      // RESPONSE
       return res.status(200).send(
         ResponseHandler(200, "General documents fetched successfully", {
           folderId: folderId || null,
@@ -383,7 +318,6 @@ const caseDocumentController = {
     }
   },
 
-  // CASE DOCUMENT EXPLORER
   async getCaseDocuments(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -400,7 +334,6 @@ const caseDocumentController = {
         return next(CustomErrorHandler.badRequest("Case ID is required"));
       }
 
-      // TOTAL DOCUMENT COUNT FOR THE CASE
       const totalDocsResult = await db
         .select({ total: count() })
         .from(caseDocuments)
@@ -413,12 +346,10 @@ const caseDocumentController = {
 
       const totalDocumentCount = Number(totalDocsResult[0]?.total || 0);
 
-      // FOLDER CONDITION
       const folderCondition = folderId
         ? eq(documentFolders.parentId, folderId as string)
         : isNull(documentFolders.parentId);
 
-      // GET FOLDERS
       const folders = await db
         .select()
         .from(documentFolders)
@@ -430,7 +361,6 @@ const caseDocumentController = {
           ),
         );
 
-      // DOCUMENT CONDITION
       const documentCondition = includeAll === "true"
         ? undefined
         : folderId
@@ -446,13 +376,11 @@ const caseDocumentController = {
         docWhereFilters.push(documentCondition);
       }
 
-      // GET DOCUMENTS
       const documents = await db
         .select()
         .from(caseDocuments)
         .where(and(...docWhereFilters));
 
-      // RESPONSE
       return res.status(200).send(
         ResponseHandler(200, "Case documents fetched successfully", {
           caseId,
@@ -469,7 +397,6 @@ const caseDocumentController = {
     }
   },
 
-  // TRIGGER OCR EXTRACTION (Asynchronously queued, page quota verified)
   async triggerOcr(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -496,7 +423,6 @@ const caseDocumentController = {
         return next(CustomErrorHandler.notFound("Document not found"));
       }
 
-      // Pre-check monthly and addon OCR credits from subscription
       const subscription = await db.query.tenantSubscriptions.findFirst({
         where: and(
           eq(tenantSubscriptions.tenantId, tenantId),
@@ -530,7 +456,6 @@ const caseDocumentController = {
         );
       }
 
-      // Mark document as 'pending'
       await db
         .update(caseDocuments)
         .set({
@@ -540,7 +465,6 @@ const caseDocumentController = {
         })
         .where(eq(caseDocuments.id, id));
 
-      // Push to isolated OCR Queue (Worker executes in background without slowing down the API)
       ocrQueueService.addJob({
         documentId: id,
         tenantId,
@@ -572,9 +496,9 @@ const caseDocumentController = {
     }
   },
 
-  // GET TENANT OCR QUOTA & USAGE (Credit basis: 10 credits / page)
   async getOcrQuota(req: Request, res: Response, next: NextFunction) {
     try {
+      res.set("Cache-Control", "no-store");
       const tenantId = req.user?.tenantId;
       if (!tenantId) {
         return next(
@@ -600,7 +524,6 @@ const caseDocumentController = {
       let creditsUsed = subscription?.ocrCreditsUsedThisMonth ?? ((subscription?.ocrPagesUsedThisMonth ?? 0) * OCR_CREDITS_PER_PAGE);
       let addonCredits = subscription?.ocrAddonCredits ?? 0;
 
-      // Check monthly cycle reset
       if (subscription?.ocrCycleResetDate) {
         const now = new Date();
         const resetDate = new Date(subscription.ocrCycleResetDate);
@@ -659,7 +582,6 @@ const caseDocumentController = {
     }
   },
 
-  // GET OCR CREDIT PACKS & PRICING (₹2.00 / credit, 10 credits / page)
   async getOcrCreditPacks(req: Request, res: Response, next: NextFunction) {
     try {
       return res.status(200).json({
@@ -677,7 +599,6 @@ const caseDocumentController = {
     }
   },
 
-  // CREATE RAZORPAY PAYMENT ORDER FOR OCR CREDITS
   async createOcrCreditOrder(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -743,7 +664,6 @@ const caseDocumentController = {
     }
   },
 
-  // VERIFY RAZORPAY PAYMENT FOR OCR CREDITS
   async verifyOcrCreditPayment(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -779,7 +699,6 @@ const caseDocumentController = {
         return next(CustomErrorHandler.badRequest("Invalid payment signature verification"));
       }
 
-      // Add credits to tenant subscription pool
       await db
         .update(tenantSubscriptions)
         .set({
@@ -787,7 +706,6 @@ const caseDocumentController = {
         })
         .where(eq(tenantSubscriptions.tenantId, tenantId));
 
-      // Record in subscriptionPaymentHistory
       const subtotal = Math.round(credits * OCR_CREDIT_RATE_INR * 100) / 100;
       const gstAmount = Math.round(subtotal * (OCR_CREDIT_GST_PERCENT / 100) * 100) / 100;
       const finalAmount = amount || Math.round((subtotal + gstAmount) * 100) / 100;
@@ -820,7 +738,6 @@ const caseDocumentController = {
     }
   },
 
-  // OCR FULL-TEXT SEARCH (Fast query on PostgreSQL indexed text)
   async searchOcr(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -871,7 +788,6 @@ const caseDocumentController = {
         .where(and(...filters))
         .limit(50);
 
-      // Create highlight snippets around the search query
       const results = matchedDocs.map((doc) => {
         const text = doc.ocrText || "";
         const lowerText = text.toLowerCase();
@@ -921,7 +837,6 @@ const caseDocumentController = {
     }
   },
 
-  // GET DOCUMENT BY ID (with OCR text & Case context)
   async getDocumentById(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId || null;

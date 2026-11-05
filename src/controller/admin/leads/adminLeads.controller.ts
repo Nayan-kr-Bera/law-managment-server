@@ -71,8 +71,6 @@ function classifyCaseOpportunities(
       ? caseRow.caseValue
       : extractAmountFromText(caseRow.remarks) || 750000;
 
-  // Model A: Litigation Funding & Legal Fee Financing
-  // Triggers: Substantial case value (>= 5 Lakhs) or prolonged duration (> 1 yr)
   if (effectiveValue >= 500000 || (effectiveValue > 0 && caseRow.durationDays > 365)) {
     models.push({
       type: "litigation_funding",
@@ -84,8 +82,6 @@ function classifyCaseOpportunities(
     });
   }
 
-  // Model B: Institutional Private Mediation & ADR (Mediation Act 2023)
-  // Triggers: Civil, Commercial, Property, Matrimonial, Partition, 138/settlement, or General delay > 1 yr
   const isMediationFit =
     textCorpus.includes("civil") ||
     textCorpus.includes("commercial") ||
@@ -110,8 +106,6 @@ function classifyCaseOpportunities(
     });
   }
 
-  // Model C: Second Opinion & Senior Counsel Briefing Desk
-  // Triggers: High adjournments count (>= 5 hearings) or High Court / Supreme Court bench or high stakes
   const isAppellateCourt =
     (caseRow.courtType || "").toLowerCase().includes("high") ||
     (caseRow.courtType || "").toLowerCase().includes("supreme") ||
@@ -129,8 +123,6 @@ function classifyCaseOpportunities(
     });
   }
 
-  // Model D: Auxiliary Legal Services (Asset Tracing, ROC Forensics, Recovery)
-  // Triggers: 138 NI Act, Summary Suits, Execution Petitions, Money Recovery, Cheque Bounce, Dishonour
   const isRecoveryFit =
     textCorpus.includes("138") ||
     textCorpus.includes("ni act") ||
@@ -154,7 +146,6 @@ function classifyCaseOpportunities(
     });
   }
 
-  // Default fallback if no specific trigger fired
   if (models.length === 0) {
     models.push({
       type: "mediation_adr",
@@ -166,7 +157,6 @@ function classifyCaseOpportunities(
     });
   }
 
-  // Assign primary opportunity
   let primaryOpportunity: LeadClassification["primaryOpportunity"] = "mediation_adr";
   if (models.some((m) => m.type === "litigation_funding")) {
     primaryOpportunity = "litigation_funding";
@@ -182,12 +172,6 @@ function classifyCaseOpportunities(
 }
 
 const adminLeadsController = {
-  /**
-   * GET /api/admin/leads/stalled-cases
-   * Fetches stalled cases (> 1 year pending) enriched with client contact information
-   * and tagged for the 4 monetization business models.
-   * Access: Super Admin OR users with "admin.leads.read" permission only.
-   */
   async getStalledCaseLeads(req: Request, res: Response, next: NextFunction) {
     try {
       const page = Math.max(1, parseInt(req.query.page as string) || 1);
@@ -220,7 +204,6 @@ const adminLeadsController = {
         durationCondition
       );
 
-      // Fetch stalled cases with joins
       const query = db
         .select({
           caseId: cases.id,
@@ -289,10 +272,8 @@ const adminLeadsController = {
         );
       }
 
-      // Fetch client contacts and hearing counts for these cases
       const caseIds = rawCases.map((c) => c.caseId);
 
-      // Clients mapping
       const clientsData = await db
         .select({
           caseId: caseClients.caseId,
@@ -319,7 +300,6 @@ const adminLeadsController = {
         clientsByCaseId.get(client.caseId)!.push(client);
       }
 
-      // Hearing counts mapping
       const hearingCountsData = await db
         .select({
           caseId: hearings.caseId,
@@ -334,7 +314,6 @@ const adminLeadsController = {
         if (h.caseId) hearingCountMap.set(h.caseId, Number(h.count));
       }
 
-      // Build enriched leads with opportunity classification
       const enrichedLeads = rawCases.map((c) => {
         const hearingsCount = hearingCountMap.get(c.caseId) || 0;
         const caseValueNum =
@@ -410,7 +389,6 @@ const adminLeadsController = {
         };
       });
 
-      // Filter by requested opportunity type if specified
       let filteredLeads = enrichedLeads;
       if (opportunityType !== "all") {
         filteredLeads = enrichedLeads.filter((l) =>
@@ -418,7 +396,6 @@ const adminLeadsController = {
         );
       }
 
-      // Optional client search filter (if search was matching client name/phone)
       if (search) {
         const lowerSearch = search.toLowerCase();
         filteredLeads = filteredLeads.filter(
@@ -456,11 +433,6 @@ const adminLeadsController = {
     }
   },
 
-  /**
-   * GET /api/admin/leads/stats
-   * Provides executive pipeline statistics across the 4 business models.
-   * Access: Super Admin OR users with "admin.leads.read" permission only.
-   */
   async getLeadStats(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.query.tenantId as string;

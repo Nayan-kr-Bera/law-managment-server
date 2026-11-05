@@ -11,26 +11,10 @@ import { bareActCategoryEnum } from "../db/schema/enum.js";
 import { AppError } from "../middleware/errorHandler.js";
 
 /**
- * ============================================================================
- * Official IndiaCode (indiacode.nic.in) Architecture & Resilience Strategy
- * ============================================================================
- * 1. The official Government of India repository (https://www.indiacode.nic.in),
- *    maintained by the Ministry of Law and Justice / NIC, is hosted on DSpace
- *    (an open-source digital archiving system using /handle/123456789/... links)
- *    and does NOT provide a public open REST API.
- * 2. Community wrappers (e.g. https://indiacode.ecourtsindia.com/api/v1) have
- *    been decommissioned (HTTP 410 Gone).
- * 3. Architecture & Pipeline:
- *    - Tier 1: Local PostgreSQL database (`bare_acts` & `bare_act_sections`).
- *              Fast, offline, zero-latency.
- *    - Tier 2: Live Statutory Central Acts Directory (848+ Parliament enactments).
- *    - Tier 3: External IndiaCode API wrapper (if configured and accessible).
- *              Wrapped in short timeouts and graceful fall-through so 410/network
- *              errors never break user workflows.
- *    - Cache-Aside Dynamic Auto-Persist: First time an enactment or provision is
- *      requested, it is fetched live and immediately saved into PostgreSQL.
- *      All subsequent queries are served 100% from PostgreSQL.
- * ============================================================================
+ * Official IndiaCode (indiacode.nic.in) is hosted on DSpace without a public REST API,
+ * and community wrappers (indiacode.ecourtsindia.com) return HTTP 410 Gone.
+ * Pipeline: Tier 1 Local PostgreSQL -> Tier 2 Live Statutory Central Acts Directory ->
+ * Tier 3 External API wrapper (with short timeout & cache-aside auto-persist to PostgreSQL).
  */
 const INDIA_CODE_BASE_URL = process.env.INDIA_CODE_API_URL || "https://indiacode.ecourtsindia.com/api/v1";
 
@@ -174,9 +158,6 @@ class IndiaCodeService {
     INDIA_CODE_BASE_URL.includes("indiacode.ecourtsindia.com") ||
     process.env.DISABLE_EXTERNAL_INDIACODE === "true";
 
-  /**
-   * Common slug aliases to map informal or legacy slugs to live eCourts IndiaCode IDs
-   */
   public static readonly SLUG_ALIASES: Record<string, string> = {
     "prevention-of-corruption-act-1988": "pc-act",
     "prevention-of-corruption-act": "pc-act",
@@ -214,16 +195,28 @@ class IndiaCodeService {
     "competition-act": "the-competition-act-2002",
     "indian-partnership-act": "the-indian-partnership-act-1932",
     "indian-partnership": "the-indian-partnership-act-1932",
+    "the-indian-partnership-act-1932": "the-indian-partnership-act-1932",
+    "ipa": "the-indian-partnership-act-1932",
+    "partnership-act": "the-indian-partnership-act-1932",
     "arbitration-and-conciliation": "the-arbitration-and-conciliation-act-1996",
     "arbitration-and-conciliation-act": "the-arbitration-and-conciliation-act-1996",
     "bharatiya-nyaya-sanhita": "the-bharatiya-nyaya-sanhita-2023",
+    "mv-act": "the-motor-vehicles-act-1988",
+    "motor-vehicles-act": "the-motor-vehicles-act-1988",
+    "motor-vehicles-act-1988": "the-motor-vehicles-act-1988",
+    "motor-vehicles": "the-motor-vehicles-act-1988",
+    "the-motor-vehicles-act": "the-motor-vehicles-act-1988",
+    "the-motor-vehicles-act-1988": "the-motor-vehicles-act-1988",
+    "mva": "the-motor-vehicles-act-1988",
+    "mv": "the-motor-vehicles-act-1988",
+    "consumer-protection-act": "the-consumer-protection-act-2019",
+    "the-consumer-protection-act-2019": "the-consumer-protection-act-2019",
+    "the-consumer-protection-act": "the-consumer-protection-act-2019",
+    "cpa": "the-consumer-protection-act-2019",
   };
 
-  /**
-   * Fetch and cache the live directory of 848+ Central Acts of India
-   */
   public async fetchLiveCentralActs(): Promise<ICentralActIndexItem[]> {
-    const CACHE_TTL_MS = 3 * 60 * 60 * 1000; // 3 hours cache
+    const CACHE_TTL_MS = 3 * 60 * 60 * 1000;
     if (
       IndiaCodeService.centralActsCache &&
       Date.now() - IndiaCodeService.centralActsCache.timestamp < CACHE_TTL_MS &&
@@ -305,12 +298,12 @@ class IndiaCodeService {
     }
   }
 
-  /**
-   * Fetch and parse full live Act details & statutory provisions from open parliamentary enactments
-   */
-  public async fetchLiveActDetails(slugOrHref: string): Promise<ILiveParsedAct | null> {
-    const clean = (slugOrHref || "").toLowerCase().trim();
+  public async fetchLiveActDetails(slugOrHref: string, hintTitle?: string): Promise<ILiveParsedAct | null> {
+    let clean = (slugOrHref || "").toLowerCase().trim();
     if (!clean) return null;
+    if (IndiaCodeService.SLUG_ALIASES[clean]) {
+      clean = IndiaCodeService.SLUG_ALIASES[clean].toLowerCase().trim();
+    }
 
     const cached = IndiaCodeService.parsedActDetailsCache.get(clean);
     if (cached && Date.now() - cached.timestamp < 3 * 60 * 60 * 1000) {
@@ -332,8 +325,77 @@ class IndiaCodeService {
     if (!matched) {
       matched = liveActs.find((a) => {
         const s = a.slug.toLowerCase();
-        return s.includes(clean) || clean.includes(s);
+        return s === `the-${clean}` || `the-${s}` === clean;
       });
+    }
+
+    if (!matched) {
+      const withoutAct = clean.replace(/-act$/, "");
+      const withoutThe = clean.replace(/^the-/, "");
+      const withThe = clean.startsWith("the-") ? clean : `the-${clean}`;
+      matched = liveActs.find((a) => {
+        const s = a.slug.toLowerCase();
+        const h = a.href.toLowerCase();
+        return (
+          s === withThe ||
+          s === withoutThe ||
+          h.endsWith(`/${withThe}`) ||
+          h.endsWith(`/${withoutThe}`) ||
+          (a.aliases && a.aliases.some((al) => {
+            const low = al.toLowerCase();
+            return low === clean || low === withoutAct || low === withoutThe;
+          }))
+        );
+      });
+    }
+
+    if (!matched && hintTitle) {
+      const cleanHint = hintTitle
+        .toLowerCase()
+        .replace(/^the\s+/i, "")
+        .replace(/\bact\b/gi, "")
+        .replace(/\b(18|19|20)\d{2}\b/g, "")
+        .replace(/[^a-z0-9]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      if (cleanHint.length > 3) {
+        matched = liveActs.find((a) => {
+          const cleanActTitle = a.title
+            .toLowerCase()
+            .replace(/^the\s+/i, "")
+            .replace(/\bact\b/gi, "")
+            .replace(/\b(18|19|20)\d{2}\b/g, "")
+            .replace(/[^a-z0-9]/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+          return cleanActTitle === cleanHint || cleanActTitle.includes(cleanHint) || cleanHint.includes(cleanActTitle);
+        });
+      }
+    }
+
+    if (!matched) {
+      matched = liveActs.find((a) => {
+        const s = a.slug.toLowerCase();
+        return s.startsWith(clean) || clean.startsWith(s);
+      });
+    }
+
+    if (!matched) {
+      matched = liveActs.find((a) => {
+        const s = a.slug.toLowerCase();
+        return s.includes(clean);
+      });
+    }
+
+    if (!matched) {
+      const normalizedQuery = clean.replace(/[-_]/g, " ").replace(/^the\s+/i, "").replace(/\s+act.*$/i, "").trim();
+      if (normalizedQuery.length >= 4) {
+        matched = liveActs.find((a) => {
+          const normalizedTitle = a.title.toLowerCase().replace(/[^a-z0-9\s]/g, " ");
+          return normalizedTitle.includes(normalizedQuery);
+        });
+      }
     }
 
     if (!matched) {
@@ -440,9 +502,6 @@ class IndiaCodeService {
     }
   }
 
-  /**
-   * Search Acts dynamically from Database and Live Central Acts Registry
-   */
   async searchActs(
     query: string,
     options?: {
@@ -459,7 +518,6 @@ class IndiaCodeService {
 
     console.log(`[IndiaCodeService] 🔍 searchActs called: query="${query || ""}", jurisdiction="${options?.jurisdiction || "all"}", limit=${limit}, offset=${offset}`);
 
-    // 1. Try external IndiaCode API if configured and accessible
     if (!IndiaCodeService.externalApiDisabled) {
       try {
         const params = new URLSearchParams();
@@ -526,7 +584,6 @@ class IndiaCodeService {
       }
     }
 
-    // 2. Query Database 'bare_acts' table
     const conditions = [];
 
     if (cleanQuery) {
@@ -573,7 +630,6 @@ class IndiaCodeService {
       .where(whereClause)
       .orderBy(bareActs.title);
 
-    // 3. Query Live Central Acts Directory (848+ Central Acts)
     const liveCentralActs = await this.fetchLiveCentralActs();
     let matchingLiveActs: IIndiaCodeSearchResult[] = [];
 
@@ -615,7 +671,6 @@ class IndiaCodeService {
       }));
     }
 
-    // 4. Merge results (DB acts take precedence, live central acts augment)
     const actMap = new Map<string, IIndiaCodeSearchResult>();
     for (const d of dbActs) {
       actMap.set(d.slug.toLowerCase(), {
@@ -659,7 +714,6 @@ class IndiaCodeService {
       }
     }
 
-    // Relevance-based sorting: exact or primary matches first
     const allActs = Array.from(actMap.values()).sort((a, b) => {
       if (!cleanQuery) return 0;
       const aTitle = (a.title || "").toLowerCase();
@@ -700,10 +754,6 @@ class IndiaCodeService {
     };
   }
 
-  /**
-   * Universal Provision Search across Acts
-   * Searches sections, articles, orders, rules dynamically from Database
-   */
   async searchProvisions(
     query: string,
     options?: {
@@ -727,7 +777,6 @@ class IndiaCodeService {
     const limit = Math.min(50, Math.max(1, Number(options?.limit) || 15));
     const offset = Math.max(0, Number(options?.offset) || 0);
 
-    // 1. Try external API
     try {
       const params = new URLSearchParams({
         q: cleanQuery,
@@ -759,7 +808,6 @@ class IndiaCodeService {
       // Fall through to database
     }
 
-    // 2. Dynamic Database Search from 'bare_act_sections'
     const matchingDbSections = await db.query.bareActSections.findMany({
       where: or(
         ilike(bareActSections.title, `%${cleanQuery}%`),
@@ -792,9 +840,6 @@ class IndiaCodeService {
     };
   }
 
-  /**
-   * Get Code of Civil Procedure (CPC) Order overview and list of Rules
-   */
   async getCPCOrder(order: string | number): Promise<{
     order?: string;
     order_arabic?: number;
@@ -817,10 +862,6 @@ class IndiaCodeService {
     }
   }
 
-  /**
-   * Auto-persist an externally fetched Act and its provisions into PostgreSQL
-   * so subsequent reads are served entirely from the local Database.
-   */
   public async autoPersistActToDatabase(liveAct: ILiveParsedAct): Promise<void> {
     const { overview, sections } = liveAct;
     const act = overview.act;
@@ -829,8 +870,14 @@ class IndiaCodeService {
     console.log(`[IndiaCodeService] 💾 Auto-persisting enactment '${act.short_title}' (${act.id}) with ${sections.length} sections into PostgreSQL...`);
 
     try {
+      const aliasEntries = Object.entries(IndiaCodeService.SLUG_ALIASES);
+      const matchingAliases = aliasEntries
+        .filter(([alias, target]) => target === act.id || alias === act.id)
+        .flatMap(([alias, target]) => [alias, target]);
+      const possibleSlugs = Array.from(new Set([act.id, ...matchingAliases]));
+
       const existing = await db.query.bareActs.findFirst({
-        where: eq(bareActs.slug, act.id),
+        where: or(...possibleSlugs.map((s) => eq(bareActs.slug, s))),
       });
 
       let actId = existing?.id;
@@ -864,35 +911,53 @@ class IndiaCodeService {
       if (!actId || sections.length === 0) return;
 
       const existingSecs = await db
-        .select({ sectionNumber: bareActSections.sectionNumber })
+        .select({ sectionNumber: bareActSections.sectionNumber, slug: bareActSections.slug })
         .from(bareActSections)
         .where(eq(bareActSections.actId, actId));
 
-      const existingSet = new Set(existingSecs.map((s) => s.sectionNumber.toLowerCase().trim()));
+      const existingSet = new Set(
+        existingSecs.flatMap((s) => [
+          s.sectionNumber.toLowerCase().trim(),
+          s.sectionNumber.toLowerCase().replace(/^(section|article|order|rule)\s+/i, "").trim(),
+          s.slug.toLowerCase().trim(),
+        ])
+      );
       const newSecRecords: (typeof bareActSections.$inferInsert)[] = [];
 
       for (let i = 0; i < sections.length; i++) {
         const sec = sections[i];
-        const secNumberStr = String(sec.number).trim();
-        if (existingSet.has(secNumberStr.toLowerCase())) continue;
+        const rawNum = String(sec.number).trim();
+        const pureNum = rawNum.replace(/^(section|article|order|rule)\s+/i, "").trim();
+        const secNumberStr = act.unit === "article" ? `Article ${pureNum}` : `Section ${pureNum}`;
 
-        const secNumeric = this.parseNumeric(secNumberStr);
-        const secSlug = `${act.id}-section-${secNumberStr.toLowerCase()}`;
+        if (
+          existingSet.has(rawNum.toLowerCase()) ||
+          existingSet.has(pureNum.toLowerCase()) ||
+          existingSet.has(secNumberStr.toLowerCase())
+        ) {
+          continue;
+        }
+
+        const secNumeric = this.parseNumeric(pureNum);
+        const secSlug = `${existing?.slug || act.id}-section-${pureNum.toLowerCase()}`;
 
         newSecRecords.push({
           actId,
           sectionType: act.unit === "article" ? "article" : "section",
           sectionNumber: secNumberStr,
           sectionNumeric: secNumeric,
-          title: sec.heading || `Section ${secNumberStr}`,
+          title: sec.heading || `Section ${pureNum}`,
           slug: secSlug,
-          content: sec.text || sec.heading || `Section ${secNumberStr} of ${act.short_title}`,
+          content: sec.text || sec.heading || `Section ${pureNum} of ${act.short_title}`,
           bailableStatus: "not_applicable",
           cognizableStatus: "not_applicable",
           compoundableStatus: "not_applicable",
           orderIndex: i + 1,
-          keywords: [secNumberStr.toLowerCase(), (sec.heading || "").toLowerCase(), act.id],
+          keywords: [pureNum.toLowerCase(), secNumberStr.toLowerCase(), (sec.heading || "").toLowerCase(), act.id],
         });
+        existingSet.add(rawNum.toLowerCase());
+        existingSet.add(pureNum.toLowerCase());
+        existingSet.add(secNumberStr.toLowerCase());
       }
 
       if (newSecRecords.length > 0) {
@@ -901,16 +966,21 @@ class IndiaCodeService {
           await db.insert(bareActSections).values(chunk).onConflictDoNothing();
         }
       }
+
+      await db
+        .update(bareActs)
+        .set({
+          totalSections: Math.max(act.section_count || 0, existingSecs.length + newSecRecords.length),
+        })
+        .where(eq(bareActs.id, actId));
+
       console.log(`[IndiaCodeService] ✅ Successfully auto-persisted '${act.short_title}' to PostgreSQL (${newSecRecords.length} new provisions saved).`);
     } catch (err) {
       console.warn(`[IndiaCodeService] ⚠️ Auto-persist error for '${act.id}':`, err);
     }
   }
 
-  /**
-   * Get an Act's overview, all section headings, and schedules dynamically from Database
-   */
-  async getActOverview(actSlug: string): Promise<IIndiaCodeActOverview> {
+  async getActOverview(actSlug: string, hintTitle?: string): Promise<IIndiaCodeActOverview> {
     if (!actSlug || typeof actSlug !== "string") {
       throw new AppError("A valid actSlug is required", 400);
     }
@@ -921,7 +991,6 @@ class IndiaCodeService {
 
     console.log(`[IndiaCodeService] 📖 getActOverview requested for: "${actSlug}" (resolved: "${cleanSlug}")`);
 
-    // 1. Try external IndiaCode API (with short timeout)
     try {
       const url = `${INDIA_CODE_BASE_URL}/acts/${cleanSlug}`;
       const response = await fetch(url, { signal: AbortSignal.timeout(3000) });
@@ -935,7 +1004,6 @@ class IndiaCodeService {
       // External API unavailable / withdrawn -> proceed to database query
     }
 
-    // 2. Query Database for this act and its provisions
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanSlug);
     const dbAct = await db.query.bareActs.findFirst({
       where: isUuid ? eq(bareActs.id, cleanSlug) : eq(bareActs.slug, cleanSlug),
@@ -949,8 +1017,8 @@ class IndiaCodeService {
       },
     });
 
-    if (dbAct) {
-      const sections = dbAct.sections || [];
+    if (dbAct && dbAct.sections && dbAct.sections.length > 0) {
+      const sections = dbAct.sections;
       const schedules = dbAct.schedules || [];
       console.log(`[IndiaCodeService] 💾 Found '${dbAct.title}' in PostgreSQL database with ${sections.length} sections and ${schedules.length} schedules. Serving directly from DB.`);
       return {
@@ -983,24 +1051,41 @@ class IndiaCodeService {
       };
     }
 
-    // 3. Fallback to live statutory repository
-    console.log(`[IndiaCodeService] 🏛️ Act '${cleanSlug}' not yet in database. Querying live parliamentary repository...`);
-    const liveAct = await this.fetchLiveActDetails(cleanSlug);
+    console.log(`[IndiaCodeService] 🏛️ Act '${cleanSlug}' not yet in database or has 0 sections in DB. Querying live parliamentary repository...`);
+    const liveAct = await this.fetchLiveActDetails(cleanSlug, hintTitle || dbAct?.title);
     if (liveAct) {
       console.log(`[IndiaCodeService] 📥 Live enactment fetched: '${liveAct.overview.act.short_title}' (${liveAct.sections.length} sections). Auto-persisting to database...`);
-      // Auto-persist into Database so subsequent reads are served directly from DB!
-      this.autoPersistActToDatabase(liveAct).catch((err) => {
-        console.warn(`[IndiaCodeService] ⚠️ Auto-persist failed for '${cleanSlug}':`, err);
-      });
+      await this.autoPersistActToDatabase(liveAct);
       return liveAct.overview;
+    }
+
+    if (dbAct) {
+      console.log(`[IndiaCodeService] ℹ️ Serving Act '${dbAct.title}' from DB (has 0 provisions in live registry).`);
+      return {
+        act: {
+          id: dbAct.slug,
+          short_title: dbAct.title,
+          long_title: dbAct.longTitle || dbAct.description || dbAct.title,
+          act_number: dbAct.actNumber || undefined,
+          act_year: dbAct.actYear || undefined,
+          enact_date: dbAct.enactmentDate || undefined,
+          enforcement_date: dbAct.enforcementDate || undefined,
+          ministry: dbAct.ministry || undefined,
+          jurisdiction: dbAct.jurisdiction === "state" ? (dbAct.stateJurisdiction || "State") : "Central",
+          section_count: dbAct.totalSections || 0,
+          in_force: dbAct.status === "active",
+          unit: "section",
+        },
+        count: 0,
+        sections: [],
+        schedules: [],
+        amendments: [],
+      };
     }
 
     throw new AppError(`Act '${actSlug}' not found in database or live statutory directory.`, 404);
   }
 
-  /**
-   * Get a single provision (section/article) with complete statutory text, classification, and judgments from Database
-   */
   async getSection(actSlug: string, sectionNumber: string): Promise<IIndiaCodeSectionDetail> {
     if (!actSlug || !sectionNumber) {
       throw new AppError("Both actSlug and sectionNumber are required", 400);
@@ -1012,7 +1097,6 @@ class IndiaCodeService {
     const cleanNumber = sectionNumber.trim();
     console.log(`[IndiaCodeService] 📄 getSection requested: Act="${actSlug}", Provision="${cleanNumber}"`);
 
-    // 1. Try external IndiaCode API (with short timeout)
     try {
       let url = `${INDIA_CODE_BASE_URL}/${cleanSlug}/section/${encodeURIComponent(cleanNumber)}`;
       if (cleanSlug === "cpc" && /order/i.test(cleanNumber)) {
@@ -1060,7 +1144,6 @@ class IndiaCodeService {
       // Fall through to database
     }
 
-    // 2. Query Database for the act and section
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanSlug);
     const dbAct = await db.query.bareActs.findFirst({
       where: isUuid ? eq(bareActs.id, cleanSlug) : eq(bareActs.slug, cleanSlug),
@@ -1120,11 +1203,9 @@ class IndiaCodeService {
       }
     }
 
-    // 3. Fallback to live statutory repository
     console.log(`[IndiaCodeService] 🏛️ Section '${cleanNumber}' not in DB. Querying live statutory repository for '${cleanSlug}'...`);
     const liveAct = await this.fetchLiveActDetails(cleanSlug);
     if (liveAct) {
-      // Auto-persist into Database so subsequent reads are served directly from DB!
       this.autoPersistActToDatabase(liveAct).catch((err) => {
         console.warn(`[IndiaCodeService] ⚠️ Auto-persist failed for '${cleanSlug}':`, err);
       });
@@ -1160,9 +1241,6 @@ class IndiaCodeService {
     throw new AppError(`Section '${sectionNumber}' of Act '${actSlug}' not found.`, 404);
   }
 
-  /**
-   * Helper to derive a clean shortCode from title / slug
-   */
   public deriveShortCode(title: string, slug: string): string {
     const cleanTitle = title.replace(/^the\s+/i, "").replace(/,\s*\d{4}.*$/, "").trim();
     const words = cleanTitle.split(/\s+/).filter(Boolean);
@@ -1171,9 +1249,6 @@ class IndiaCodeService {
     return acronym.slice(0, 15);
   }
 
-  /**
-   * Helper to deduce category enum from title and description
-   */
   public deduceCategory(
     title: string,
     longTitle?: string
@@ -1218,9 +1293,6 @@ class IndiaCodeService {
     return "general_special";
   }
 
-  /**
-   * Helper to parse criminal classification fields into schema enums
-   */
   public parseClassification(classifications?: IIndiaCodeSectionDetail["classification"]) {
     if (!classifications || classifications.length === 0) {
       return {
@@ -1259,9 +1331,6 @@ class IndiaCodeService {
     };
   }
 
-  /**
-   * Parse numeric value from provision string (e.g. "188" -> 188, "21A" -> 21.1)
-   */
   private parseNumeric(numStr: string): number {
     const match = numStr.match(/^(\d+)([a-zA-Z])?/);
     if (!match) return 0;
@@ -1271,9 +1340,6 @@ class IndiaCodeService {
     return base + letterCode * 0.1;
   }
 
-  /**
-   * Background Sync: Inserts Acts returned by IndiaCode / e-Courts search into the database
-   */
   async syncActsToDatabase(acts: IIndiaCodeSearchResult[]) {
     if (!acts || acts.length === 0) return;
 
@@ -1307,7 +1373,7 @@ class IndiaCodeService {
             status: act.in_force ? "active" : "amended",
             source: "system_seed",
             isFeatured: false,
-            totalSections: act.section_count || 0,
+            totalSections: 0,
             totalChapters: 0,
             description: `Statute enacted by Parliament/State Legislature in ${act.act_year || ""}.`,
             keywords: [act.short_title.toLowerCase(), act.id, shortCode.toLowerCase()],
@@ -1319,10 +1385,6 @@ class IndiaCodeService {
     }
   }
 
-  /**
-   * ADMIN ONE-CLICK IMPORT:
-   * Imports an entire Act, all its sections, classifications, and judgments into Postgres.
-   */
   async importActWithSections(
     actSlug: string,
     options?: {
@@ -1330,10 +1392,11 @@ class IndiaCodeService {
       maxSections?: number;
       batchSize?: number;
       uploadedByAdminId?: string;
+      hintTitle?: string;
     }
   ) {
     console.log(`📥 Starting 1-Click Import from IndiaCode for: ${actSlug}`);
-    const overview = await this.getActOverview(actSlug);
+    const overview = await this.getActOverview(actSlug, options?.hintTitle);
     const { act, sections = [], schedules = [] } = overview;
 
     const category =
@@ -1349,7 +1412,6 @@ class IndiaCodeService {
     const stateJurisdiction = isStateAct ? act.jurisdiction : null;
     const jurisdiction: "state" | "central" = isStateAct ? "state" : "central";
 
-    // 1. Check or Upsert bareAct record
     let actRecord = await db.query.bareActs.findFirst({
       where: eq(bareActs.slug, act.id),
     });
@@ -1383,7 +1445,6 @@ class IndiaCodeService {
       actRecord = inserted;
       console.log(`  ✅ Created Act in DB: ${actRecord.title} (ID: ${actRecord.id})`);
     } else {
-      // Update metadata
       await db
         .update(bareActs)
         .set({
@@ -1397,7 +1458,6 @@ class IndiaCodeService {
 
     const actId = actRecord.id;
 
-    // 2. Import Schedules
     if (schedules && schedules.length > 0) {
       await db.delete(bareActSchedules).where(eq(bareActSchedules.actId, actId));
       for (const sch of schedules) {
@@ -1412,7 +1472,6 @@ class IndiaCodeService {
       console.log(`  📋 Saved ${schedules.length} schedules.`);
     }
 
-    // 3. Fast Outline Insertion for ALL sections in the Act (e.g. 282 sections)
     const existingSections = await db
       .select({
         id: bareActSections.id,
@@ -1425,7 +1484,6 @@ class IndiaCodeService {
       existingSections.map((s) => s.sectionNumber.toLowerCase().trim())
     );
 
-    // Check if we have pre-parsed sections from live repository
     const cachedLive = IndiaCodeService.parsedActDetailsCache.get(act.id.toLowerCase());
     const liveSectionsMap = new Map<string, string>();
     if (cachedLive?.data?.sections) {
@@ -1479,81 +1537,82 @@ class IndiaCodeService {
       })
       .where(eq(bareActs.id, actId));
 
-    // 4. Batch enrich detailed statutory text, classification, and judgments
-    const sectionsToImport = options?.maxSections ? sections.slice(0, options.maxSections) : sections.slice(0, 20);
-    console.log(`  ⚡ Enriching statutory text for ${sectionsToImport.length} sections from IndiaCode...`);
+    let importedSectionsCount = newOutlineRecords.length + existingSections.length;
+    if (liveSectionsMap.size === 0 && !IndiaCodeService.externalApiDisabled) {
+      const sectionsToImport = options?.maxSections ? sections.slice(0, options.maxSections) : sections.slice(0, 20);
+      console.log(`  ⚡ Enriching statutory text for ${sectionsToImport.length} sections from IndiaCode...`);
 
-    const batchSize = Math.max(1, options?.batchSize || 5);
-    let importedSectionsCount = 0;
+      const batchSize = Math.max(1, options?.batchSize || 5);
+      importedSectionsCount = 0;
 
-    for (let i = 0; i < sectionsToImport.length; i += batchSize) {
-      const chunk = sectionsToImport.slice(i, i + batchSize);
-      await Promise.all(
-        chunk.map(async (sec, idx) => {
-          try {
-            const secDetail = await this.getSection(act.id, sec.number);
-            const { section, classification, judgments } = secDetail;
-            if (!section) return;
+      for (let i = 0; i < sectionsToImport.length; i += batchSize) {
+        const chunk = sectionsToImport.slice(i, i + batchSize);
+        await Promise.all(
+          chunk.map(async (sec, idx) => {
+            try {
+              const secDetail = await this.getSection(act.id, sec.number);
+              const { section, classification, judgments } = secDetail;
+              if (!section) return;
 
-            const secNumberStr = `${act.unit === "article" ? "Article" : "Section"} ${section.number}`;
-            const secSlug = `${act.id}-section-${section.number.toLowerCase()}`;
-            const parsedClass = this.parseClassification(classification);
-            const secNumeric = this.parseNumeric(section.number);
+              const secNumberStr = `${act.unit === "article" ? "Article" : "Section"} ${section.number}`;
+              const secSlug = `${act.id}-section-${section.number.toLowerCase()}`;
+              const parsedClass = this.parseClassification(classification);
+              const secNumeric = this.parseNumeric(section.number);
 
-            const landmarkJudgments = (judgments || []).map((j) => ({
-              title: j.title,
-              citation: j.citation,
-              summary: j.applied_to_this_section || j.ratio_decidendi || undefined,
-            }));
+              const landmarkJudgments = (judgments || []).map((j) => ({
+                title: j.title,
+                citation: j.citation,
+                summary: j.applied_to_this_section || j.ratio_decidendi || undefined,
+              }));
 
-            // Check if section already exists
-            const existingSec = await db.query.bareActSections.findFirst({
-              where: and(eq(bareActSections.actId, actId), eq(bareActSections.sectionNumber, secNumberStr)),
-            });
-
-            if (!existingSec) {
-              await db.insert(bareActSections).values({
-                actId,
-                sectionType: act.unit === "article" ? "article" : "section",
-                sectionNumber: secNumberStr,
-                sectionNumeric: secNumeric,
-                title: section.heading || `Provision ${section.number}`,
-                slug: secSlug,
-                content: section.text || section.html || section.heading,
-                punishment: parsedClass.punishment,
-                bailableStatus: parsedClass.bailableStatus,
-                cognizableStatus: parsedClass.cognizableStatus,
-                compoundableStatus: parsedClass.compoundableStatus,
-                triableBy: parsedClass.triableBy,
-                orderIndex: i + idx + 1,
-                keywords: [secNumberStr.toLowerCase(), section.heading?.toLowerCase() || "", act.id],
-                crossReferences: {
-                  landmarkJudgments: landmarkJudgments.length ? landmarkJudgments : undefined,
-                },
+              const existingSec = await db.query.bareActSections.findFirst({
+                where: and(eq(bareActSections.actId, actId), eq(bareActSections.sectionNumber, secNumberStr)),
               });
-            } else {
-              await db
-                .update(bareActSections)
-                .set({
-                  title: section.heading || existingSec.title,
-                  content: section.text || section.html || existingSec.content,
-                  punishment: parsedClass.punishment || existingSec.punishment,
-                  bailableStatus: parsedClass.bailableStatus || existingSec.bailableStatus,
-                  cognizableStatus: parsedClass.cognizableStatus || existingSec.cognizableStatus,
-                  triableBy: parsedClass.triableBy || existingSec.triableBy,
-                  crossReferences: landmarkJudgments.length
-                    ? { landmarkJudgments }
-                    : existingSec.crossReferences,
-                })
-                .where(eq(bareActSections.id, existingSec.id));
+
+              if (!existingSec) {
+                await db.insert(bareActSections).values({
+                  actId,
+                  sectionType: act.unit === "article" ? "article" : "section",
+                  sectionNumber: secNumberStr,
+                  sectionNumeric: secNumeric,
+                  title: section.heading || `Provision ${section.number}`,
+                  slug: secSlug,
+                  content: section.text || section.html || section.heading,
+                  punishment: parsedClass.punishment,
+                  bailableStatus: parsedClass.bailableStatus,
+                  cognizableStatus: parsedClass.cognizableStatus,
+                  compoundableStatus: parsedClass.compoundableStatus,
+                  triableBy: parsedClass.triableBy,
+                  orderIndex: i + idx + 1,
+                  keywords: [secNumberStr.toLowerCase(), section.heading?.toLowerCase() || "", act.id],
+                  crossReferences: {
+                    landmarkJudgments: landmarkJudgments.length ? landmarkJudgments : undefined,
+                  },
+                });
+              } else {
+                await db
+                  .update(bareActSections)
+                  .set({
+                    title: section.heading || existingSec.title,
+                    content: section.text || section.html || existingSec.content,
+                    punishment: parsedClass.punishment || existingSec.punishment,
+                    bailableStatus: parsedClass.bailableStatus || existingSec.bailableStatus,
+                    cognizableStatus: parsedClass.cognizableStatus || existingSec.cognizableStatus,
+                    triableBy: parsedClass.triableBy || existingSec.triableBy,
+                    crossReferences: landmarkJudgments.length
+                      ? { landmarkJudgments }
+                      : existingSec.crossReferences,
+                  })
+                  .where(eq(bareActSections.id, existingSec.id));
+              }
+              importedSectionsCount++;
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              console.warn(`  ⚠️ Could not import section ${sec.number} of ${act.id}: ${message}`);
             }
-            importedSectionsCount++;
-          } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            console.warn(`  ⚠️ Could not import section ${sec.number} of ${act.id}: ${message}`);
-          }
-        })
-      );
+          })
+        );
+      }
     }
 
     console.log(`🎉 Successfully imported ${importedSectionsCount} sections for ${act.short_title}!`);
@@ -1569,11 +1628,6 @@ class IndiaCodeService {
     };
   }
 
-  /**
-   * ON-DEMAND FALLBACK (HYBRID CACHE):
-   * When an advocate or user requests a section that doesn't exist locally,
-   * fetches from IndiaCode, caches it to DB, and returns it.
-   */
   async getOrFetchSection(actSlug: string, sectionNumber: string) {
     let cleanSlug = actSlug.toLowerCase().trim();
     if (IndiaCodeService.SLUG_ALIASES[cleanSlug]) {
@@ -1585,14 +1639,12 @@ class IndiaCodeService {
       .replace(/^(section|article)[-_\s]+/i, "")
       .trim();
 
-    // 1. Fetch from IndiaCode
     const detail = await this.getSection(cleanSlug, cleanNumber);
     const { act, section, classification, judgments } = detail;
     if (!section) {
       throw new AppError(`Section ${sectionNumber} not found on IndiaCode.`, 404);
     }
 
-    // 2. Ensure Act exists in DB
     let actRecord = await db.query.bareActs.findFirst({
       where: eq(bareActs.slug, act.id),
     });
@@ -1625,7 +1677,6 @@ class IndiaCodeService {
     const parsedClass = this.parseClassification(classification);
     const secNumeric = this.parseNumeric(section.number);
 
-    // Check if section already exists in DB
     const existing = await db.query.bareActSections.findFirst({
       where: and(
         eq(bareActSections.actId, actRecord.id),
@@ -1645,7 +1696,6 @@ class IndiaCodeService {
       summary: j.applied_to_this_section || j.ratio_decidendi || undefined,
     }));
 
-    // 3. Cache section into DB
     let [savedSection] = await db
       .insert(bareActSections)
       .values({

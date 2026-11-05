@@ -25,9 +25,6 @@ import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import { sendTaskAssignmentEmail } from "../../services/taskEmail.service.js";
 import { createNotification } from "../../services/notification.service.js";
 
-/**
- * Helper to check if a user is an administrator or has specific permission
- */
 async function checkUserAdminOrPermission(
   userId: string,
   tenantId: string,
@@ -43,7 +40,6 @@ async function checkUserAdminOrPermission(
     return true;
   }
 
-  // Check roles in DB
   const scope = await db.query.userScopes.findFirst({
     where: and(eq(userScopes.userId, userId), eq(userScopes.tenantId, tenantId)),
   });
@@ -62,7 +58,6 @@ async function checkUserAdminOrPermission(
 
   if (isAdminRole) return true;
 
-  // If not admin, check if required permission is directly assigned in userPermissions table
   if (requiredPermission) {
     const directPerm = await db
       .select({ code: permissions.code })
@@ -83,7 +78,6 @@ async function checkUserAdminOrPermission(
 }
 
 const taskController = {
-  // 1. Create Task & Notify Assignee
   async createTask(req: Request, res: Response, next: NextFunction) {
     try {
       const { caseId, assignedTo, title, description, dueDate, priority, status } = req.body;
@@ -167,7 +161,6 @@ const taskController = {
         assignedUserRecord = assignedUser;
       }
 
-      // Fetch Creator Name
       const [creatorRecord] = await db
         .select({ id: users.id, name: users.name, email: users.email })
         .from(users)
@@ -191,10 +184,8 @@ const taskController = {
         })
         .returning();
 
-      // Dispatch Notifications if assigned to someone else
       if (assignedUserRecord) {
         try {
-          // In-App Notification (emitted over SSE)
           await createNotification({
             tenantId,
             officeId,
@@ -207,7 +198,6 @@ const taskController = {
           console.error("Failed to create in-app notification:", notifErr);
         }
 
-        // Email Notification
         sendTaskAssignmentEmail({
           recipientName: assignedUserRecord.name || "Advocate",
           recipientEmail: assignedUserRecord.email,
@@ -223,7 +213,6 @@ const taskController = {
         }).catch((err) => console.error("Email send error:", err));
       }
 
-      // Record Initial Timeline Event
       try {
         await db.insert(taskTimelines).values({
           tenantId,
@@ -253,7 +242,6 @@ const taskController = {
     }
   },
 
-  // 2. Get Tasks with Dynamic Scope & Permissions
   async getTasks(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user.tenantId as string;
@@ -274,7 +262,7 @@ const taskController = {
         priority,
         caseId,
         assignedTo,
-        scope = "all", // "all", "assigned_to_me", "created_by_me"
+        scope = "all",
         page = "1",
         limit = "10",
       } = req.query;
@@ -296,22 +284,18 @@ const taskController = {
         eq(tasks.officeId, officeId),
       ];
 
-      // Scope filtering
       if (scope === "assigned_to_me") {
         conditions.push(eq(tasks.assignedTo, userId));
       } else if (scope === "created_by_me") {
         conditions.push(eq(tasks.createdBy, userId));
       } else {
-        // scope === "all" or default
         if (!canViewAllTasks) {
-          // Regular user without task.read_all only sees tasks assigned to them or created by them
           conditions.push(
             or(eq(tasks.assignedTo, userId), eq(tasks.createdBy, userId))!
           );
         }
       }
 
-      // Search
       if (search) {
         conditions.push(
           or(
@@ -325,7 +309,6 @@ const taskController = {
         );
       }
 
-      // Status
       if (status && status !== "all") {
         conditions.push(
           eq(
@@ -335,7 +318,6 @@ const taskController = {
         );
       }
 
-      // Priority
       if (priority && priority !== "all") {
         conditions.push(
           eq(
@@ -345,12 +327,10 @@ const taskController = {
         );
       }
 
-      // Case
       if (caseId) {
         conditions.push(eq(tasks.caseId, String(caseId)));
       }
 
-      // Explicit Assigned User filter
       if (assignedTo) {
         conditions.push(eq(tasks.assignedTo, String(assignedTo)));
       }
@@ -365,7 +345,6 @@ const taskController = {
       const total = Number(totalResult?.count ?? 0);
       const totalPages = total === 0 ? 0 : Math.ceil(total / pageLimit);
 
-      // Fetch task records with joined Case, Assignee, and Creator info
       const taskList = await db
         .select({
           id: tasks.id,
@@ -377,17 +356,14 @@ const taskController = {
           createdAt: tasks.createdAt,
           updatedAt: tasks.updatedAt,
 
-          // Case
           caseId: tasks.caseId,
           caseTitle: cases.title,
           caseNumber: cases.caseNumber,
 
-          // Assigned User
           assignedTo: tasks.assignedTo,
           assignedUserName: user.name,
           assignedUserEmail: user.email,
 
-          // Creator User
           createdBy: tasks.createdBy,
         })
         .from(tasks)
@@ -405,7 +381,6 @@ const taskController = {
         .limit(pageLimit)
         .offset(offset);
 
-      // Stats query conditions based on scope & permissions
       const statsConditions: (SQL | undefined)[] = [
         eq(tasks.tenantId, tenantId),
         eq(tasks.officeId, officeId),
@@ -447,14 +422,12 @@ const taskController = {
         else if (row.status === "cancelled") stats.cancelled = c;
       }
 
-      // Populate Client Name, Advocate Name, Creator Name, and Comments count
       const data = await Promise.all(
         taskList.map(async (task) => {
           let clientName: string | null = null;
           let advocateName: string | null = null;
           let creatorName: string | null = null;
 
-          // Creator name
           if (task.createdBy) {
             const [cUser] = await db
               .select({ name: user.name })
@@ -464,7 +437,6 @@ const taskController = {
             creatorName = cUser?.name || null;
           }
 
-          // Case client & advocate info
           if (task.caseId) {
             const clientData = await db.query.caseClients.findFirst({
               where: eq(caseClients.caseId, task.caseId),
@@ -503,7 +475,6 @@ const taskController = {
             advocateName = advocateData?.advocate?.user?.name ?? null;
           }
 
-          // Comments count
           const [commentsRes] = await db
             .select({ count: count() })
             .from(taskComments)
@@ -511,7 +482,6 @@ const taskController = {
 
           const commentsCount = Number(commentsRes?.count ?? 0);
 
-          // Permissions flags for frontend UI
           const canDelete = isAdmin || task.createdBy === userId;
           const canEdit = isAdmin || task.createdBy === userId;
           const canChangeStatus =
@@ -564,7 +534,6 @@ const taskController = {
     }
   },
 
-  // 3. Get Task By ID with full notes/comments & permissions
   async getTaskById(req: Request, res: Response, next: NextFunction) {
     try {
       const { taskId } = req.params;

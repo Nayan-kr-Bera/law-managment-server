@@ -1,12 +1,11 @@
 import { NextFunction, Request, Response } from "express";
-import { desc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import db from "../db/index.js";
 import contactUsMessages from "../db/schema/contactUs.js";
 import CustomErrorHandler from "../utils/customErrorHandler.js";
 import ResponseHandler from "../utils/responseHandler.js";
 
 const contactUsController = {
-  // Public submission endpoint from website Contact/Support page
   async submitContact(req: Request, res: Response, next: NextFunction) {
     try {
       const { fullName, email, phone, firmName, role, subject, message } = req.body;
@@ -19,7 +18,6 @@ const contactUsController = {
         );
       }
 
-      // Basic email validation
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(email)) {
         return next(CustomErrorHandler.badRequest("Please provide a valid email address."));
@@ -54,7 +52,6 @@ const contactUsController = {
     }
   },
 
-  // GET /api/contact-us (Ready for future Admin Panel)
   async getAllMessages(req: Request, res: Response, next: NextFunction) {
     try {
       const statusFilter = req.query.status as string;
@@ -75,7 +72,6 @@ const contactUsController = {
     }
   },
 
-  // GET /api/contact-us/:id (Ready for future Admin Panel)
   async getMessageById(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -100,7 +96,6 @@ const contactUsController = {
     }
   },
 
-  // PATCH /api/contact-us/:id/status (Ready for future Admin Panel)
   async updateStatus(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;

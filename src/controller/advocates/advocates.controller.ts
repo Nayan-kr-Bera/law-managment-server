@@ -29,6 +29,7 @@ import {
   notifyAdvocateCasesRevoked,
   notifyCasesReassigned,
 } from "../../services/caseAssignmentNotification.service.js";
+
 const advocatesController = {
   async getadvocates(req: Request, res: Response, next: NextFunction) {
     try {
@@ -72,7 +73,6 @@ const advocatesController = {
 
       const filtered = scopes.filter((scope) => {
         if (!scope.user?.advocate) return false;
-
         if (!search) return true;
 
         const advocate = scope.user.advocate;
@@ -107,20 +107,17 @@ const advocatesController = {
           barCouncil: advocate.barCouncil,
           designation: advocate.designation,
           practiceArea: advocate.practiceArea,
-
           role:
             scope.roles.length > 0
               ? {
-                id: scope.roles[0].role.id,
-                name: scope.roles[0].role.name,
-              }
+                  id: scope.roles[0].role.id,
+                  name: scope.roles[0].role.name,
+                }
               : null,
-
           offices: scope.offices.map((item) => ({
             id: item.office.id,
             name: item.office.name,
           })),
-
           assignedCases: advocate.cases.length,
         };
       });
@@ -195,7 +192,6 @@ const advocatesController = {
       const hashedPassword = await bcrypt.hash(password, 10);
 
       const result = await db.transaction(async (tx) => {
-        // Create User
         const [user] = await tx
           .insert(users)
           .values({
@@ -206,7 +202,6 @@ const advocatesController = {
           })
           .returning();
 
-        // Create User Scope
         const [scope] = await tx
           .insert(userScopes)
           .values({
@@ -216,19 +211,16 @@ const advocatesController = {
           })
           .returning();
 
-        // Attach Office
         await tx.insert(userScopeOffices).values({
           userScopeId: scope.id,
           officeId,
         });
 
-        // Assign Role
         await tx.insert(userRoles).values({
           scopeId: scope.id,
           roleId,
         });
 
-        // Create Advocate
         const [advocate] = await tx
           .insert(advocates)
           .values({
@@ -251,10 +243,8 @@ const advocatesController = {
         advocateName: result.user.name,
         advocateEmail: result.user.email,
         password,
-
         officeName: office.name,
         roleName: role.name,
-
         designation: result.advocate.designation ?? undefined,
         enrollmentNo: result.advocate.enrollmentNo ?? undefined,
         barCouncil: result.advocate.barCouncil ?? undefined,
@@ -311,7 +301,6 @@ const advocatesController = {
         });
       }
 
-      // Check email uniqueness
       if (email && email !== advocate.user.email) {
         const existingEmail = await db.query.user.findFirst({
           where: eq(users.email, email),
@@ -325,7 +314,6 @@ const advocatesController = {
         }
       }
 
-      // Check phone uniqueness
       if (phone && phone !== advocate.user.phone) {
         const existingPhone = await db.query.user.findFirst({
           where: eq(users.phone, phone),
@@ -419,7 +407,6 @@ const advocatesController = {
         return next(CustomErrorHandler.badRequest("Tenant ID is required."));
       }
 
-      // 1. Find advocate
       const advocate = await db.query.advocates.findFirst({
         where: eq(advocates.id, id),
       });
@@ -428,9 +415,6 @@ const advocatesController = {
         return next(CustomErrorHandler.notFound("Advocate not found."));
       }
 
-      // 2. Get advocate's scopes for the current tenant
-      // Avoid relational `with: { user: { scopes: true } }`
-      // because users <-> userScopes has multiple relations.
       const scopes = await db
         .select({
           id: userScopes.id,
@@ -454,29 +438,22 @@ const advocatesController = {
       const scopeIds = scopes.map((scope) => scope.id);
 
       await db.transaction(async (tx) => {
-        // 3. Remove case assignments first
         await tx.delete(caseAdvocates).where(eq(caseAdvocates.advocateId, id));
 
-        // 4. Remove roles attached to scopes
         if (scopeIds.length > 0) {
           await tx
             .delete(userRoles)
             .where(inArray(userRoles.scopeId, scopeIds));
 
-          // 5. Remove office assignments
           await tx
             .delete(userScopeOffices)
             .where(inArray(userScopeOffices.userScopeId, scopeIds));
 
-          // 6. Remove scopes
           await tx.delete(userScopes).where(inArray(userScopes.id, scopeIds));
         }
 
-        // 7. Delete advocate
         await tx.delete(advocates).where(eq(advocates.id, id));
 
-        // 8. Check whether this user still has another scope.
-        // If not, delete the underlying user too.
         const remainingScopes = await tx
           .select({
             id: userScopes.id,
@@ -511,7 +488,6 @@ const advocatesController = {
 
       const { cases: assignedCases } = validated.data;
 
-      // Check advocate
       const advocate = await db.query.advocates.findFirst({
         where: eq(advocates.id, advocateId),
         with: {
@@ -541,7 +517,6 @@ const advocatesController = {
 
       const caseIds = assignedCases.map((c) => c.caseId);
 
-      // Validate cases
       if (caseIds.length) {
         const existingCases = await db.query.cases.findMany({
           where: (c, { and, eq, inArray }) =>
@@ -559,7 +534,6 @@ const advocatesController = {
       let removedCaseIds: string[] = [];
 
       await db.transaction(async (tx) => {
-        // Current assignments
         const existingAssignments = await tx
           .select({
             caseId: caseAdvocates.caseId,
@@ -573,12 +547,10 @@ const advocatesController = {
 
         const incomingCaseIds = new Set(caseIds);
 
-        // Cases to add
         const toInsert = assignedCases.filter(
           (item) => !existingCaseIds.has(item.caseId),
         );
 
-        // Cases to remove
         const toRemove = [...existingCaseIds].filter(
           (id) => !incomingCaseIds.has(id),
         );
@@ -798,7 +770,6 @@ const advocatesController = {
         conditions.push(
           inArray(cases.status, ["open", "pending", "in_progress", "stayed"]),
         );
-
         conditions.push(eq(cases.isDecided, false));
         conditions.push(eq(cases.isAbandoned, false));
       }
@@ -829,35 +800,23 @@ const advocatesController = {
       const data = await db
         .select({
           id: cases.id,
-
           title: cases.title,
-
           caseNo: cases.caseNumber,
           cnrNo: cases.cnrNumber,
           referenceNo: cases.referenceNumber,
-
           year: cases.year,
-
           previousDate: cases.registrationDate,
           nextDate: cases.nextHearingDate,
-
           courtNo: cases.courtNumber,
-
           firstParty: cases.firstParty,
           oppositeParty: cases.oppositeParty,
-
           fixedFor: cases.stage,
-
           status: cases.status,
           priority: cases.priority,
-
           isDecided: cases.isDecided,
           isAbandoned: cases.isAbandoned,
-
           createdAt: cases.createdAt,
-
           court: courts.name,
-
           type: caseTypes.name,
         })
         .from(caseAdvocates)
@@ -902,16 +861,12 @@ const advocatesController = {
       }
 
       const page = Number(req.query.page) > 0 ? Number(req.query.page) : 1;
-
       const limit = Number(req.query.limit) > 0 ? Number(req.query.limit) : 10;
-
       const search = ((req.query.search as string) || "").trim();
-
       const offset = (page - 1) * limit;
 
       const conditions = [eq(userScopes.tenantId, tenantId)];
 
-      // Search by name, email, or practice area
       if (search) {
         conditions.push(
           or(
@@ -924,7 +879,6 @@ const advocatesController = {
 
       const whereCondition = and(...conditions);
 
-      // Get paginated advocates
       const data = await db
         .select({
           id: advocates.id,
@@ -942,7 +896,6 @@ const advocatesController = {
         .limit(limit)
         .offset(offset);
 
-      // Get total count
       const [{ total }] = await db
         .select({
           total: count(),
@@ -953,7 +906,6 @@ const advocatesController = {
         .where(whereCondition);
 
       const totalCount = Number(total);
-
       const totalPages = Math.ceil(totalCount / limit);
 
       return res.status(200).json({
@@ -982,7 +934,6 @@ const advocatesController = {
         return next(CustomErrorHandler.badRequest("Tenant ID is required."));
       }
 
-      // Ensure 'user_permission.manage' exists in database
       try {
         const existingManagePerm = await db.query.permissions.findFirst({
           where: eq(permissions.code, "user_permission.manage"),
@@ -1012,11 +963,8 @@ const advocatesController = {
             }
           }
         }
-      } catch (e) {
-        // Safe ignore
-      }
+      } catch {}
 
-      // 1. Find advocate
       const advocate = await db.query.advocates.findFirst({
         where: eq(advocates.id, id),
         with: {
@@ -1028,7 +976,6 @@ const advocatesController = {
         return next(CustomErrorHandler.notFound("Advocate not found."));
       }
 
-      // 2. Find advocate's scope for this tenant
       const scope = await db.query.userScopes.findFirst({
         where: and(
           eq(userScopes.userId, advocate.userId),
@@ -1051,7 +998,6 @@ const advocatesController = {
         );
       }
 
-      // 3. Get direct user permissions assigned to this advocate's scope
       const directPermissions = await db
         .select({
           id: permissions.id,
@@ -1065,25 +1011,23 @@ const advocatesController = {
         )
         .where(eq(userPermissions.scopeId, scope.id));
 
-      // 4. Get role-based permissions inherited by this advocate
       const roleIds = scope.roles.map((r) => r.roleId);
       const rolePermissionsData =
         roleIds.length > 0
           ? await db
-            .select({
-              id: permissions.id,
-              code: permissions.code,
-              description: permissions.description,
-            })
-            .from(rolePermissions)
-            .innerJoin(
-              permissions,
-              eq(rolePermissions.permissionId, permissions.id),
-            )
-            .where(inArray(rolePermissions.roleId, roleIds))
+              .select({
+                id: permissions.id,
+                code: permissions.code,
+                description: permissions.description,
+              })
+              .from(rolePermissions)
+              .innerJoin(
+                permissions,
+                eq(rolePermissions.permissionId, permissions.id),
+              )
+              .where(inArray(rolePermissions.roleId, roleIds))
           : [];
 
-      // 5. Get all available system permissions
       const allPermissions = await db
         .select({
           id: permissions.id,
@@ -1097,7 +1041,6 @@ const advocatesController = {
       );
       const rolePermSet = new Set(uniqueRolePermissions);
 
-      // Only return permissions that are strictly direct user permissions (not in role)
       const uniqueDirectPermissions = directPermissions
         .map((p) => p.code)
         .filter((code) => !rolePermSet.has(code));
@@ -1132,7 +1075,6 @@ const advocatesController = {
         return next(CustomErrorHandler.badRequest("Tenant ID is required."));
       }
 
-      // Authorization check: Tenant Admin OR user with 'user_permission.manage' permission
       const isTenantAdmin = req.user?.isTenantAdmin;
       const userPermissionsList = req.user?.permissions || [];
       let isAuthorized =
@@ -1165,7 +1107,6 @@ const advocatesController = {
         );
       }
 
-      // 1. Find advocate
       const advocate = await db.query.advocates.findFirst({
         where: eq(advocates.id, id),
         with: {
@@ -1177,7 +1118,6 @@ const advocatesController = {
         return next(CustomErrorHandler.notFound("Advocate not found."));
       }
 
-      // 2. Find advocate's scope for this tenant
       const scope = await db.query.userScopes.findFirst({
         where: and(
           eq(userScopes.userId, advocate.userId),
@@ -1193,7 +1133,6 @@ const advocatesController = {
         );
       }
 
-      // 3. Get the advocate's role permissions so role permissions can never be stored as user permissions
       const scopeRoles = await db
         .select({
           roleId: userRoles.roleId,
@@ -1205,46 +1144,41 @@ const advocatesController = {
       const rolePermissionsData =
         roleIds.length > 0
           ? await db
-            .select({
-              code: permissions.code,
-            })
-            .from(rolePermissions)
-            .innerJoin(
-              permissions,
-              eq(rolePermissions.permissionId, permissions.id),
-            )
-            .where(inArray(rolePermissions.roleId, roleIds))
+              .select({
+                code: permissions.code,
+              })
+              .from(rolePermissions)
+              .innerJoin(
+                permissions,
+                eq(rolePermissions.permissionId, permissions.id),
+              )
+              .where(inArray(rolePermissions.roleId, roleIds))
           : [];
 
       const rolePermissionSet = new Set(rolePermissionsData.map((p) => p.code));
 
-      // Filter out role permissions: ONLY user-specific permissions (not granted by role) can be saved
       const userSpecificCodes = requestedPermissions.filter(
         (code: string) => !rolePermissionSet.has(code),
       );
 
-      // Resolve valid permission codes
       const validPermissionRecords =
         userSpecificCodes.length > 0
           ? await db
-            .select({
-              id: permissions.id,
-              code: permissions.code,
-            })
-            .from(permissions)
-            .where(inArray(permissions.code, userSpecificCodes))
+              .select({
+                id: permissions.id,
+                code: permissions.code,
+              })
+              .from(permissions)
+              .where(inArray(permissions.code, userSpecificCodes))
           : [];
 
       const currentUserId = req.user?.userId;
 
-      // 4. Update direct user_permissions in a transaction
       await db.transaction(async (tx) => {
-        // Delete current direct permissions for this scope
         await tx
           .delete(userPermissions)
           .where(eq(userPermissions.scopeId, scope.id));
 
-        // Insert new direct permissions
         if (validPermissionRecords.length > 0) {
           const insertData = validPermissionRecords.map((p) => ({
             scopeId: scope.id,
@@ -1266,4 +1200,5 @@ const advocatesController = {
     }
   },
 };
+
 export default advocatesController;

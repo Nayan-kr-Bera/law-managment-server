@@ -1,7 +1,10 @@
 export interface AiCreditPack {
   id: string;
   name: string;
+  credits: number;
   drafts: number;
+  reportsCount: number;
+  ratePerCredit: number;
   basePrice: number;
   gstPercent: number;
   gstAmount: number;
@@ -9,42 +12,71 @@ export interface AiCreditPack {
   popular?: boolean;
 }
 
+export const AI_CREDIT_RATE_INR = 1.15;
+export const CREDITS_PER_AI_DRAFT = 10;
+export const AI_CREDIT_GST_PERCENT = 18;
+
 export const AI_CREDIT_PACKS: Record<string, AiCreditPack> = {
-  pack_15: {
-    id: "pack_15",
-    name: "Starter Pack (15 Drafts)",
-    drafts: 15,
-    basePrice: 149,
+  pack_75: {
+    id: "pack_75",
+    name: "Starter Pack",
+    credits: 75,
+    drafts: 7,
+    reportsCount: 5,
+    ratePerCredit: 1.15,
+    basePrice: 86.25,
     gstPercent: 18,
-    gstAmount: 26.82,
-    totalPrice: 175.82,
+    gstAmount: 15.53,
+    totalPrice: 101.78,
   },
-  pack_60: {
-    id: "pack_60",
-    name: "Value Pack (60 Drafts)",
-    drafts: 60,
-    basePrice: 599,
+  pack_150: {
+    id: "pack_150",
+    name: "Standard Pack",
+    credits: 150,
+    drafts: 15,
+    reportsCount: 10,
+    ratePerCredit: 1.15,
+    basePrice: 172.5,
     gstPercent: 18,
-    gstAmount: 107.82,
-    totalPrice: 706.82,
+    gstAmount: 31.05,
+    totalPrice: 203.55,
+  },
+  pack_300: {
+    id: "pack_300",
+    name: "Advocate Value Pack",
+    credits: 300,
+    drafts: 30,
+    reportsCount: 20,
+    ratePerCredit: 1.15,
+    basePrice: 345.0,
+    gstPercent: 18,
+    gstAmount: 62.1,
+    totalPrice: 407.1,
     popular: true,
   },
-  pack_180: {
-    id: "pack_180",
-    name: "Pro Firm Pack (180 Drafts)",
-    drafts: 180,
-    basePrice: 1499,
+  pack_750: {
+    id: "pack_750",
+    name: "Senior Counsel Pack",
+    credits: 750,
+    drafts: 75,
+    reportsCount: 50,
+    ratePerCredit: 1.15,
+    basePrice: 862.5,
     gstPercent: 18,
-    gstAmount: 269.82,
-    totalPrice: 1768.82,
+    gstAmount: 155.25,
+    totalPrice: 1017.75,
   },
-  pack_600: {
-    id: "pack_600",
-    name: "Mega Pack (600 Drafts)",
-    drafts: 600,
-    basePrice: 3599,
+  pack_1500: {
+    id: "pack_1500",
+    name: "Law Firm Bulk Pack",
+    credits: 1500,
+    drafts: 150,
+    reportsCount: 100,
+    ratePerCredit: 1.15,
+    basePrice: 1725.0,
     gstPercent: 18,
-    gstAmount: 647.82,
-    totalPrice: 4246.82,
+    gstAmount: 310.5,
+    totalPrice: 2035.5,
   },
 };
+

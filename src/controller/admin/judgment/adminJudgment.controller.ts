@@ -6,10 +6,6 @@ import ResponseHandler from "../../../utils/responseHandler.js";
 import CustomErrorHandler from "../../../utils/customErrorHandler.js";
 
 export const adminJudgmentController = {
-  /**
-   * 1. List judgments with search, court filters & pagination
-   * GET /api/admin/judgments
-   */
   async getJudgments(req: Request, res: Response, next: NextFunction) {
     try {
       const {
@@ -87,10 +83,6 @@ export const adminJudgmentController = {
     }
   },
 
-  /**
-   * 2. Create / Upload a new judgment
-   * POST /api/admin/judgments
-   */
   async createJudgment(req: Request, res: Response, next: NextFunction) {
     try {
       const {
@@ -150,10 +142,6 @@ export const adminJudgmentController = {
     }
   },
 
-  /**
-   * 3. Update an existing judgment
-   * PUT /api/admin/judgments/:id
-   */
   async updateJudgment(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -220,10 +208,6 @@ export const adminJudgmentController = {
     }
   },
 
-  /**
-   * 4. Delete judgment
-   * DELETE /api/admin/judgments/:id
-   */
   async deleteJudgment(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -249,11 +233,6 @@ export const adminJudgmentController = {
     }
   },
 
-  /**
-   * 5. Seed Core Landmark Judgments dynamically from live eCourts / IndiaCode API
-   * (Zero hardcoded data: calls the live eCourts API across major key legal acts)
-   * POST /api/admin/judgments/seed-landmark
-   */
   async seedLandmarkJudgments(req: Request, res: Response, next: NextFunction) {
     try {
       const defaultActs = [
@@ -331,10 +310,6 @@ export const adminJudgmentController = {
     }
   },
 
-  /**
-   * 6. Ingest from Live eCourts / IndiaCode Judgment API
-   * POST /api/admin/judgments/import-ecourts
-   */
   async importFromEcourts(req: Request, res: Response, next: NextFunction) {
     try {
       const { actSlug, sectionNumber } = req.body as { actSlug: string; sectionNumber?: string };
@@ -389,9 +364,6 @@ export const adminJudgmentController = {
   },
 };
 
-/**
- * Helper to clean and parse a raw judgment object from the eCourts / IndiaCode API
- */
 function parseEcourtsJudgmentItem(
   j: Record<string, unknown>,
   actSlug: string,
@@ -400,7 +372,6 @@ function parseEcourtsJudgmentItem(
   const title = (String(j.title || "")).trim();
   if (!title) return null;
 
-  // Split parties if " v. " or " vs. " or " versus " is present
   let petitioner: string | null = null;
   let respondent: string | null = null;
   const vParts = title.split(/\s+(?:v\.|vs\.|v\/s|versus)\s+/i);
@@ -411,7 +382,6 @@ function parseEcourtsJudgmentItem(
     petitioner = title;
   }
 
-  // Court name & court level
   const courtVal = j.court_name || (j.court === "SC" ? "Supreme Court of India" : j.court) || "Supreme Court of India";
   const rawCourt = String(courtVal).trim();
   const lowerCourt = rawCourt.toLowerCase();
@@ -422,7 +392,6 @@ function parseEcourtsJudgmentItem(
     courtLevel = "tribunal";
   }
 
-  // Date and Year
   const dateStr = j.date ? String(j.date).trim() : null;
   let year: number | null = null;
   if (dateStr && /^\d{4}/.test(dateStr)) {
@@ -432,7 +401,6 @@ function parseEcourtsJudgmentItem(
     if (matchYear) year = parseInt(matchYear[1], 10);
   }
 
-  // Bench extraction from citation e.g. "(Judge 1 & Judge 2 JJ.)"
   let bench: string | null = null;
   if (j.citation) {
     const benchMatch = String(j.citation).match(/\(([^)]+JJ?\.?)\)/i);
@@ -441,7 +409,6 @@ function parseEcourtsJudgmentItem(
     }
   }
 
-  // Format Act name cleanly from slug (e.g. the-constitution-of-india -> Constitution of India)
   const formattedAct = actSlug
     .replace(/^the-/, "")
     .split("-")
@@ -465,7 +432,6 @@ function parseEcourtsJudgmentItem(
     ? `https://ecourtsindia.com/cnr/${j.cnr}`
     : null;
 
-  // Extract or detect Neutral Citation vs Traditional Citation
   let neutralCitation: string | null = null;
   let equivalentCitations: string | null = null;
 
@@ -487,14 +453,12 @@ function parseEcourtsJudgmentItem(
     equivalentCitations = rawCit;
   }
 
-  // Bench strength estimation
   let benchStrength: number | null = null;
   if (bench) {
     const judges = bench.split(/,|&|and/i).filter((s) => s.trim().length > 0);
     benchStrength = judges.length > 0 ? judges.length : null;
   }
 
-  // Standardize decision date YYYY-MM-DD if possible
   let decisionDate: string | null = null;
   if (dateStr) {
     const d = new Date(dateStr);

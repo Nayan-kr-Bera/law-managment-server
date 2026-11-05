@@ -5,6 +5,7 @@ import { cases, companies } from "../../db/schema/index.js";
 import ResponseHandler from "../../utils/responseHandler.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import slugify from "slugify";
+
 const companiesController = {
   async getcompanies(req: Request, res: Response, next: NextFunction) {
     const tenantId = req.user.tenantId;
@@ -42,7 +43,6 @@ const companiesController = {
         return next(CustomErrorHandler.badRequest("companie name is required"));
       }
 
-      // Check duplicate name
       const existingcompanie = await db.query.companies.findFirst({
         where: eq(companies.slug, slug),
       });
@@ -127,7 +127,6 @@ const companiesController = {
         return next(CustomErrorHandler.badRequest("Case Type id is required"));
       }
 
-      // Check case type exists
       const companie = await db.query.companies.findFirst({
         where: and(eq(companies.id, id), eq(companies.tenantId, tenantId)),
       });
@@ -136,7 +135,6 @@ const companiesController = {
         return next(CustomErrorHandler.notFound("Case Type not found"));
       }
 
-      // Check if any case is using this case type
       const assignedCase = await db.query.cases.findFirst({
         where: and(eq(cases.companyId, id), eq(cases.tenantId, tenantId)),
       });

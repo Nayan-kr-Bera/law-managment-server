@@ -32,9 +32,6 @@ export class AiSupportService {
     });
   }
 
-  /**
-   * System Prompt tailored for conversational, agentic 24/7 support.
-   */
   private getSystemPrompt(): string {
     return `You are "Nyaya Sahayak AI", a helpful, friendly, and knowledgeable 24/7 AI Support Specialist on the MI Law Practice Management Platform.
 
@@ -83,16 +80,12 @@ ALWAYS OUTPUT STRICT METADATA BLOCK AT THE VERY END (SINGLE COMPACT LINE):
 `;
   }
 
-  /**
-   * Process a chat query with conversation history
-   */
   async processSupportChat(
     history: SupportChatMessage[],
     userMessage: string
   ): Promise<AiSupportResponse> {
     const trimmedQuery = userMessage.trim().toLowerCase();
 
-    // Check common conversational quick triggers first
     const isGreeting =
       trimmedQuery === "hi" ||
       trimmedQuery === "hello" ||
@@ -139,7 +132,6 @@ ALWAYS OUTPUT STRICT METADATA BLOCK AT THE VERY END (SINGLE COMPACT LINE):
 
     const client = this.getClient();
 
-    // Fallback if no OpenAI API Key configured
     if (!client) {
       if (isOrgCreationRequest) {
         return {
@@ -198,7 +190,6 @@ ALWAYS OUTPUT STRICT METADATA BLOCK AT THE VERY END (SINGLE COMPACT LINE):
         };
       }
 
-      // Default problem solving in fallback mode
       return {
         message:
           "You can do this directly from the relevant sidebar section (like Case Management or Billing). Click the primary action button to get started!",
@@ -229,7 +220,6 @@ ALWAYS OUTPUT STRICT METADATA BLOCK AT THE VERY END (SINGLE COMPACT LINE):
 
       const rawContent = completion.choices[0]?.message?.content || "";
 
-      // Extract metadata tag safely (supports full or partial comments)
       const metaMatch = rawContent.match(/<!--META:([\s\S]*?)(?:-->|$)/i);
       let isEscalated = false;
       let escalationReason: string | undefined;
@@ -255,7 +245,6 @@ ALWAYS OUTPUT STRICT METADATA BLOCK AT THE VERY END (SINGLE COMPACT LINE):
         }
       }
 
-      // Reinforce explicit triggers
       if (isExplicitEscalate) {
         isEscalated = true;
         escalationReason = escalationReason || "User requested human agent escalation";
@@ -279,7 +268,6 @@ ALWAYS OUTPUT STRICT METADATA BLOCK AT THE VERY END (SINGLE COMPACT LINE):
         ];
       }
 
-      // Clean message: completely strip any META comments, HTML comments, partial tags, and asterisks
       let cleanMessage = rawContent
         .replace(/<!--META:[\s\S]*?(?:-->|$)/gi, "")
         .replace(/<!--[\s\S]*?(?:-->|$)/gi, "")
@@ -288,7 +276,6 @@ ALWAYS OUTPUT STRICT METADATA BLOCK AT THE VERY END (SINGLE COMPACT LINE):
         .replace(/\*{1,3}/g, "")
         .trim();
 
-      // Guardrail against hallucination of entity creation
       const hallucinatedCreation =
         /created successfully|has been created|I'll create the (new )?chamber|set that up for you/i.test(
           cleanMessage

@@ -10,9 +10,6 @@ import {
 } from "../../db/schema/index.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 
-/**
- * Compute `nextRunAt` from reminder fields.
- */
 function computeNextRunAt(
   frequency: string,
   startDate: string,
@@ -53,7 +50,6 @@ function computeNextRunAt(
     return null;
   }
 
-  // If end date passed, no next run
   if (endDate) {
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);
@@ -66,9 +62,6 @@ function computeNextRunAt(
 }
 
 const reminderController = {
-  /**
-   * POST /api/reminders
-   */
   async createReminder(req: Request, res: Response, next: NextFunction) {
     try {
 
@@ -117,7 +110,6 @@ const reminderController = {
       let finalClientId = clientId || null;
       let resolvedEmail = email || null;
 
-      // Resolve client email if clientId provided and email is empty
       if (finalClientId && !resolvedEmail) {
         const [clientData] = await db
           .select({ email: clients.email })
@@ -130,7 +122,6 @@ const reminderController = {
         }
       }
 
-      // Validate case belongs to tenant and resolve associated client if missing
       if (caseId) {
         const [caseData] = await db
           .select({ id: cases.id })
@@ -147,7 +138,6 @@ const reminderController = {
           return next(CustomErrorHandler.notFound("Case not found"));
         }
 
-        // If clientId or email is missing, lookup associated client from caseClients
         if (!finalClientId || !resolvedEmail) {
           const [caseClientData] = await db
             .select({
@@ -203,9 +193,6 @@ const reminderController = {
     }
   },
 
-  /**
-   * GET /api/reminders
-   */
   async getReminders(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -266,7 +253,6 @@ const reminderController = {
           lastSentAt: customReminders.lastSentAt,
           createdAt: customReminders.createdAt,
 
-          // Joined fields
           clientFirstName: clients.firstName,
           clientLastName: clients.lastName,
           clientCompanyName: clients.companyName,
@@ -289,7 +275,6 @@ const reminderController = {
         .limit(pageLimit)
         .offset(offset);
 
-      // Format response to match frontend expectations
       const data = reminderList.map((r) => ({
         id: r.id,
         reminder: r.reminder,
@@ -332,9 +317,6 @@ const reminderController = {
     }
   },
 
-  /**
-   * PUT /api/reminders/:id
-   */
   async updateReminder(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -374,7 +356,6 @@ const reminderController = {
         caseId,
       } = req.body;
 
-      // Resolve client email if clientId provided and email is empty
       let resolvedEmail = email !== undefined ? email : undefined;
 
       if (clientId && !resolvedEmail) {
@@ -389,7 +370,6 @@ const reminderController = {
         }
       }
 
-      // Recompute nextRunAt if frequency/dates changed
       let nextRunAt: Date | null | undefined = undefined;
       if (frequency !== undefined || startDate !== undefined) {
         const finalFrequency = frequency ?? (await db
@@ -449,9 +429,6 @@ const reminderController = {
     }
   },
 
-  /**
-   * DELETE /api/reminders/:id
-   */
   async deleteReminder(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;

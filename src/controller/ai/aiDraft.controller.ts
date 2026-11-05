@@ -20,7 +20,6 @@ import { AI_CREDIT_PACKS } from "../../constants/aiCreditPacks.js";
 import { config } from "../../config/index.js";
 
 const aiDraftController = {
-  // 1. GENERATE DRAFT
   async generateDraft(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -49,7 +48,6 @@ const aiDraftController = {
         return next(CustomErrorHandler.badRequest("Facts & instructions are required"));
       }
 
-      // Load Case Context if selected
       let caseDetails = null;
       if (caseId) {
         const [caseRecord] = await db
@@ -83,7 +81,6 @@ const aiDraftController = {
         }
       }
 
-      // Load Reference Documents OCR Text if selected
       let referenceDocumentsText: string[] = [];
       if (Array.isArray(referenceDocumentIds) && referenceDocumentIds.length > 0) {
         const docs = await db
@@ -113,7 +110,6 @@ const aiDraftController = {
           .filter(Boolean);
       }
 
-      // Load Pinned / Selected Case Precedents for Pleadings
       let precedentsList: CasePrecedentDraftContext[] = [];
       if (Array.isArray(selectedPrecedentIds) && selectedPrecedentIds.length > 0) {
         precedentsList = await db
@@ -137,7 +133,6 @@ const aiDraftController = {
             ),
           );
       } else if (caseId) {
-        // Default to loading all precedents pinned for AI pleadings drafting under this case
         precedentsList = await db
           .select({
             id: casePrecedents.id,
@@ -161,7 +156,6 @@ const aiDraftController = {
           );
       }
 
-      // Call AI Service
       const draftResult = await aiDrafterService.generateDraft({
         caseDetails,
         documentType,
@@ -172,13 +166,11 @@ const aiDraftController = {
         additionalInstructions,
       });
 
-      // Deduct quota (10 credits per draft)
       const DRAFT_CREDIT_COST = 10;
       const quota = req.aiDraftQuota;
       if (quota && !quota.isInternal) {
         const remainingMonthly = Math.max(0, quota.monthlyLimit - quota.currentUsed);
         if (remainingMonthly >= DRAFT_CREDIT_COST) {
-          // Deduct full 10 credits from monthly quota
           await db
             .update(tenantSubscriptions)
             .set({
@@ -186,7 +178,6 @@ const aiDraftController = {
             })
             .where(eq(tenantSubscriptions.id, quota.subscriptionId));
         } else if (remainingMonthly > 0) {
-          // Partial from monthly, remainder from addon credits
           const fromMonthly = remainingMonthly;
           const fromAddon = DRAFT_CREDIT_COST - fromMonthly;
           await db
@@ -197,7 +188,6 @@ const aiDraftController = {
             })
             .where(eq(tenantSubscriptions.id, quota.subscriptionId));
         } else {
-          // Deduct full 10 credits from addon credits
           await db
             .update(tenantSubscriptions)
             .set({
@@ -207,7 +197,6 @@ const aiDraftController = {
         }
       }
 
-      // Save generated draft to DB
       const [savedDraft] = await db
         .insert(aiDrafts)
         .values({
@@ -241,7 +230,6 @@ const aiDraftController = {
     }
   },
 
-  // 2. GET QUOTA & PRICING PACKS
   async getQuota(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -264,7 +252,6 @@ const aiDraftController = {
       let usedThisMonth = subscription?.aiDraftsUsedThisMonth ?? 0;
       let addonCredits = subscription?.aiDraftAddonCredits ?? 0;
 
-      // Check monthly cycle reset
       if (subscription?.aiDraftCycleResetDate) {
         const resetDate = new Date(subscription.aiDraftCycleResetDate);
         const now = new Date();
@@ -309,7 +296,6 @@ const aiDraftController = {
     }
   },
 
-  // 3. CREATE RAZORPAY ORDER FOR ADD-ON DRAFTS
   async createCreditOrder(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -320,11 +306,18 @@ const aiDraftController = {
       }
 
       const { packId } = req.body;
-      const pack = AI_CREDIT_PACKS[packId];
+      const legacyPackMap: Record<string, string> = {
+        pack_15: "pack_150",
+        pack_60: "pack_300",
+        pack_180: "pack_750",
+        pack_600: "pack_1500",
+      };
+      const resolvedPackId = legacyPackMap[packId] || packId;
+      const pack = AI_CREDIT_PACKS[resolvedPackId];
       if (!pack) {
         return next(
           CustomErrorHandler.badRequest(
-            "Invalid pack selected. Valid options: pack_15, pack_60, pack_180, pack_600",
+            "Invalid pack selected. Valid options: pack_75, pack_150, pack_300, pack_750, pack_1500",
           ),
         );
       }
@@ -338,6 +331,7 @@ const aiDraftController = {
         notes: {
           tenantId,
           packId: pack.id,
+          credits: pack.credits.toString(),
           drafts: pack.drafts.toString(),
           userEmail: userEmail || "",
           type: "ai_draft_addon",
@@ -359,7 +353,6 @@ const aiDraftController = {
     }
   },
 
-  // 4. VERIFY RAZORPAY PAYMENT FOR ADD-ON CREDITS
   async verifyCreditPayment(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -373,10 +366,14 @@ const aiDraftController = {
         return next(CustomErrorHandler.badRequest("Missing required payment verification fields"));
       }
 
-      const pack = AI_CREDIT_PACKS[packId];
-      if (!pack) {
-        return next(CustomErrorHandler.badRequest("Invalid credit pack ID"));
-      }
+      const legacyPackMap: Record<string, string> = {
+        pack_15: "pack_150",
+        pack_60: "pack_300",
+        pack_180: "pack_750",
+        pack_600: "pack_1500",
+      };
+      const resolvedPackId = legacyPackMap[packId] || packId;
+      let pack = AI_CREDIT_PACKS[resolvedPackId];
 
       const isValid = razorpayService.verifyPayment({
         razorpayOrderId: razorpay_order_id,
@@ -388,21 +385,34 @@ const aiDraftController = {
         return next(CustomErrorHandler.badRequest("Invalid payment signature verification"));
       }
 
-      // Add credits to tenant subscription
+      try {
+        const rzpOrder = await razorpayService.getOrder(razorpay_order_id);
+        const orderNotes = (rzpOrder?.notes || {}) as Record<string, string>;
+        if (orderNotes.tenantId && orderNotes.tenantId !== tenantId) {
+          return next(CustomErrorHandler.forbidden("Order tenant mismatch"));
+        }
+        if (orderNotes.packId && AI_CREDIT_PACKS[orderNotes.packId]) {
+          pack = AI_CREDIT_PACKS[orderNotes.packId];
+        }
+      } catch {}
+
+      if (!pack) {
+        return next(CustomErrorHandler.badRequest("Invalid credit pack ID"));
+      }
+
       await db
         .update(tenantSubscriptions)
         .set({
-          aiDraftAddonCredits: sql`${tenantSubscriptions.aiDraftAddonCredits} + ${pack.drafts}`,
+          aiDraftAddonCredits: sql`${tenantSubscriptions.aiDraftAddonCredits} + ${pack.credits}`,
         })
         .where(eq(tenantSubscriptions.tenantId, tenantId));
 
-      // Record in subscriptionPaymentHistory
       const invoiceNumber = `INV-AI-${Date.now().toString().slice(-8)}`;
       await db.insert(subscriptionPaymentHistory).values({
         tenantId,
         invoiceNumber,
         planId: null,
-        planName: `AI Draft Addon: ${pack.name} (${pack.drafts} Drafts)`,
+        planName: `AI Credits: ${pack.name} (${pack.credits} Credits / ~${pack.drafts} Drafts) [+18% GST]`,
         amount: pack.totalPrice.toString(),
         currency: "INR",
         status: "paid",
@@ -412,10 +422,15 @@ const aiDraftController = {
       });
 
       return res.status(200).send(
-        ResponseHandler(200, `Successfully purchased ${pack.drafts} AI Draft credits!`, {
-          creditsAdded: pack.drafts,
-          invoiceNumber,
-        }),
+        ResponseHandler(
+          200,
+          `Successfully added ${pack.credits} AI credits (~${pack.drafts} Legal Drafts)!`,
+          {
+            creditsAdded: pack.credits,
+            draftsEquivalent: pack.drafts,
+            invoiceNumber,
+          },
+        ),
       );
     } catch (err: unknown) {
       console.error("[aiDraftController.verifyCreditPayment] Error:", err);
@@ -423,7 +438,6 @@ const aiDraftController = {
     }
   },
 
-  // 5. GET DRAFT HISTORY
   async getDraftHistory(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;

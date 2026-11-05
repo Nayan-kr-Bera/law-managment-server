@@ -5,10 +5,6 @@ import { tasks, cases, user, notifications } from "../db/schema/index.js";
 import { sendTaskDeadlineReminderEmail } from "./taskEmail.service.js";
 import { createNotification } from "./notification.service.js";
 
-/**
- * Task Deadline Reminder Service
- * Checks tasks due tomorrow and alerts both Assignee and Creator
- */
 export async function processTaskDeadlineReminders(): Promise<void> {
   console.log("⏰ [TaskReminderCron] Checking tasks due tomorrow...");
 
@@ -17,7 +13,6 @@ export async function processTaskDeadlineReminders(): Promise<void> {
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowIso = tomorrow.toISOString().split("T")[0];
 
-    // Find all active tasks due tomorrow
     const dueTasks = await db
       .select({
         id: tasks.id,
@@ -50,7 +45,6 @@ export async function processTaskDeadlineReminders(): Promise<void> {
     console.log(`⏰ [TaskReminderCron] Found ${dueTasks.length} task(s) due tomorrow.`);
 
     for (const task of dueTasks) {
-      // Fetch Assignee User Details
       let assigneeData: { id: string; name: string; email: string } | null = null;
       if (task.assignedTo) {
         const [aUser] = await db
@@ -61,7 +55,6 @@ export async function processTaskDeadlineReminders(): Promise<void> {
         if (aUser) assigneeData = aUser;
       }
 
-      // Fetch Creator User Details
       let creatorData: { id: string; name: string; email: string } | null = null;
       if (task.createdBy) {
         const [cUser] = await db
@@ -72,9 +65,7 @@ export async function processTaskDeadlineReminders(): Promise<void> {
         if (cUser) creatorData = cUser;
       }
 
-      // 1. Notify Assignee
       if (assigneeData) {
-        // Send In-App Notification
         await createNotification({
           tenantId: task.tenantId || "",
           officeId: task.officeId || null,
@@ -84,7 +75,6 @@ export async function processTaskDeadlineReminders(): Promise<void> {
           type: "task",
         });
 
-        // Send Email Reminder
         await sendTaskDeadlineReminderEmail({
           recipientName: assigneeData.name || "Advocate",
           recipientEmail: assigneeData.email,
@@ -99,9 +89,7 @@ export async function processTaskDeadlineReminders(): Promise<void> {
         });
       }
 
-      // 2. Notify Creator (if different from assignee)
       if (creatorData && creatorData.id !== assigneeData?.id) {
-        // Send In-App Notification
         await createNotification({
           tenantId: task.tenantId || "",
           officeId: task.officeId || null,
@@ -111,7 +99,6 @@ export async function processTaskDeadlineReminders(): Promise<void> {
           type: "task",
         });
 
-        // Send Email Reminder
         await sendTaskDeadlineReminderEmail({
           recipientName: creatorData.name || "Colleague",
           recipientEmail: creatorData.email,
@@ -131,12 +118,7 @@ export async function processTaskDeadlineReminders(): Promise<void> {
   }
 }
 
-/**
- * Start the Task Reminder Cron Job
- * Runs every day at 08:30 AM server time
- */
 export function startTaskReminderCron(): void {
-  // Run daily at 08:30 AM
   cron.schedule("30 8 * * *", () => {
     processTaskDeadlineReminders();
   });

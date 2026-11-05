@@ -22,22 +22,15 @@ class OcrQueueService {
   private queue: OcrJobPayload[] = [];
   private isProcessing = false;
 
-  /**
-   * Enqueue an OCR job and trigger worker asynchronously
-   */
   public addJob(job: OcrJobPayload): void {
     this.queue.push(job);
     console.log(`[ocrQueue] Job enqueued for document ${job.documentId}. Queue size: ${this.queue.length}`);
     
-    // Trigger worker asynchronously on next event loop tick so API call returns immediately
     setImmediate(() => {
       this.processNext();
     });
   }
 
-  /**
-   * Process the next job in the queue (concurrency = 1 to protect CPU/RAM)
-   */
   private async processNext(): Promise<void> {
     if (this.isProcessing) {
       return;
@@ -58,21 +51,16 @@ class OcrQueueService {
       console.error(`[ocrQueue] Uncaught error processing document ${job.documentId}:`, err);
     } finally {
       this.isProcessing = false;
-      // Yield to event loop before taking next job to keep HTTP server responsive
       setTimeout(() => {
         this.processNext();
       }, 500);
     }
   }
 
-  /**
-   * Execute an individual OCR job with strict page limit enforcement
-   */
   private async executeJob(job: OcrJobPayload): Promise<void> {
     const { documentId, tenantId, userEmail, userName, language = "eng+hin" } = job;
     console.log(`[ocrQueue] Starting processing for document: ${documentId}`);
 
-    // Step 1: Verify document exists
     const [doc] = await db
       .select()
       .from(caseDocuments)
@@ -83,7 +71,6 @@ class OcrQueueService {
       return;
     }
 
-    // Step 2: Mark document status as 'processing'
     await db
       .update(caseDocuments)
       .set({
@@ -93,7 +80,6 @@ class OcrQueueService {
       })
       .where(eq(caseDocuments.id, documentId));
 
-    // Step 3: Fetch active subscription and verify credit limit
     const subscription = await db.query.tenantSubscriptions.findFirst({
       where: and(
         eq(tenantSubscriptions.tenantId, tenantId),
@@ -112,13 +98,11 @@ class OcrQueueService {
 
     let currentCreditsUsed = subscription?.ocrCreditsUsedThisMonth ?? ((subscription?.ocrPagesUsedThisMonth ?? 0) * OCR_CREDITS_PER_PAGE);
 
-    // Check if monthly cycle reset is needed
     if (subscription?.ocrCycleResetDate) {
       const now = new Date();
       const resetDate = new Date(subscription.ocrCycleResetDate);
       if (now > resetDate) {
         currentCreditsUsed = 0;
-        // Next reset date: 30 days from now
         const nextReset = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
         await db
           .update(tenantSubscriptions)
@@ -143,7 +127,6 @@ class OcrQueueService {
       ? undefined
       : Math.floor(totalAvailableCredits / OCR_CREDITS_PER_PAGE);
 
-    // Limit check: must have at least 10 credits (for 1 page)
     if (!isInternal && (totalAvailableCredits < OCR_CREDITS_PER_PAGE || (maxPagesAllowed ?? 0) <= 0)) {
       const errorMsg = `Insufficient OCR credits (${totalAvailableCredits} credits available). Each page requires ${OCR_CREDITS_PER_PAGE} OCR credits. Please top up your OCR credits.`;
       console.warn(`[ocrQueue] Quota exceeded for tenant ${tenantId}: ${errorMsg}`);
@@ -167,7 +150,6 @@ class OcrQueueService {
       return;
     }
 
-    // Step 4: Perform OCR extraction up to allowed pages
     try {
       const result = await ocrService.processDocument({
         fileUrl: doc.fileUrl,
@@ -186,21 +168,7 @@ class OcrQueueService {
           ? `Processed first ${pagesProcessed} of ${totalDocPages} pages (${creditsCost} OCR credits used). Last ${pagesSkipped} pages were skipped due to available credit limit.`
           : (result.warning || null);
 
-      // Step 5: Update document record with extracted text, page count & warning if partial
-      await db
-        .update(caseDocuments)
-        .set({
-          ocrStatus: "completed",
-          ocrText: result.text,
-          pageCount: totalDocPages,
-          ocrPagesProcessed: pagesProcessed,
-          ocrWarning: warningMessage,
-          ocrProcessedAt: new Date(),
-          ocrError: null,
-        })
-        .where(eq(caseDocuments.id, documentId));
-
-      // Step 6: Deduct credits: First from monthly quota, then from addon credits
+      // Deduct credits before marking completed so clients reading "completed" always see the updated balance
       if (subscription && !isInternal) {
         const fromMonthlyCredits = Math.min(remainingMonthlyCredits, creditsCost);
         const fromAddonCredits = creditsCost - fromMonthlyCredits;
@@ -220,11 +188,23 @@ class OcrQueueService {
           .where(eq(tenantSubscriptions.id, subscription.id));
       }
 
+      await db
+        .update(caseDocuments)
+        .set({
+          ocrStatus: "completed",
+          ocrText: result.text,
+          pageCount: totalDocPages,
+          ocrPagesProcessed: pagesProcessed,
+          ocrWarning: warningMessage,
+          ocrProcessedAt: new Date(),
+          ocrError: null,
+        })
+        .where(eq(caseDocuments.id, documentId));
+
       console.log(
         `[ocrQueue] OCR completed for ${doc.fileName}: ${pagesProcessed} of ${totalDocPages} pages (${creditsCost} credits consumed).`,
       );
 
-      // Step 7: Send completion email to user (includes partial warning if any pages were skipped)
       if (userEmail) {
         await ocrEmailService.sendOcrSuccessEmail({
           toEmail: userEmail,
@@ -264,9 +244,6 @@ class OcrQueueService {
     }
   }
 
-  /**
-   * Get current queue length and status
-   */
   public getStatus(): { isProcessing: boolean; pendingJobs: number } {
     return {
       isProcessing: this.isProcessing,

@@ -112,35 +112,18 @@ interface DocumentIntelligencePayload {
   }>;
 }
 
-/**
- * Post-processes LLM text to eliminate degenerate repetition loops,
- * repeated legal prefixes (such as "M/s. M/s. M/s."), repeated words,
- * or runaway markdown table rows.
- */
 function cleanLlmRepetitions(text: string): string {
   if (!text) return text;
 
-  // 1. Collapse repetitive entity honorifics/prefixes like "M/s. M/s. M/s." -> "M/s. "
   let cleaned = text.replace(/(?:M\/s\.\s*){2,}/gi, "M/s. ");
-
-  // 2. Collapse repetitive adversarial connectors like "vs. vs." or "v. v."
   cleaned = cleaned.replace(/(?:(?:\b(?:vs?|versus)\b\.?)\s*){2,}/gi, "vs. ");
-
-  // 3. Collapse consecutive repeated single words (3 or more occurrences, e.g. "word word word")
   cleaned = cleaned.replace(/\b([A-Za-z0-9_&./-]+)(\s+\1\b){2,}/gi, "$1");
-
-  // 4. Collapse consecutive repeated phrases (2 to 5 words repeating multiple times)
   cleaned = cleaned.replace(/(\b[\w\s.,'&/()-]{3,35}\b)(?:\s*\1){2,}/gi, "$1");
-
-  // 5. Clean up broken runaway table rows with endless pipes or dashes
   cleaned = cleaned.replace(/(\|[\s_]*){5,}/g, "| ");
 
   return cleaned.trim();
 }
 
-/**
- * Deducts 1 AI credit from tenant's subscription pool (aiDraftsUsedThisMonth / aiDraftAddonCredits)
- */
 async function deductOneAiCredit(subscription: {
   id: string;
   monthlyLimit: number;
@@ -148,7 +131,7 @@ async function deductOneAiCredit(subscription: {
   addonCredits: number;
   isInternal: boolean;
 }) {
-  if (subscription.isInternal) return; // Unlimited for internal staff
+  if (subscription.isInternal) return;
 
   const remainingMonthly = Math.max(0, subscription.monthlyLimit - subscription.currentUsed);
 
@@ -169,9 +152,6 @@ async function deductOneAiCredit(subscription: {
   }
 }
 
-/**
- * Validates tenant subscription and ensures at least 1 AI credit is available.
- */
 async function checkAndGetAiSubscription(tenantId: string) {
   const subscription = await db.query.tenantSubscriptions.findFirst({
     where: and(
@@ -192,7 +172,6 @@ async function checkAndGetAiSubscription(tenantId: string) {
   let currentUsed = subscription.aiDraftsUsedThisMonth ?? 0;
   const addonCredits = subscription.aiDraftAddonCredits ?? 0;
 
-  // Monthly billing cycle reset check
   if (subscription.aiDraftCycleResetDate) {
     const resetDate = new Date(subscription.aiDraftCycleResetDate);
     const now = new Date();
@@ -233,10 +212,6 @@ async function checkAndGetAiSubscription(tenantId: string) {
 }
 
 const documentIntelligenceController = {
-  /**
-   * POST /api/document/:id/intelligence/level2
-   * Extracts Structured Legal Named Entities (NER) dynamically from OCR text without deducting AI credits.
-   */
   async generateLevel2(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -264,7 +239,6 @@ const documentIntelligenceController = {
         );
       }
 
-      // Fetch linked case metadata if available
       let caseRecord: {
         caseNumber?: string | null;
         court?: string | null;
@@ -357,7 +331,6 @@ ${ocrText.slice(0, 15000)}`;
         }
       }
 
-      // Regex / Metadata smart fallback if LLM was unavailable or returned empty
       if (!entities || entities.parties.length === 0) {
         const courtMatch = ocrText.match(/IN THE COURT OF\s+([^,\n\r]+(?:,\s*[^,\n\r]+)?)/i);
         const caseNoMatch = ocrText.match(/CASE NO\.?\s*[:•\-]?\s*([A-Z0-9/_-]+)/i);
@@ -392,7 +365,6 @@ ${ocrText.slice(0, 15000)}`;
           });
         }
 
-        // Check if level 4 already has real parties
         const existingIntel = (doc.intelligenceData as DocumentIntelligencePayload | null) || {};
         if (parties.length === 0 && existingIntel.level4?.data?.nodes) {
           const pNodes = existingIntel.level4.data.nodes.filter((n) => n.type === "party");
@@ -443,7 +415,6 @@ ${ocrText.slice(0, 15000)}`;
         };
       }
 
-      // Save to PostgreSQL JSONB column
       const existingIntel = (doc.intelligenceData as DocumentIntelligencePayload | null) || {};
       const updatedIntel = {
         ...existingIntel,
@@ -471,10 +442,6 @@ ${ocrText.slice(0, 15000)}`;
     }
   },
 
-  /**
-   * POST /api/document/:id/intelligence/level3
-   * Runs Deep Inconsistency Analysis & Chronology. Saves to PostgreSQL JSONB column. Deducts 1 AI Credit.
-   */
   async generateLevel3(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -484,7 +451,6 @@ ${ocrText.slice(0, 15000)}`;
         return next(CustomErrorHandler.unAuthorized("Authentication required"));
       }
 
-      // 1. Verify Document & OCR text
       const [doc] = await db
         .select()
         .from(caseDocuments)
@@ -503,10 +469,8 @@ ${ocrText.slice(0, 15000)}`;
         );
       }
 
-      // 2. Validate AI Credit Quota
       const subscription = await checkAndGetAiSubscription(tenantId);
 
-      // 3. Call LLM for real dynamic intelligence
       const client = aiProxyService.getClient();
       let timeline: TimelineItem[] = [];
       let inconsistencies: InconsistencyItem[] = [];
@@ -542,7 +506,6 @@ ${ocrText.slice(0, 15000)}`;
         }
       }
 
-      // Fallback to dynamic regex parsing if LLM is unavailable
       if (timeline.length === 0) {
         const dateMatches = ocrText.match(/\b\d{1,2}[-/.](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|\d{1,2})[-/.]\d{2,4}\b/gi) || [];
         timeline = Array.from(new Set(dateMatches)).slice(0, 4).map((d, i) => ({
@@ -566,7 +529,6 @@ ${ocrText.slice(0, 15000)}`;
         ];
       }
 
-      // 4. Save to PostgreSQL JSONB column
       const existingIntel = (doc.intelligenceData as DocumentIntelligencePayload | null) || {};
       const updatedIntel = {
         ...existingIntel,
@@ -585,7 +547,6 @@ ${ocrText.slice(0, 15000)}`;
         .set({ intelligenceData: updatedIntel })
         .where(eq(caseDocuments.id, documentId));
 
-      // 5. Deduct 1 AI credit from PostgreSQL
       await deductOneAiCredit(subscription);
 
       return res.status(200).json(
@@ -605,10 +566,6 @@ ${ocrText.slice(0, 15000)}`;
     }
   },
 
-  /**
-   * POST /api/document/:id/intelligence/level4
-   * Generates Case Knowledge Graph & Relational Node Flow. Saves to PostgreSQL JSONB column. Deducts 1 AI Credit.
-   */
   async generateLevel4(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -636,10 +593,8 @@ ${ocrText.slice(0, 15000)}`;
         );
       }
 
-      // Validate AI Credit Quota
       const subscription = await checkAndGetAiSubscription(tenantId);
 
-      // LLM for dynamic Graph generation
       const client = aiProxyService.getClient();
       let nodes: GraphNode[] = [];
       let edges: GraphEdge[] = [];
@@ -708,7 +663,6 @@ ${ocrText.slice(0, 15000)}`;
         }
       }
 
-      // Dynamic fallback nodes if LLM is unavailable
       if (nodes.length === 0) {
         const docTitle = doc.originalName || doc.fileName;
         nodes = [
@@ -727,7 +681,6 @@ ${ocrText.slice(0, 15000)}`;
         summary = `Relational knowledge graph mapped from ${docTitle} across key dispute and procedural milestones.`;
       }
 
-      // 4. Save to PostgreSQL JSONB column
       const existingIntel = (doc.intelligenceData as DocumentIntelligencePayload | null) || {};
       const updatedIntel = {
         ...existingIntel,
@@ -747,7 +700,6 @@ ${ocrText.slice(0, 15000)}`;
         .set({ intelligenceData: updatedIntel })
         .where(eq(caseDocuments.id, documentId));
 
-      // 5. Deduct 1 AI credit from PostgreSQL
       await deductOneAiCredit(subscription);
 
       return res.status(200).json(
@@ -768,10 +720,6 @@ ${ocrText.slice(0, 15000)}`;
     }
   },
 
-  /**
-   * POST /api/document/:id/intelligence/chat
-   * Queries AI Co-Counsel with document context. Saves history to PostgreSQL JSONB column. Deducts 1 AI Credit per query.
-   */
   async chat(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -800,10 +748,8 @@ ${ocrText.slice(0, 15000)}`;
         return next(CustomErrorHandler.badRequest("Document has no OCR text. Run Level 1 OCR first."));
       }
 
-      // Validate AI Credit Quota
       const subscription = await checkAndGetAiSubscription(tenantId);
 
-      // Call LLM with document context
       const client = aiProxyService.getClient();
       let reply = "";
 
@@ -834,7 +780,6 @@ ${ocrText.slice(0, 30000)}
         { role: "user", content: query.trim() },
       ];
 
-      // Console log exactly what is sent to LLM for inspection
       console.log("\n=======================================================");
       console.log("🔍 [LEVEL 4 CO-COUNSEL CHAT] - INCOMING PROMPT TO LLM");
       console.log("Document ID:", documentId);
@@ -883,7 +828,6 @@ ${ocrText.slice(0, 30000)}
         }
       }
 
-      // Save chat interaction to PostgreSQL JSONB column
       const existingIntel = (doc.intelligenceData as DocumentIntelligencePayload | null) || {};
       const existingChatList = Array.isArray(existingIntel.chatMessages) ? existingIntel.chatMessages : [];
 
@@ -911,7 +855,6 @@ ${ocrText.slice(0, 30000)}
         .set({ intelligenceData: updatedIntel })
         .where(eq(caseDocuments.id, documentId));
 
-      // Deduct 1 AI credit from PostgreSQL
       await deductOneAiCredit(subscription);
 
       return res.status(200).json(
@@ -931,10 +874,6 @@ ${ocrText.slice(0, 30000)}
     }
   },
 
-  /**
-   * DELETE /api/document/:id/intelligence
-   * Clears saved intelligence data in PostgreSQL for this document
-   */
   async clearIntelligence(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;

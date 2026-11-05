@@ -30,13 +30,6 @@ const officeGuard = async (
       return next(new AppError("Tenant context is missing", 400));
     }
 
-    /**
-     * Verify:
-     *
-     * 1. Office belongs to the requested tenant
-     * 2. User has a scope for that tenant
-     * 3. That scope has access to this office
-     */
     const access = await db
       .select({
         officeId: offices.id,
@@ -72,10 +65,6 @@ const officeGuard = async (
       );
     }
 
-    /**
-     * Store the verified office context
-     * so controllers don't have to read x-office-id again.
-     */
     req.officeId = access[0].officeId;
 
     next();

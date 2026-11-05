@@ -8,8 +8,6 @@ import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import ResponseHandler from "../../utils/responseHandler.js";
 
 const documentFolderController = {
-
-  // CREATE FOLDER
   async createFolder(
     req: Request,
     res: Response,
@@ -50,8 +48,6 @@ const documentFolderController = {
         );
       }
 
-      // CHECK PARENT FOLDER
-
       if (parentId) {
         const [parentFolder] = await db
           .select({
@@ -74,7 +70,6 @@ const documentFolderController = {
         }
       }
 
-      // CREATE
       const [folder] = await db
         .insert(documentFolders)
         .values({
@@ -108,7 +103,6 @@ const documentFolderController = {
     }
   },
 
-  // GET FOLDERS
   async getFolders(
     req: Request,
     res: Response,
@@ -135,8 +129,6 @@ const documentFolderController = {
         eq(documentFolders.tenantId, tenantId),
       ];
 
-      // CASE FILTER
-
       if (caseId) {
         conditions.push(
           eq(
@@ -146,8 +138,6 @@ const documentFolderController = {
         );
       }
 
-      // OFFICE FILTER
-
       if (officeId) {
         conditions.push(
           eq(
@@ -156,15 +146,6 @@ const documentFolderController = {
           ),
         );
       }
-
-      // PARENT FILTER
-      //
-      // parentId = folder UUID
-      //             → children of that folder
-      //
-      // parentId = "root"
-      //             → top-level folders
-      //
 
       if (parentId === "root") {
         conditions.push(
@@ -205,7 +186,6 @@ const documentFolderController = {
     }
   },
 
-  // GET FOLDER BY ID
   async getFolderById(
     req: Request,
     res: Response,
@@ -262,7 +242,6 @@ const documentFolderController = {
     }
   },
 
-  // UPDATE FOLDER
   async updateFolder(
     req: Request,
     res: Response,
@@ -285,8 +264,6 @@ const documentFolderController = {
         parentId,
       } = req.body;
 
-      // FIND FOLDER
-
       const [existingFolder] = await db
         .select()
         .from(documentFolders)
@@ -305,10 +282,7 @@ const documentFolderController = {
         );
       }
 
-      // CHECK PARENT
-
       if (parentId) {
-        // Folder cannot be its own parent
         if (parentId === id) {
           return next(
             CustomErrorHandler.badRequest(
@@ -337,8 +311,6 @@ const documentFolderController = {
           );
         }
       }
-
-      // UPDATE
 
       const [updatedFolder] = await db
         .update(documentFolders)
@@ -377,7 +349,6 @@ const documentFolderController = {
     }
   },
 
-  // DELETE FOLDER
   async deleteFolder(
     req: Request,
     res: Response,
@@ -394,8 +365,6 @@ const documentFolderController = {
           ),
         );
       }
-
-      // FIND FOLDER
 
       const [folder] = await db
         .select({
@@ -417,7 +386,6 @@ const documentFolderController = {
         );
       }
 
-      // 1. REASSIGN ALL DOCUMENTS IN THIS FOLDER TO ROOT LEVEL (folderId = null)
       await db
         .update(caseDocuments)
         .set({
@@ -430,7 +398,6 @@ const documentFolderController = {
           ),
         );
 
-      // 2. REASSIGN ANY SUBFOLDERS TO ROOT LEVEL (parentId = null)
       await db
         .update(documentFolders)
         .set({
@@ -443,7 +410,6 @@ const documentFolderController = {
           ),
         );
 
-      // 3. DELETE FOLDER
       await db
         .delete(documentFolders)
         .where(

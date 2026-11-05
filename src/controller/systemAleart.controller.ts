@@ -24,15 +24,10 @@ const SystemAlertController = {
         .values({
           title: title.trim(),
           message: message.trim(),
-
           link: link?.trim() || null,
-
           type: type ?? "info",
-
           isActive: isActive ?? true,
-
           expiresAt: expiresAt ? new Date(expiresAt) : null,
-
           createdBy: userId,
           updatedBy: userId,
         })
@@ -58,8 +53,6 @@ const SystemAlertController = {
         .where(
           and(
             eq(systemAlerts.isActive, true),
-
-            // Not expired
             or(isNull(systemAlerts.expiresAt), gt(systemAlerts.expiresAt, now)),
           ),
         )
@@ -90,7 +83,6 @@ const SystemAlertController = {
         );
       }
 
-      // Check alert exists
       const [existingAlert] = await db
         .select({
           id: systemAlerts.id,
@@ -109,27 +101,21 @@ const SystemAlertController = {
           ...(title !== undefined && {
             title: title.trim(),
           }),
-
           ...(message !== undefined && {
             message: message.trim(),
           }),
-
           ...(link !== undefined && {
             link: link?.trim() || null,
           }),
-
           ...(type !== undefined && {
             type,
           }),
-
           ...(isActive !== undefined && {
             isActive,
           }),
-
           ...(expiresAt !== undefined && {
             expiresAt: expiresAt ? new Date(expiresAt) : null,
           }),
-
           updatedBy: userId,
           updatedAt: new Date(),
         })

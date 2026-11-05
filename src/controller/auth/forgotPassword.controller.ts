@@ -43,7 +43,7 @@ const forgotPasswordController = {
           .status(401)
           .send(ResponseHandler(401, "Generated OTP is expired, resend now"));
       }
-      // Hash the new password
+
       const hashedPassword = await bcrypt.hash(password, Number(config.SALT));
 
       await db.transaction(async (tx) => {
@@ -74,7 +74,6 @@ const forgotPasswordController = {
     }
     const { current_password, password } = req.body;
     try {
-      // Find the user by email
       const userRes = await db.query.user.findFirst({
         where: eq(users.id, userId),
       });
@@ -82,7 +81,6 @@ const forgotPasswordController = {
         return res.status(404).send(ResponseHandler(404, "User not found"));
       }
 
-      // Check if the current password is correct
       const isMatch = await bcrypt.compare(
         current_password,
         userRes?.password!,
@@ -93,11 +91,7 @@ const forgotPasswordController = {
           .send(ResponseHandler(400, "Incorrect current password"));
       }
 
-      // Hash the new password
-
       const hashedPassword = await bcrypt.hash(password, Number(config.SALT));
-
-      // Update the user's password
 
       await db
         .update(users)

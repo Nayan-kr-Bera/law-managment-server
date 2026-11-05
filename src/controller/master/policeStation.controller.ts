@@ -5,6 +5,7 @@ import { cases, policeStations } from "../../db/schema/index.js";
 import ResponseHandler from "../../utils/responseHandler.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import slugify from "slugify";
+
 const policeStationController = {
   async getpoliceStations(req: Request, res: Response, next: NextFunction) {
     const id = req.user.tenantId;
@@ -48,7 +49,6 @@ const policeStationController = {
         );
       }
 
-      // Check duplicate name
       const existingpoliceStation = await db.query.policeStations.findFirst({
         where: eq(policeStations.name, name),
       });
@@ -144,7 +144,6 @@ const policeStationController = {
         return next(CustomErrorHandler.badRequest("Case Type id is required"));
       }
 
-      // Check case type exists
       const policeStation = await db.query.policeStations.findFirst({
         where: and(
           eq(policeStations.id, id),
@@ -156,7 +155,6 @@ const policeStationController = {
         return next(CustomErrorHandler.notFound("Case Type not found"));
       }
 
-      // Check if any case is using this case type
       const assignedCase = await db.query.cases.findFirst({
         where: and(eq(cases.policeStationId, id), eq(cases.tenantId, tenantId)),
       });

@@ -11,7 +11,6 @@ import ResponseHandler from "../../utils/responseHandler.js";
 import slugify from "slugify";
 
 class CustomFieldController {
-  // Create
   async createCustomField(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user.tenantId;
@@ -61,7 +60,6 @@ class CustomFieldController {
         })
         .returning();
 
-      // Insert options only for option-based fields
       if (
         ["select", "radio", "checkbox", "multiselect"].includes(fieldType) &&
         Array.isArray(options) &&
@@ -113,7 +111,6 @@ class CustomFieldController {
     }
   }
 
-  // Get All
   async getCustomFields(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user.tenantId;
@@ -136,7 +133,6 @@ class CustomFieldController {
     }
   }
 
-  // Get By Id
   async getCustomFieldById(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -165,7 +161,6 @@ class CustomFieldController {
     }
   }
 
-  // Update
   async updateCustomField(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -217,7 +212,6 @@ class CustomFieldController {
       }
 
       await db.transaction(async (tx) => {
-        // Update field
         await tx
           .update(customFields)
           .set({
@@ -230,12 +224,10 @@ class CustomFieldController {
           })
           .where(eq(customFields.id, id));
 
-        // Remove all old options
         await tx
           .delete(customFieldOptions)
           .where(eq(customFieldOptions.fieldId, id));
 
-        // Insert new options for option-based fields
         if (
           ["select", "radio", "checkbox", "multiselect"].includes(fieldType) &&
           Array.isArray(options) &&
@@ -281,7 +273,6 @@ class CustomFieldController {
     }
   }
 
-  // Delete
   async deleteCustomField(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;

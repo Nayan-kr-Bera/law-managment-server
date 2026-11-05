@@ -41,9 +41,6 @@ export interface OcrCompletionEmailData {
 }
 
 class OcrEmailService {
-  /**
-   * Sends an email notification when background OCR processing finishes successfully
-   */
   public async sendOcrSuccessEmail(
     data: OcrCompletionEmailData,
   ): Promise<boolean> {
@@ -199,9 +196,6 @@ class OcrEmailService {
     }
   }
 
-  /**
-   * Sends an email notification if OCR fails (e.g., quota exceeded or unreadable file)
-   */
   public async sendOcrFailureEmail(params: {
     toEmail: string;
     userName: string;

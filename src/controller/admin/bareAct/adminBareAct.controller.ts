@@ -18,7 +18,6 @@ import { bareActs } from "../../../db/schema/index.js";
 import ResponseHandler from "../../../utils/responseHandler.js";
 
 export const adminBareActController = {
-  // 1. Get All Acts (Admin View)
   async getActs(req: Request, res: Response, next: NextFunction) {
     try {
       const {
@@ -59,7 +58,6 @@ export const adminBareActController = {
     }
   },
 
-  // 1b. Get All Act Slugs (Lightweight lookup for admin portal)
   async getActSlugs(req: Request, res: Response, next: NextFunction) {
     try {
       const rows = await db.select({ slug: bareActs.slug }).from(bareActs);
@@ -70,7 +68,6 @@ export const adminBareActController = {
     }
   },
 
-  // 2. Get Single Act Details (Admin View)
   async getActById(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -83,7 +80,6 @@ export const adminBareActController = {
     }
   },
 
-  // 3. Create Bare Act (Admin Upload / Manual Entry)
   async createAct(req: Request, res: Response, next: NextFunction) {
     try {
       const validated = createBareActSchema.parse(req.body);
@@ -98,7 +94,6 @@ export const adminBareActController = {
     }
   },
 
-  // 4. Update Bare Act
   async updateAct(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -112,7 +107,6 @@ export const adminBareActController = {
     }
   },
 
-  // 5. Delete Bare Act
   async deleteAct(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -123,7 +117,6 @@ export const adminBareActController = {
     }
   },
 
-  // 6. Create Chapter
   async createChapter(req: Request, res: Response, next: NextFunction) {
     try {
       const id = req.params.id as string;
@@ -137,7 +130,6 @@ export const adminBareActController = {
     }
   },
 
-  // 7. Update Chapter
   async updateChapter(req: Request, res: Response, next: NextFunction) {
     try {
       const chapterId = req.params.chapterId as string;
@@ -151,7 +143,6 @@ export const adminBareActController = {
     }
   },
 
-  // 8. Delete Chapter
   async deleteChapter(req: Request, res: Response, next: NextFunction) {
     try {
       const chapterId = req.params.chapterId as string;
@@ -162,7 +153,6 @@ export const adminBareActController = {
     }
   },
 
-  // 8a. Assign Sections to Chapter (By list of IDs or by section range e.g. 1-10)
   async assignSections(req: Request, res: Response, next: NextFunction) {
     try {
       const chapterId = req.params.chapterId as string;
@@ -174,7 +164,6 @@ export const adminBareActController = {
     }
   },
 
-  // 8b. Unassign Sections from Chapter
   async unassignSections(req: Request, res: Response, next: NextFunction) {
     try {
       const validated = unassignSectionsSchema.parse(req.body);
@@ -185,7 +174,6 @@ export const adminBareActController = {
     }
   },
 
-  // 9. Create Section
   async createSection(req: Request, res: Response, next: NextFunction) {
     try {
       const id = req.params.id as string;
@@ -199,7 +187,6 @@ export const adminBareActController = {
     }
   },
 
-  // 10. Update Section
   async updateSection(req: Request, res: Response, next: NextFunction) {
     try {
       const sectionId = req.params.sectionId as string;
@@ -213,7 +200,6 @@ export const adminBareActController = {
     }
   },
 
-  // 11. Delete Section
   async deleteSection(req: Request, res: Response, next: NextFunction) {
     try {
       const sectionId = req.params.sectionId as string;
@@ -224,7 +210,6 @@ export const adminBareActController = {
     }
   },
 
-  // 12. Bulk Import Act with Chapters and Sections
   async bulkImportAct(req: Request, res: Response, next: NextFunction) {
     try {
       const validated = bulkImportBareActSchema.parse(req.body);
@@ -238,7 +223,6 @@ export const adminBareActController = {
     }
   },
 
-  // 13. Re-seed System Default Indian Bare Acts Library
   async seedLibrary(req: Request, res: Response, next: NextFunction) {
     try {
       const result = await bareActService.reseedLibrary();
@@ -248,7 +232,6 @@ export const adminBareActController = {
     }
   },
 
-  // 14. Search IndiaCode API Live
   async searchIndiaCode(req: Request, res: Response, next: NextFunction) {
     try {
       const { q, jurisdiction, ministry, year, limit, offset } = req.query;
@@ -277,7 +260,6 @@ export const adminBareActController = {
     }
   },
 
-  // 15. Preview Act from IndiaCode
   async previewIndiaCodeAct(req: Request, res: Response, next: NextFunction) {
     try {
       const { actSlug } = req.params;
@@ -294,7 +276,6 @@ export const adminBareActController = {
       try {
         result = (await indiaCodeService.getActOverview(cleanSlug)) as unknown as typeof result;
       } catch (err: unknown) {
-        // Fallback: check if act already exists in local DB
         const dbAct = await db.query.bareActs.findFirst({
           where: eq(bareActs.slug, cleanSlug),
           with: {
@@ -364,7 +345,6 @@ export const adminBareActController = {
     }
   },
 
-  // 16. Admin 1-Click Import from IndiaCode to Database
   async importFromIndiaCode(req: Request, res: Response, next: NextFunction) {
     try {
       const { actSlug, slug, id, category, maxSections, batchSize } = req.body;

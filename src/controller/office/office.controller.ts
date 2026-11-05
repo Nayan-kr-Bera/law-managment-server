@@ -98,7 +98,6 @@ const officeController = {
       }
 
       const result = await db.transaction(async (tx) => {
-        // 1. Find user's scope for this tenant
         const scope = await tx.query.userScopes.findFirst({
           where: and(
             eq(userScopes.userId, userId),
@@ -110,7 +109,6 @@ const officeController = {
           throw CustomErrorHandler.notFound("User Scope Not Found");
         }
 
-        // 2. Create office
         const [office] = await tx
           .insert(offices)
           .values({
@@ -130,7 +128,6 @@ const officeController = {
           })
           .returning();
 
-        // 3. Give creator's scope access to the new office
         await tx.insert(userScopeOffices).values({
           userScopeId: scope.id,
           officeId: office.id,

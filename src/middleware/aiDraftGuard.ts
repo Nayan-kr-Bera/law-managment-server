@@ -54,7 +54,6 @@ export const aiDraftGuard = async (
     let currentUsed = subscription.aiDraftsUsedThisMonth ?? 0;
     const addonCredits = subscription.aiDraftAddonCredits ?? 0;
 
-    // Check monthly billing reset
     if (subscription.aiDraftCycleResetDate) {
       const resetDate = new Date(subscription.aiDraftCycleResetDate);
       const now = new Date();

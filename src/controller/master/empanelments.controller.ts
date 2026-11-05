@@ -5,6 +5,7 @@ import { cases, empanelments } from "../../db/schema/index.js";
 import ResponseHandler from "../../utils/responseHandler.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import slugify from "slugify";
+
 const empanelmentsController = {
   async getempanelments(req: Request, res: Response, next: NextFunction) {
     const id = req.user.tenantId;
@@ -48,7 +49,6 @@ const empanelmentsController = {
         );
       }
 
-      // Check duplicate name
       const existingempanelments = await db.query.empanelments.findFirst({
         where: eq(empanelments.slug, slug),
       });
@@ -145,7 +145,6 @@ const empanelmentsController = {
         );
       }
 
-      // Check empanelments exists
       const empanelmentsdata = await db.query.empanelments.findFirst({
         where: and(
           eq(empanelments.id, id),
@@ -157,7 +156,6 @@ const empanelmentsController = {
         return next(CustomErrorHandler.notFound("empanelments not found"));
       }
 
-      // Check if any case is using this empanelments
       const assignedCase = await db.query.cases.findFirst({
         where: and(eq(cases.empanelmentId, id), eq(cases.tenantId, tenantId)),
       });

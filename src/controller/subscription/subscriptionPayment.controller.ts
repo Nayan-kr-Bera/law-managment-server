@@ -9,7 +9,6 @@ import ResponseHandler from "../../utils/responseHandler.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 
 const subscriptionPaymentController = {
-  // GET ALL PAYMENTS OF TENANT
   async getPayments(req: Request, res: Response, next: NextFunction) {
     try {
       const { tenantId } = req.params;
@@ -41,7 +40,6 @@ const subscriptionPaymentController = {
     }
   },
 
-  // GET PAYMENT BY ID
   async getPaymentById(req: Request, res: Response, next: NextFunction) {
     try {
       const { tenantId, id } = req.params;

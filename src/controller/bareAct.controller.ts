@@ -4,7 +4,6 @@ import { indiaCodeService } from "../services/indiaCode.service.js";
 import ResponseHandler from "../utils/responseHandler.js";
 
 export const bareActController = {
-  // 1. List Bare Acts with filter/search
   async listActs(req: Request, res: Response, next: NextFunction) {
     try {
       const {
@@ -45,7 +44,6 @@ export const bareActController = {
     }
   },
 
-  // 2. Get Single Bare Act Details by slug or ID
   async getActBySlugOrId(req: Request, res: Response, next: NextFunction) {
     try {
       const { slugOrId } = req.params;
@@ -58,7 +56,6 @@ export const bareActController = {
     }
   },
 
-  // 3. Get Sections of an Act
   async getActSections(req: Request, res: Response, next: NextFunction) {
     try {
       const { actSlugOrId } = req.params;
@@ -83,7 +80,6 @@ export const bareActController = {
     }
   },
 
-  // 4. Get Single Section details with statutory text, explanations, judgments & cross-refs
   async getSectionDetail(req: Request, res: Response, next: NextFunction) {
     try {
       const { actSlugOrId, sectionSlugOrNumber } = req.params;
@@ -99,7 +95,6 @@ export const bareActController = {
     }
   },
 
-  // 4b. Get Enriched Judgments with CNR, Ratio Decidendi & PDF URL
   async getSectionJudgments(req: Request, res: Response, next: NextFunction) {
     try {
       const { actSlugOrId, sectionSlugOrNumber } = req.params;
@@ -115,7 +110,6 @@ export const bareActController = {
     }
   },
 
-  // 5. Instant Quick Section Lookup across all Bare Acts
   async quickLookup(req: Request, res: Response, next: NextFunction) {
     try {
       const { q, limit } = req.query;
@@ -131,7 +125,6 @@ export const bareActController = {
     }
   },
 
-  // 6. Get Categories with Act counts & legal domain descriptions
   async getCategories(req: Request, res: Response, next: NextFunction) {
     try {
       const result = await bareActService.getCategories();
@@ -143,7 +136,6 @@ export const bareActController = {
     }
   },
 
-  // 7. Global stats
   async getStats(req: Request, res: Response, next: NextFunction) {
     try {
       const result = await bareActService.getStats();
@@ -155,7 +147,6 @@ export const bareActController = {
     }
   },
 
-  // 8. Criminal Law Comparisons (IPC vs BNS, CrPC vs BNSS, IEA vs BSA)
   async getCriminalLawComparisons(req: Request, res: Response, next: NextFunction) {
     try {
       const result = await bareActService.getCriminalLawComparisons();
@@ -173,7 +164,6 @@ export const bareActController = {
     }
   },
 
-  // 9. Search IndiaCode Live (over 10,000+ Acts)
   async searchIndiaCode(req: Request, res: Response, next: NextFunction) {
     try {
       const { q, jurisdiction, ministry, year, limit, offset } = req.query;
@@ -200,7 +190,6 @@ export const bareActController = {
     }
   },
 
-  // 10. Preview IndiaCode Act
   async previewIndiaCodeAct(req: Request, res: Response, next: NextFunction) {
     try {
       const { actSlug } = req.params;
@@ -243,7 +232,6 @@ export const bareActController = {
     }
   },
 
-  // 11. 1-Click Import Act from IndiaCode
   async importFromIndiaCode(req: Request, res: Response, next: NextFunction) {
     try {
       const { actSlug, slug, id, category, maxSections, batchSize } = req.body;
@@ -269,7 +257,6 @@ export const bareActController = {
     }
   },
 
-  // 12. Delete Bare Act
   async deleteAct(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;

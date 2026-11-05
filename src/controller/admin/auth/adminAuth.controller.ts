@@ -23,9 +23,6 @@ import { IAdminJwtPayload } from "../../../@types/payload.types.js";
 const REFRESH_EXPIRES = "7d";
 
 const adminAuthController = {
-  // =========================================================================
-  // ADMIN PORTAL LOGIN
-  // =========================================================================
   async login(req: Request, res: Response, next: NextFunction) {
     try {
       const { email, password } = req.body;
@@ -36,7 +33,6 @@ const adminAuthController = {
         );
       }
 
-      // Find Admin User
       const adminUser = await db.query.user.findFirst({
         where: eq(user.email, email.trim().toLowerCase()),
       });
@@ -47,7 +43,6 @@ const adminAuthController = {
         );
       }
 
-      // Verify Password
       const isMatch = await bcrypt.compare(password, adminUser.password);
       if (!isMatch) {
         return next(
@@ -61,7 +56,6 @@ const adminAuthController = {
         );
       }
 
-      // Get Default / System Scope
       const scope = await db.query.userScopes.findFirst({
         where: and(
           eq(userScopes.userId, adminUser.id),
@@ -69,7 +63,6 @@ const adminAuthController = {
         ),
       });
 
-      // Get Assigned Roles
       const assignedRoles = scope
         ? await db.query.userRoles.findMany({
             where: eq(userRoles.scopeId, scope.id),
@@ -94,14 +87,12 @@ const adminAuthController = {
       const isPlatformAdmin =
         isSuperAdmin || roleData.some((r) => r.slug === "admin");
 
-      // Single role: either "super_admin" or "admin" (or slug/name)
       const singleRole: string = isSuperAdmin
         ? "super_admin"
         : isPlatformAdmin
         ? "admin"
         : roleData[0]?.slug || roleData[0]?.name || "admin";
 
-      // Role Permissions
       const rolePermissionData =
         roleIds.length > 0
           ? await db
@@ -134,13 +125,11 @@ const adminAuthController = {
       let adminPermissions: string[] = [];
 
       if (isSuperAdmin) {
-        // Super Admin gets all system and admin portal permissions
         const allAdminPortalPerms = await db
           .select({ code: permissions.code })
           .from(permissions);
         adminPermissions = allAdminPortalPerms.map((p) => p.code);
       } else {
-        // Departmental Admin gets assigned Admin Portal permissions
         adminPermissions = [
           ...new Set([
             ...rolePermissionData
@@ -153,7 +142,6 @@ const adminAuthController = {
         ];
       }
 
-      // If user has NO platform admin role and NO admin portal permissions, reject access
       if (!isSuperAdmin && !isPlatformAdmin && adminPermissions.length === 0) {
         return next(
           CustomErrorHandler.unAuthorized(
@@ -162,7 +150,6 @@ const adminAuthController = {
         );
       }
 
-      // Create Dedicated Admin JWT Payload (No tenantId, single role, RBAC permissions)
       const payload: IAdminJwtPayload = {
         userId: adminUser.id,
         adminId: adminUser.id,
@@ -185,7 +172,6 @@ const adminAuthController = {
         config.REFRESH_SECRET
       );
 
-      // Save Admin Refresh Token (clean up previous session and insert fresh token)
       await db.delete(refreshTokens).where(eq(refreshTokens.userId, adminUser.id));
       await db.insert(refreshTokens).values({
         userId: adminUser.id,
@@ -217,9 +203,6 @@ const adminAuthController = {
     }
   },
 
-  // =========================================================================
-  // ADMIN REFRESH TOKEN
-  // =========================================================================
   async refreshToken(req: Request, res: Response, next: NextFunction) {
     try {
       const { refresh_token } = req.body;
@@ -350,9 +333,6 @@ const adminAuthController = {
     }
   },
 
-  // =========================================================================
-  // ADMIN LOGOUT
-  // =========================================================================
   async logout(req: Request, res: Response, next: NextFunction) {
     try {
       const adminId = req.user?.userId || req.adminUser?.userId;
@@ -370,9 +350,6 @@ const adminAuthController = {
     }
   },
 
-  // =========================================================================
-  // GET ADMIN PROFILE (ME)
-  // =========================================================================
   async getProfile(req: Request, res: Response, next: NextFunction) {
     try {
       const adminId = req.user?.userId || req.adminUser?.userId;

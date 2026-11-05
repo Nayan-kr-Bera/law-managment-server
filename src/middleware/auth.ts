@@ -10,6 +10,7 @@ import {
   rolePermissions,
   userPermissions,
   permissions,
+  mobileSessions,
 } from "../db/schema/index.js";
 
 import JwtService from "../utils/jwtServices.js";
@@ -37,7 +38,20 @@ const auth = async (
 
     const decoded = JwtService.verify(token) as IUserJwtPayload;
 
-    // Check user still exists
+    if (decoded.sid) {
+      const mobileSession = await db.query.mobileSessions.findFirst({
+        where: eq(mobileSessions.id, decoded.sid),
+        columns: { id: true, revokedAt: true, userId: true },
+      });
+      if (
+        !mobileSession ||
+        mobileSession.revokedAt ||
+        mobileSession.userId !== decoded.userId
+      ) {
+        throw new AppError("Session expired", 401);
+      }
+    }
+
     const existingUser = await db.query.user.findFirst({
       where: eq(users.id, decoded.userId),
     });
@@ -46,12 +60,10 @@ const auth = async (
       throw new AppError("User not found", 401);
     }
 
-    // Check email verification
     if (!existingUser.isEmailVerified) {
       throw new AppError("Email not verified", 403);
     }
 
-    // If token payload is missing permissions or isTenantAdmin, load them from DB
     if (!decoded.permissions || decoded.isTenantAdmin === undefined) {
       const scope = decoded.scopeId
         ? await db.query.userScopes.findFirst({

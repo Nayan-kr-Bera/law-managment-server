@@ -23,7 +23,7 @@ export interface StreamChatParams {
   judgmentText?: string;
   history: ChatMessage[];
   res: Response;
-  onComplete?: () => Promise<void>;
+  onComplete?: (fullText: string) => Promise<void>;
 }
 
 export class AiProxyService {
@@ -38,9 +38,6 @@ export class AiProxyService {
     });
   }
 
-  /**
-   * System Prompt tailored for Indian Court Judgments Analysis
-   */
   private buildSystemPrompt(metadata?: JudgmentMetadata, judgmentText?: string): string {
     const caseHeader = [
       metadata?.title ? `Case Title: ${metadata.title}` : "",
@@ -73,21 +70,15 @@ YOUR ROLE & INSTRUCTIONS:
 4. Keep the tone formal, legally rigorous, authoritative, and practical for court arguments.`;
   }
 
-  /**
-   * Stream LLM response directly to client via Server-Sent Events (SSE).
-   * Supports pluggable external microservice or direct in-process LLM.
-   */
   public async streamJudgmentChat(params: StreamChatParams): Promise<void> {
     const { metadata, judgmentText, history, res, onComplete } = params;
 
-    // Check if user has configured an external dedicated AI Microservice
     const externalAiUrl = process.env.JUDGMENT_AI_SERVICE_URL;
 
     if (externalAiUrl && externalAiUrl.trim() !== "") {
       return this.forwardToExternalMicroservice(externalAiUrl, params);
     }
 
-    // Default: Direct OpenAI / Compatible LLM in-process streaming
     const client = this.getClient();
     if (!client) {
       res.write(`data: ${JSON.stringify({ error: "LLM service is not configured. Please check OPENAI_API_KEY in server environment." })}\n\n`);
@@ -115,9 +106,12 @@ YOUR ROLE & INSTRUCTIONS:
         stream: true,
       });
 
+      let fullText = "";
+
       for await (const chunk of stream) {
         const content = chunk.choices[0]?.delta?.content || "";
         if (content) {
+          fullText += content;
           res.write(`data: ${JSON.stringify({ token: content })}\n\n`);
         }
       }
@@ -125,9 +119,8 @@ YOUR ROLE & INSTRUCTIONS:
       res.write("data: [DONE]\n\n");
       res.end();
 
-      // Trigger credit deduction upon successful completion
       if (onComplete) {
-        await onComplete();
+        await onComplete(fullText);
       }
     } catch (err: unknown) {
       console.error("[AiProxyService.streamJudgmentChat] Error during stream:", err);
@@ -137,10 +130,6 @@ YOUR ROLE & INSTRUCTIONS:
     }
   }
 
-  /**
-   * Forwards streaming request to an external dedicated AI microservice
-   * (e.g. Future Python / FastAPI / LangGraph service on another VPS)
-   */
   private async forwardToExternalMicroservice(url: string, params: StreamChatParams): Promise<void> {
     const { metadata, judgmentText, history, res, onComplete } = params;
 
@@ -161,18 +150,33 @@ YOUR ROLE & INSTRUCTIONS:
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
+      let fullText = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         const chunk = decoder.decode(value, { stream: true });
         res.write(chunk);
+        const lines = chunk.split("\n\n");
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const dataStr = line.replace("data: ", "").trim();
+            if (dataStr && dataStr !== "[DONE]") {
+              try {
+                const parsed = JSON.parse(dataStr);
+                if (parsed.token) fullText += parsed.token;
+              } catch {
+                // ignore
+              }
+            }
+          }
+        }
       }
 
       res.end();
 
       if (onComplete) {
-        await onComplete();
+        await onComplete(fullText);
       }
     } catch (err: unknown) {
       console.error("[AiProxyService.forwardToExternalMicroservice] Error:", err);

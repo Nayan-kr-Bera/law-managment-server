@@ -5,6 +5,7 @@ import { cases, caseTypes } from "../../db/schema/index.js";
 import ResponseHandler from "../../utils/responseHandler.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import slugify from "slugify";
+
 const caseTypeController = {
   async getcaseTypes(req: Request, res: Response, next: NextFunction) {
     const id = req.user.tenantId;
@@ -47,7 +48,6 @@ const caseTypeController = {
         return next(CustomErrorHandler.badRequest("caseType name is required"));
       }
 
-      // Check duplicate name
       const existingcaseType = await db.query.caseTypes.findFirst({
         where: and(eq(caseTypes.tenantId, id), eq(caseTypes.slug, slug)),
       });
@@ -97,20 +97,18 @@ const caseTypeController = {
       }
 
       if (slug && slug !== caseType.slug) {
-        {
-          const duplicateName = await db.query.caseTypes.findFirst({
-            where: and(
-              eq(caseTypes.slug, slug),
-              eq(caseTypes.tenantId, tenantId),
-              ne(caseTypes.id, id),
-            ),
-          });
+        const duplicateName = await db.query.caseTypes.findFirst({
+          where: and(
+            eq(caseTypes.slug, slug),
+            eq(caseTypes.tenantId, tenantId),
+            ne(caseTypes.id, id),
+          ),
+        });
 
-          if (duplicateName) {
-            return next(
-              CustomErrorHandler.badRequest("caseType name already exists"),
-            );
-          }
+        if (duplicateName) {
+          return next(
+            CustomErrorHandler.badRequest("caseType name already exists"),
+          );
         }
       }
 
@@ -141,7 +139,6 @@ const caseTypeController = {
         return next(CustomErrorHandler.badRequest("Case Type id is required"));
       }
 
-      // Check case type exists
       const caseType = await db.query.caseTypes.findFirst({
         where: and(eq(caseTypes.id, id), eq(caseTypes.tenantId, tenantId)),
       });
@@ -150,7 +147,6 @@ const caseTypeController = {
         return next(CustomErrorHandler.notFound("Case Type not found"));
       }
 
-      // Check if any case is using this case type
       const assignedCase = await db.query.cases.findFirst({
         where: and(eq(cases.caseTypeId, id), eq(cases.tenantId, tenantId)),
       });

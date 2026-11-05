@@ -5,7 +5,7 @@ import { notifications, notificationQueue, userScopes, userScopeOffices } from "
 import { sendExpoPushToClient } from "./expoPushNotification.service.js";
 
 export const notificationEvents = new EventEmitter();
-notificationEvents.setMaxListeners(0); // Unlimited listeners for active SSE connections
+notificationEvents.setMaxListeners(0);
 
 export interface CreateNotificationParams {
   tenantId: string;
@@ -31,9 +31,6 @@ export interface CreateClientNotificationParams {
   payload?: Record<string, unknown>;
 }
 
-/**
- * Creates notifications for the Client Portal and pushes real-time SSE event.
- */
 export const createClientNotification = async (params: CreateClientNotificationParams) => {
   try {
     const targetLink =
@@ -68,7 +65,6 @@ export const createClientNotification = async (params: CreateClientNotificationP
     if (queueItem) {
       notificationEvents.emit("client_notification:new", queueItem);
 
-      // Trigger mobile push notification banner via Expo
       sendExpoPushToClient(params.clientId, {
         title: params.title,
         body: params.message,
@@ -101,7 +97,6 @@ export const createNotification = async (params: CreateNotificationParams) => {
   try {
     if (!params.tenantId) return null;
 
-    // 1. Direct user-targeted notification
     if (params.userId) {
       const [notif] = await db
         .insert(notifications)
@@ -123,7 +118,6 @@ export const createNotification = async (params: CreateNotificationParams) => {
       return [notif];
     }
 
-    // 2. Broadcast to Office or Tenant -> Fan-out to all active members
     let targetUserIds: string[] = [];
 
     if (params.officeId) {
@@ -162,7 +156,6 @@ export const createNotification = async (params: CreateNotificationParams) => {
       targetUserIds = targetUserIds.filter((id) => id !== params.excludeUserId);
     }
 
-    // Fallback if no target users found
     if (targetUserIds.length === 0) {
       const [singleNotif] = await db
         .insert(notifications)
@@ -183,7 +176,6 @@ export const createNotification = async (params: CreateNotificationParams) => {
       return [singleNotif];
     }
 
-    // Fan-out: Insert individual records per user
     const insertPayload = targetUserIds.map((uid) => ({
       tenantId: params.tenantId,
       officeId: params.officeId || null,

@@ -6,10 +6,6 @@ import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import ResponseHandler from "../../utils/responseHandler.js";
 
 export const casePrecedentController = {
-  /**
-   * 1. GET /api/case-precedents/case/:caseId
-   * Fetch all judicial precedents and neutral citations attached to a case
-   */
   async getCasePrecedents(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -42,10 +38,6 @@ export const casePrecedentController = {
     }
   },
 
-  /**
-   * 2. POST /api/case-precedents
-   * Attach a court judgment or neutral citation to a client case
-   */
   async attachPrecedent(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -90,7 +82,6 @@ export const casePrecedentController = {
         return next(CustomErrorHandler.badRequest("Case ID and Judgment Title are required"));
       }
 
-      // Verify case belongs to tenant
       const caseExists = await db.query.cases.findFirst({
         where: and(eq(cases.id, caseId), eq(cases.tenantId, tenantId)),
       });
@@ -132,10 +123,6 @@ export const casePrecedentController = {
     }
   },
 
-  /**
-   * 3. PATCH /api/case-precedents/:id
-   * Update advocate's notes or relevance tag for an attached precedent
-   */
   async updatePrecedent(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -185,10 +172,6 @@ export const casePrecedentController = {
     }
   },
 
-  /**
-   * 4. DELETE /api/case-precedents/:id
-   * Remove an attached precedent from a case file
-   */
   async removePrecedent(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;

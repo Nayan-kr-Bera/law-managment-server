@@ -8,9 +8,6 @@ import CustomErrorHandler from "../../../utils/customErrorHandler.js";
 import ResponseHandler from "../../../utils/responseHandler.js";
 
 const adminAuditController = {
-  // =========================================================================
-  // GET PLATFORM AUDIT LOGS
-  // =========================================================================
   async getAuditLogs(req: Request, res: Response, next: NextFunction) {
     try {
       const { entityType, page = "1", limit = "50" } = req.query as {

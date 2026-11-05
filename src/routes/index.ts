@@ -1,4 +1,5 @@
 export { default as authRoutes } from "./auth.route.js";
+export { default as mobileAuthRoutes } from "./mobileAuth.route.js";
 export { default as passwordRoutes } from "./password.route.js";
 export { default as otpRoutes } from "./otp.route.js";
 export { default as roleRoutes } from "./role.route.js";

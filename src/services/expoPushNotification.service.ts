@@ -12,10 +12,6 @@ export interface ExpoPushMessage {
   channelId?: string;
 }
 
-/**
- * Sends a push notification to Expo's Push API servers (which route to FCM on Android and APNs on iOS).
- * 100% Free, no credit card or paid account required.
- */
 export const sendExpoPushNotification = async (message: ExpoPushMessage) => {
   try {
     const rawTokens = Array.isArray(message.to) ? message.to : [message.to];
@@ -58,9 +54,6 @@ export const sendExpoPushNotification = async (message: ExpoPushMessage) => {
   }
 };
 
-/**
- * Looks up all registered Expo push tokens for a client and delivers the push banner to their device(s).
- */
 export const sendExpoPushToClient = async (
   clientId: string,
   payload: { title: string; body: string; data?: Record<string, unknown> }

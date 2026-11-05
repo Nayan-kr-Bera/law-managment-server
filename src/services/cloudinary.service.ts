@@ -80,7 +80,6 @@ export const deleteFileFromCloudinary = async (
 
     let publicIdParts = pathParts.slice(uploadIndex + 1);
 
-    // Remove transformations if present
     if (
       publicIdParts[0] &&
       (publicIdParts[0].includes("_") || publicIdParts[0].includes(","))
@@ -88,7 +87,6 @@ export const deleteFileFromCloudinary = async (
       publicIdParts = publicIdParts.slice(1);
     }
 
-    // Remove version
     if (publicIdParts[0] && /^v\d+$/.test(publicIdParts[0])) {
       publicIdParts = publicIdParts.slice(1);
     }
@@ -99,7 +97,6 @@ export const deleteFileFromCloudinary = async (
 
     let publicId = publicIdParts.join("/");
 
-    // Remove extension
     publicId = publicId.replace(/\.[^/.]+$/, "");
 
     await cloudinary.uploader.destroy(publicId, {

@@ -1,9 +1,21 @@
 import { type Request, type Response, type NextFunction } from "express";
 import aiProxyService, { type ChatMessage, type JudgmentMetadata } from "../../services/aiProxy.service.js";
-import { deductJudgmentCredit } from "../../middleware/judgmentCreditGuard.js";
+import {
+  deductJudgmentCredit,
+  ensureJudgmentSessionsTable,
+  resolveJudgmentKey,
+  MAX_FOLLOWUP_PROMPT_CHARS,
+  SESSION_TTL_MS,
+} from "../../middleware/judgmentCreditGuard.js";
 import db from "../../db/index.js";
-import { courtJudgments, tenantSubscriptions, subscriptionPaymentHistory } from "../../db/schema/index.js";
-import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
+import {
+  courtJudgments,
+  tenantSubscriptions,
+  subscriptionPaymentHistory,
+  judgmentAiSessions,
+  type IJudgmentSessionMessage,
+} from "../../db/schema/index.js";
+import { and, desc, eq, gt, ilike, lte, or, sql } from "drizzle-orm";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import razorpayService from "../../services/razorpay.service.js";
 import ResponseHandler from "../../utils/responseHandler.js";
@@ -16,10 +28,6 @@ import {
 } from "../../constants/judgmentCreditPacks.js";
 
 const judgmentAiController = {
-  /**
-   * GET /api/judgment-ai/quota
-   * Returns current AI credits and usage for the logged-in advocate's tenant
-   */
   async getQuota(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -47,7 +55,6 @@ const judgmentAiController = {
       let usedThisMonth = subscription?.aiDraftsUsedThisMonth ?? 0;
       let addonCredits = subscription?.aiDraftAddonCredits ?? 0;
 
-      // Check monthly cycle reset
       if (subscription?.aiDraftCycleResetDate) {
         const resetDate = new Date(subscription.aiDraftCycleResetDate);
         const now = new Date();
@@ -92,10 +99,6 @@ const judgmentAiController = {
     }
   },
 
-  /**
-   * GET /api/judgment-ai/judgments
-   * Returns paginated list of judgments from central library for the advocate portal
-   */
   async getJudgments(req: Request, res: Response, next: NextFunction) {
     try {
       const {
@@ -165,17 +168,98 @@ const judgmentAiController = {
     }
   },
 
-  /**
-   * POST /api/judgment-ai/chat
-   * Streams AI completion for judgment briefing or conversational Q&A.
-   * Deducts 15 credits upon starting generation.
-   */
+  async getActiveSessions(req: Request, res: Response, next: NextFunction) {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return next(CustomErrorHandler.unAuthorized("Authentication required"));
+      }
+
+      await ensureJudgmentSessionsTable();
+
+      db.delete(judgmentAiSessions)
+        .where(lte(judgmentAiSessions.expiresAt, new Date()))
+        .catch(() => {});
+
+      const sessions = await db
+        .select()
+        .from(judgmentAiSessions)
+        .where(
+          and(
+            eq(judgmentAiSessions.tenantId, tenantId),
+            gt(judgmentAiSessions.expiresAt, new Date()),
+          ),
+        )
+        .orderBy(desc(judgmentAiSessions.updatedAt))
+        .limit(50);
+
+      const formatted = sessions.map((s) => ({
+        id: s.id,
+        caseId: s.judgmentKey,
+        judgmentKey: s.judgmentKey,
+        title: s.title,
+        citation: s.citation,
+        court: s.court,
+        chatHistory: s.messages || [],
+        questionsUsed: s.questionsUsed,
+        savedAt: new Date(s.savedAt).getTime(),
+        expiresAt: new Date(s.expiresAt).getTime(),
+      }));
+
+      return res.status(200).json({
+        success: true,
+        data: formatted,
+      });
+    } catch (err) {
+      console.error("[judgmentAiController.getActiveSessions] Error:", err);
+      return next(CustomErrorHandler.serverError("Failed to fetch active AI sessions"));
+    }
+  },
+
+  async deleteSession(req: Request, res: Response, next: NextFunction) {
+    try {
+      const tenantId = req.user?.tenantId;
+      if (!tenantId) {
+        return next(CustomErrorHandler.unAuthorized("Authentication required"));
+      }
+
+      const rawKey = req.params.judgmentKey || "";
+      const judgmentKey = decodeURIComponent(rawKey)
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, "-")
+        .slice(0, 250);
+
+      await ensureJudgmentSessionsTable();
+
+      await db
+        .delete(judgmentAiSessions)
+        .where(
+          and(
+            eq(judgmentAiSessions.tenantId, tenantId),
+            eq(judgmentAiSessions.judgmentKey, judgmentKey),
+          ),
+        );
+
+      return res.status(200).json({
+        success: true,
+        message: "Judgment AI session cleared",
+      });
+    } catch (err) {
+      console.error("[judgmentAiController.deleteSession] Error:", err);
+      return next(CustomErrorHandler.serverError("Failed to clear judgment AI session"));
+    }
+  },
+
   async streamChat(req: Request, res: Response, next: NextFunction) {
     try {
-      const { metadata, judgmentText, history } = req.body as {
-        metadata?: JudgmentMetadata;
+      const { metadata, judgmentText, history, forceRefresh } = req.body as {
+        judgmentId?: string;
+        caseId?: string;
+        metadata?: JudgmentMetadata & { id?: string; neutralCitation?: string };
         judgmentText?: string;
         history: ChatMessage[];
+        forceRefresh?: boolean;
       };
 
       if (!history || !Array.isArray(history) || history.length === 0) {
@@ -187,25 +271,110 @@ const judgmentAiController = {
         return next(CustomErrorHandler.forbidden("AI Credit quota check missing."));
       }
 
-      // Configure Server-Sent Events (SSE) headers
+      const tenantId = req.user?.tenantId;
+      const userId = req.user?.userId;
+      const judgmentKey = resolveJudgmentKey(req.body || {});
+      const activeSession = !forceRefresh ? req.activeJudgmentSession : null;
+      const isFollowUp = history.length > 1;
+      const lastUserMsg = history[history.length - 1];
+
+      if (isFollowUp && lastUserMsg?.content && lastUserMsg.content.length > MAX_FOLLOWUP_PROMPT_CHARS) {
+        return next(
+          CustomErrorHandler.badRequest(
+            `Follow-up question is too long (max ${MAX_FOLLOWUP_PROMPT_CHARS} characters).`,
+          ),
+        );
+      }
+
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache, no-transform");
       res.setHeader("Connection", "keep-alive");
       res.setHeader("X-Accel-Buffering", "no");
       res.flushHeaders?.();
 
-      // Deduct 15 credits atomically per judgment report / chat
-      const handleCompletion = async () => {
+      if (
+        activeSession &&
+        !isFollowUp &&
+        Array.isArray(activeSession.messages) &&
+        activeSession.messages.length >= 2
+      ) {
+        const cachedAssistant = activeSession.messages.find((m) => m.role === "assistant");
+        if (cachedAssistant?.content) {
+          res.write(`data: ${JSON.stringify({ token: cachedAssistant.content, cached: true })}\n\n`);
+          res.write("data: [DONE]\n\n");
+          res.end();
+          return;
+        }
+      }
+
+      const handleCompletion = async (fullText: string) => {
         try {
-          await deductJudgmentCredit(
-            quota.subscriptionId,
-            quota.currentUsed,
-            quota.monthlyLimit,
-            quota.isInternal,
-            CREDITS_PER_JUDGMENT_REPORT
-          );
+          const nowTs = Date.now();
+          const userEntry: IJudgmentSessionMessage = {
+            role: "user",
+            content: lastUserMsg?.content || "Generate Executive Briefing",
+            timestamp: nowTs - 1000,
+          };
+          const assistantEntry: IJudgmentSessionMessage = {
+            role: "assistant",
+            content: fullText,
+            timestamp: nowTs,
+          };
+
+          if (activeSession && tenantId && judgmentKey) {
+            const updatedMessages: IJudgmentSessionMessage[] = [
+              ...(Array.isArray(activeSession.messages) ? activeSession.messages : []),
+              userEntry,
+              assistantEntry,
+            ];
+
+            await db
+              .update(judgmentAiSessions)
+              .set({
+                messages: updatedMessages,
+                questionsUsed: sql`${judgmentAiSessions.questionsUsed} + 1`,
+                updatedAt: new Date(),
+              })
+              .where(eq(judgmentAiSessions.id, activeSession.id));
+          } else {
+            await deductJudgmentCredit(
+              quota.subscriptionId,
+              quota.currentUsed,
+              quota.monthlyLimit,
+              quota.isInternal,
+              CREDITS_PER_JUDGMENT_REPORT,
+            );
+
+            if (tenantId && judgmentKey && fullText.trim().length > 0) {
+              await db
+                .delete(judgmentAiSessions)
+                .where(
+                  and(
+                    eq(judgmentAiSessions.tenantId, tenantId),
+                    eq(judgmentAiSessions.judgmentKey, judgmentKey),
+                  ),
+                );
+
+              const now = new Date();
+              const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
+
+              await db.insert(judgmentAiSessions).values({
+                tenantId,
+                judgmentKey,
+                title: (metadata?.title || "Court Judgment").slice(0, 500),
+                citation: metadata?.citation ? metadata.citation.slice(0, 255) : null,
+                court: metadata?.court ? metadata.court.slice(0, 255) : null,
+                messages: [userEntry, assistantEntry],
+                questionsUsed: 0,
+                createdBy: userId || null,
+                savedAt: now,
+                expiresAt,
+                updatedAt: now,
+              });
+            }
+          }
         } catch (creditErr) {
-          console.error("[judgmentAiController] Error deducting credit:", creditErr);
+          console.error("[judgmentAiController] Error persisting session / deducting credit:", creditErr);
         }
       };
 
@@ -225,10 +394,6 @@ const judgmentAiController = {
     }
   },
 
-  /**
-   * 4. GET /api/judgment-ai/credit-packs
-   * Returns list of credit packs, rate per credit (₹1.15), and credits per report (15)
-   */
   async getCreditPacks(req: Request, res: Response, next: NextFunction) {
     try {
       return res.status(200).json(
@@ -245,10 +410,6 @@ const judgmentAiController = {
     }
   },
 
-  /**
-   * 5. POST /api/judgment-ai/create-credit-order
-   * Creates a Razorpay order for purchasing Judgment AI credits (₹1.15 / credit + 18% GST)
-   */
   async createCreditOrder(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -327,10 +488,6 @@ const judgmentAiController = {
     }
   },
 
-  /**
-   * 6. POST /api/judgment-ai/verify-credit-payment
-   * Verifies Razorpay payment signature and adds credits to tenant's pool
-   */
   async verifyCreditPayment(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -366,25 +523,45 @@ const judgmentAiController = {
         return next(CustomErrorHandler.badRequest("Invalid payment signature verification"));
       }
 
-      // Add credits to tenant subscription pool
+      let verifiedCredits = Number(credits);
+      let verifiedAmount = Number(amount);
+
+      try {
+        const rzpOrder = await razorpayService.getOrder(razorpay_order_id);
+        const orderNotes = (rzpOrder?.notes || {}) as Record<string, string>;
+        if (orderNotes.tenantId && orderNotes.tenantId !== tenantId) {
+          return next(CustomErrorHandler.forbidden("Order tenant mismatch"));
+        }
+        const notesCredits = parseInt(orderNotes.credits || "0", 10);
+        if (notesCredits >= CREDITS_PER_JUDGMENT_REPORT) {
+          verifiedCredits = notesCredits;
+        }
+        if (typeof rzpOrder?.amount === "number" && rzpOrder.amount > 0) {
+          verifiedAmount = Math.round(rzpOrder.amount) / 100;
+        }
+      } catch {}
+
+      if (!verifiedCredits || verifiedCredits < CREDITS_PER_JUDGMENT_REPORT) {
+        return next(CustomErrorHandler.badRequest("Invalid credit quantity in order"));
+      }
+
       await db
         .update(tenantSubscriptions)
         .set({
-          aiDraftAddonCredits: sql`${tenantSubscriptions.aiDraftAddonCredits} + ${credits}`,
+          aiDraftAddonCredits: sql`${tenantSubscriptions.aiDraftAddonCredits} + ${verifiedCredits}`,
         })
         .where(eq(tenantSubscriptions.tenantId, tenantId));
 
-      // Record in payment history
-      const subtotal = Math.round(credits * JUDGMENT_CREDIT_RATE_INR * 100) / 100;
+      const subtotal = Math.round(verifiedCredits * JUDGMENT_CREDIT_RATE_INR * 100) / 100;
       const gstAmount = Math.round(subtotal * (JUDGMENT_CREDIT_GST_PERCENT / 100) * 100) / 100;
-      const finalAmount = amount || Math.round((subtotal + gstAmount) * 100) / 100;
+      const finalAmount = verifiedAmount || Math.round((subtotal + gstAmount) * 100) / 100;
       const invoiceNumber = `INV-JAI-${Date.now().toString().slice(-8)}`;
 
       await db.insert(subscriptionPaymentHistory).values({
         tenantId,
         invoiceNumber,
         planId: null,
-        planName: `Judgment AI Credits: ${credits} Credits (${Math.floor(credits / CREDITS_PER_JUDGMENT_REPORT)} Reports) [+18% GST]`,
+        planName: `AI Credits: ${verifiedCredits} Credits (${Math.floor(verifiedCredits / CREDITS_PER_JUDGMENT_REPORT)} Briefings) [+18% GST]`,
         amount: finalAmount.toString(),
         currency: "INR",
         status: "paid",
@@ -394,8 +571,8 @@ const judgmentAiController = {
       });
 
       return res.status(200).send(
-        ResponseHandler(200, `Successfully purchased ${credits} Judgment AI credits!`, {
-          creditsAdded: credits,
+        ResponseHandler(200, `Successfully purchased ${verifiedCredits} AI credits!`, {
+          creditsAdded: verifiedCredits,
           invoiceNumber,
         })
       );
@@ -405,10 +582,6 @@ const judgmentAiController = {
     }
   },
 
-  /**
-   * 7. GET /api/judgment-ai/lookup
-   * Fast Neutral Citation resolver and cross-reference matcher (ultra lightweight)
-   */
   async lookupCitation(req: Request, res: Response, next: NextFunction) {
     try {
       const { q } = req.query as { q?: string };

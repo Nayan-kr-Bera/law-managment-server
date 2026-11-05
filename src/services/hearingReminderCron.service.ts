@@ -44,7 +44,6 @@ export async function processUpcomingHearingReminders(): Promise<void> {
     const todayStr = today.toISOString().split("T")[0];
     const fiveDaysOutStr = fiveDaysOut.toISOString().split("T")[0];
 
-    // Select hearings happening in the next 5 days
     const upcomingHearings = await db
       .select({
         hearingId: hearings.id,
@@ -83,7 +82,6 @@ export async function processUpcomingHearingReminders(): Promise<void> {
       const diffTime = hearingDateObj.getTime() - today.getTime();
       const daysRemaining = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
 
-      // 1. Fetch advocate emails linked to the case
       const advocateRecords = await db
         .select({
           email: user.email,
@@ -93,7 +91,6 @@ export async function processUpcomingHearingReminders(): Promise<void> {
         .innerJoin(user, eq(advocates.userId, user.id))
         .where(eq(caseAdvocates.caseId, h.caseId));
 
-      // 2. Fetch client emails linked to the case
       const clientRecords = await db
         .select({
           email: clients.email,
@@ -133,7 +130,6 @@ export async function processUpcomingHearingReminders(): Promise<void> {
         h.courtNo || "N/A"
       }\nDate: ${h.hearingDate}\nRemarks: ${h.remarks || "None"}`;
 
-      // Generate Google Calendar 1-Click URL
       const googleCalendarUrl = generateGoogleCalendarUrl({
         title: hearingTitle,
         description,
@@ -163,7 +159,6 @@ export async function processUpcomingHearingReminders(): Promise<void> {
         isHearingReminder: true,
       };
 
-      // Publish job to RabbitMQ queue
       await publishToQueue(REMINDER_EMAIL_QUEUE, emailJob);
       console.log(`✉️ Queued 5-day advance hearing reminder for ${recipients.length} recipient(s) [Case #${h.caseNumber}]`);
     }
@@ -173,7 +168,6 @@ export async function processUpcomingHearingReminders(): Promise<void> {
 }
 
 export function startHearingReminderCron(): void {
-  // Run daily at 8:00 AM IST ('0 8 * * *')
   cron.schedule("0 8 * * *", () => {
     void processUpcomingHearingReminders();
   });

@@ -1,19 +1,16 @@
-import { and, count, desc, eq, inArray, isNull, or, SQL } from "drizzle-orm";
+import { and, count, desc, eq, isNull, or, SQL } from "drizzle-orm";
 import { Request, Response, NextFunction } from "express";
 
 import db from "../db/index.js";
 import {
   notifications,
   offices,
-  userScopeOffices,
-  userScopes,
 } from "../db/schema/index.js";
 import CustomErrorHandler from "../utils/customErrorHandler.js";
 import ResponseHandler from "../utils/responseHandler.js";
 import { notificationEvents } from "../services/notification.service.js";
 
 const notificationController = {
-  // GET USER NOTIFICATIONS (User-Isolated)
   async getNotifications(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -27,10 +24,9 @@ const notificationController = {
       const limit = parseInt(req.query.limit as string) || 30;
       const offset = (page - 1) * limit;
       const filterOfficeId = (req.query.officeId as string) || null;
-      const statusFilter = req.query.status as string; // 'unread' | 'read' | 'all'
-      const typeFilter = req.query.type as string; // 'hearing' | 'task' | 'appointment' | 'invoice' | 'system'
+      const statusFilter = req.query.status as string;
+      const typeFilter = req.query.type as string;
 
-      // Construct visibility filter: strictly user-scoped
       const visibilityConditions: SQL[] = [
         eq(notifications.tenantId, tenantId),
         or(eq(notifications.userId, userId), isNull(notifications.userId))!,
@@ -54,7 +50,6 @@ const notificationController = {
 
       const finalWhere = and(...visibilityConditions);
 
-      // Fetch notifications joined with Office name
       const notifsQuery = await db
         .select({
           id: notifications.id,
@@ -75,7 +70,6 @@ const notificationController = {
         .limit(limit)
         .offset(offset);
 
-      // Calculate unread count strictly for this user
       const unreadWhere = and(
         eq(notifications.tenantId, tenantId),
         eq(notifications.status, "pending"),
@@ -113,7 +107,6 @@ const notificationController = {
     }
   },
 
-  // MARK NOTIFICATION AS READ (User-Isolated)
   async markAsRead(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -151,7 +144,6 @@ const notificationController = {
     }
   },
 
-  // MARK ALL NOTIFICATIONS AS READ (User-Isolated)
   async markAllAsRead(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -161,7 +153,6 @@ const notificationController = {
         return next(CustomErrorHandler.unAuthorized());
       }
 
-      // Mark only this user's pending notifications as read
       await db
         .update(notifications)
         .set({ status: "read" })
@@ -182,7 +173,6 @@ const notificationController = {
     }
   },
 
-  // DELETE SINGLE NOTIFICATION (User-Isolated)
   async deleteNotification(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -217,7 +207,6 @@ const notificationController = {
     }
   },
 
-  // CLEAR ALL READ NOTIFICATIONS (User-Isolated)
   async clearReadNotifications(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -246,7 +235,6 @@ const notificationController = {
     }
   },
 
-  // SERVER-SENT EVENTS (SSE) STREAM (User-Isolated)
   async streamNotifications(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -256,22 +244,18 @@ const notificationController = {
         return next(CustomErrorHandler.unAuthorized("User context missing"));
       }
 
-      // Setup SSE Headers
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache, no-transform");
       res.setHeader("Connection", "keep-alive");
       res.setHeader("X-Accel-Buffering", "no");
       res.flushHeaders();
 
-      // Send initial connection event
       res.write(`event: connected\ndata: ${JSON.stringify({ status: "connected", time: new Date().toISOString() })}\n\n`);
 
-      // Event listener callback: strictly push events targeted to this user
       const onNotification = (notif: typeof notifications.$inferSelect) => {
         try {
           if (notif.tenantId !== tenantId) return;
 
-          // Push if explicitly targeted to this user or global unassigned
           if (notif.userId === userId || notif.userId === null) {
             res.write(`event: notification\ndata: ${JSON.stringify(notif)}\n\n`);
           }
@@ -282,7 +266,6 @@ const notificationController = {
 
       notificationEvents.on("notification:new", onNotification);
 
-      // Keep connection alive with heartbeat every 25s
       const heartbeatInterval = setInterval(() => {
         try {
           if (!res.writableEnded) {
@@ -295,7 +278,6 @@ const notificationController = {
         }
       }, 25000);
 
-      // Clean up when client disconnects
       req.on("close", () => {
         clearInterval(heartbeatInterval);
         notificationEvents.off("notification:new", onNotification);
@@ -303,9 +285,7 @@ const notificationController = {
           if (!res.writableEnded) {
             res.end();
           }
-        } catch {
-          // Socket already cleanly closed by remote client
-        }
+        } catch {}
       });
     } catch (error) {
       console.error("SSE stream error:", error);

@@ -22,28 +22,16 @@ export function escapeHtml(str: string | null | undefined): string {
 }
 
 export interface MiLawEmailLayoutOptions {
-  /** HTML page <title> */
   documentTitle: string;
-  /** Optional subtitle right under MI LAW in the top brand bar (defaults to firmName or "Legal Practice Management Suite") */
   brandSubtitle?: string;
-  /** Semantic status pill HTML rendered above the main heading */
   badgeHtml?: string;
-  /** Main H1 title inside the header */
   heading: string;
-  /** Subtitle paragraph below the H1 heading */
   subheading?: string;
-  /** Inner body HTML (greeting, cards, CTA buttons, security notes) */
   bodyHtml: string;
-  /** Top line of the footer explaining why the email was sent */
   footerReason: string;
-  /** Optional law firm / tenant name for co-branded footer attribution */
   firmName?: string | null;
 }
 
-/**
- * Generates a complete, responsive, table-based HTML email using the unified
- * MI LAW 60-30-10 design system (60% Platinum-White #FFFFFF, 30% Maity Midnight Navy #0B1336, 10% Maity Crimson Red #DC1E28).
- */
 export function buildMiLawEmailHtml(options: MiLawEmailLayoutOptions): string {
   const {
     documentTitle,

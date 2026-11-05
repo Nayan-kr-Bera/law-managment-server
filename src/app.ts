@@ -8,6 +8,7 @@ import {
   advocateRoutes,
   appointmentRoutes,
   authRoutes,
+  mobileAuthRoutes,
   caseActionRoutes,
   caseRoutes,
   caseTypesRoutes,
@@ -105,6 +106,7 @@ app.use("/api", autoAuditMiddleware);
 /* ---------- Routes ---------- */
 
 app.use("/api/auth", authRoutes);
+app.use("/api/mobile/auth", mobileAuthRoutes);
 app.use("/api/password", passwordRoutes);
 app.use("/api/otp", otpRoutes);
 app.use("/api/role", roleRoutes);

@@ -16,19 +16,13 @@ import ResponseHandler from "../../utils/responseHandler.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 
 const tenantSubscriptionController = {
-  // GET CURRENT SUBSCRIPTION
-
   async getSubscription(req: Request, res: Response, next: NextFunction) {
     try {
-      // GET TENANT ID FROM AUTHENTICATED USER
-
       const tenantId = req.user.tenantId;
 
       if (!tenantId) {
         return next(CustomErrorHandler.badRequest("Tenant id is required"));
       }
-
-      // CHECK TENANT EXISTS
 
       const tenant = await db.query.tenants.findFirst({
         where: eq(tenants.id, tenantId),
@@ -38,8 +32,6 @@ const tenantSubscriptionController = {
         return next(CustomErrorHandler.notFound("Tenant not found"));
       }
 
-      // GET CURRENT TENANT SUBSCRIPTION
-
       const subscription = await db.query.tenantSubscriptions.findFirst({
         where: eq(tenantSubscriptions.tenantId, tenantId),
         with: {
@@ -47,8 +39,6 @@ const tenantSubscriptionController = {
           pendingPlan: true,
         },
       });
-
-      // NO SUBSCRIPTION
 
       if (!subscription) {
         return res
@@ -61,8 +51,6 @@ const tenantSubscriptionController = {
             ),
           );
       }
-
-      // SUCCESS
 
       return res
         .status(200)
@@ -79,8 +67,6 @@ const tenantSubscriptionController = {
       return next(CustomErrorHandler.serverError());
     }
   },
-
-  // GET SUBSCRIPTION STATUS
 
   async getSubscriptionStatus(req: Request, res: Response, next: NextFunction) {
     try {
@@ -143,7 +129,6 @@ const tenantSubscriptionController = {
     }
   },
 
-  // CREATE PAYMENT ORDER (Supports Initial Subscriptions and Mid-Cycle Prorated Upgrades with 18% GST)
   async createPaymentOrder(req: Request, res: Response, next: NextFunction) {
     try {
       const { tenantId: paramTenantId } = req.params;
@@ -256,7 +241,6 @@ const tenantSubscriptionController = {
         }
       }
 
-      // Calculate 18% GST
       const gstRate = 0.18;
       const gstAmount = Math.round(proratedBaseAmount * gstRate * 100) / 100;
       const totalAmount =
@@ -313,7 +297,6 @@ const tenantSubscriptionController = {
     }
   },
 
-  // PREVIEW PLAN TRANSITION (Calculates Upgrade Proration or Downgrade Schedules)
   async previewTransition(req: Request, res: Response, next: NextFunction) {
     try {
       const { tenantId: paramTenantId } = req.params;
@@ -434,7 +417,6 @@ const tenantSubscriptionController = {
     }
   },
 
-  // VERIFY PAYMENT & ACTIVATE (New Subscriptions or Immediate Upgrades)
   async verifyPayment(req: Request, res: Response, next: NextFunction) {
     try {
       const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
@@ -533,7 +515,6 @@ const tenantSubscriptionController = {
         let subscription;
 
         if (isUpgrade && existingSubscription) {
-          // Immediately Upgrade existing subscription
           const [updatedSub] = await tx
             .update(tenantSubscriptions)
             .set({
@@ -552,7 +533,6 @@ const tenantSubscriptionController = {
 
           subscription = updatedSub;
         } else {
-          // New Subscription
           const nextBillingDate = new Date(today);
           if (billingCycle === "annual") {
             nextBillingDate.setFullYear(nextBillingDate.getFullYear() + 1);
@@ -649,15 +629,6 @@ const tenantSubscriptionController = {
       return next(CustomErrorHandler.serverError());
     }
   },
-
-  // CHANGE PLAN
-  //
-  // IMPORTANT:
-  // No payment happens here.
-  //
-  // The new plan becomes active on the
-  // next billing cycle.
-  //
 
   async changePlan(req: Request, res: Response, next: NextFunction) {
     try {
@@ -765,8 +736,6 @@ const tenantSubscriptionController = {
     }
   },
 
-  // CANCEL PENDING PLAN CHANGE
-
   async cancelPendingPlan(req: Request, res: Response, next: NextFunction) {
     try {
       const { tenantId: paramTenantId } = req.params;
@@ -823,8 +792,6 @@ const tenantSubscriptionController = {
       return next(CustomErrorHandler.serverError());
     }
   },
-
-  // UPDATE AUTO RENEW
 
   async updateAutoRenew(req: Request, res: Response, next: NextFunction) {
     try {
@@ -884,8 +851,6 @@ const tenantSubscriptionController = {
       return next(CustomErrorHandler.serverError());
     }
   },
-
-  // REACTIVATE SUBSCRIPTION
 
   async reactivateSubscription(
     req: Request,

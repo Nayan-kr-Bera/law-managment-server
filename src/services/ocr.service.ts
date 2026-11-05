@@ -12,9 +12,6 @@ export interface OcrExtractionResult {
 }
 
 export const ocrService = {
-  /**
-   * Download a file buffer from a remote URL (Cloudinary)
-   */
   async fetchBufferFromUrl(url: string): Promise<Buffer> {
     const response = await fetch(url);
     if (!response.ok) {
@@ -24,10 +21,6 @@ export const ocrService = {
     return Buffer.from(arrayBuffer);
   },
 
-  /**
-   * Extract text from PDF buffer using PDFParse and compute page count.
-   * If maxPages is provided, only extracts up to maxPages and skips the rest.
-   */
   async extractTextFromPdf(
     buffer: Buffer,
     maxPages?: number,
@@ -66,9 +59,6 @@ export const ocrService = {
     }
   },
 
-  /**
-   * Quick estimation/retrieval of page count from a document buffer
-   */
   async getDocumentPageCount(buffer: Buffer, isPdf: boolean): Promise<number> {
     if (!isPdf) return 1;
     try {
@@ -80,9 +70,6 @@ export const ocrService = {
     }
   },
 
-  /**
-   * Run Tesseract OCR on an image buffer (supports English + Hindi)
-   */
   async runTesseractOnImage(
     imageBuffer: Buffer | string,
     language: string = "eng+hin",
@@ -104,10 +91,6 @@ export const ocrService = {
     }
   },
 
-  /**
-   * Main entrypoint to extract text from a document.
-   * If document exceeds maxPages, processes up to maxPages and skips the rest.
-   */
   async processDocument({
     fileUrl,
     buffer,
@@ -130,7 +113,6 @@ export const ocrService = {
     const fileBuffer = buffer || (await this.fetchBufferFromUrl(fileUrl));
 
     if (isPdf) {
-      // Step 1: Instant digital PDF text extraction
       const {
         text: directText,
         totalPages,
@@ -151,12 +133,9 @@ export const ocrService = {
         };
       }
 
-      // Step 2: Scanned PDF without embedded text.
-      // Use Cloudinary page image or PDFParse screenshot for OCR
       try {
         let imageToOcr: Buffer | string = fileBuffer;
         if (fileUrl.includes("res.cloudinary.com")) {
-          // Cloudinary renders page 1 of PDF as high-res PNG for OCR
           imageToOcr = fileUrl.replace(/\.pdf$/i, ".png");
         } else {
           try {
@@ -192,7 +171,6 @@ export const ocrService = {
       }
     }
 
-    // Step 3: Image files (jpg, jpeg, png, webp, tiff)
     const ocrText = await this.runTesseractOnImage(fileBuffer, language);
     return {
       text: ocrText,

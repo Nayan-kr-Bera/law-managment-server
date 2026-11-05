@@ -5,14 +5,11 @@ import { taskComments, tasks, user } from "../../db/schema/index.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 
 const taskCommentController = {
-
-  // GET COMMENTS FOR TASK
   async getComments(req: Request, res: Response, next: NextFunction) {
     try {
       const { taskId } = req.params;
       const tenantId = req.user.tenantId;
 
-      // Check task belongs to current tenant
       const [task] = await db
         .select({
           id: tasks.id,
@@ -51,7 +48,6 @@ const taskCommentController = {
     }
   },
 
-  // CREATE COMMENT
   async createComment(req: Request, res: Response, next: NextFunction) {
     try {
       const { taskId, comment } = req.body;
@@ -67,7 +63,6 @@ const taskCommentController = {
         return next(CustomErrorHandler.badRequest("Comment is required"));
       }
 
-      // Check task belongs to current tenant
       const [task] = await db
         .select({
           id: tasks.id,
@@ -99,15 +94,12 @@ const taskCommentController = {
     }
   },
 
-  // DELETE COMMENT
   async deleteComment(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
 
       const tenantId = req.user.tenantId;
 
-      // Make sure comment belongs to a task
-      // inside the current tenant
       const [comment] = await db
         .select({
           id: taskComments.id,

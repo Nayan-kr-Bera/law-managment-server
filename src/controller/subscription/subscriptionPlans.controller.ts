@@ -6,7 +6,6 @@ import ResponseHandler from "../../utils/responseHandler.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 
 const subscriptionPlanController = {
-  // GET ALL PLANS
   async getPlans(req: Request, res: Response, next: NextFunction) {
     try {
       const { all, includeInternal, includeTrial } = req.query;
@@ -68,7 +67,6 @@ const subscriptionPlanController = {
     }
   },
 
-  // GET PLAN BY ID
   async getPlanById(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -96,7 +94,6 @@ const subscriptionPlanController = {
     }
   },
 
-  // CREATE PLAN
   async createPlan(req: Request, res: Response, next: NextFunction) {
     try {
       const {
@@ -122,7 +119,6 @@ const subscriptionPlanController = {
         isInternal,
       } = req.body;
 
-      // VALIDATION
       if (!code) {
         return next(CustomErrorHandler.badRequest("Plan code is required"));
       }
@@ -156,7 +152,6 @@ const subscriptionPlanController = {
         );
       }
 
-      // CHECK DUPLICATE CODE
       const existingPlan = await db.query.subscriptionPlans.findFirst({
         where: eq(subscriptionPlans.code, code),
       });
@@ -169,7 +164,6 @@ const subscriptionPlanController = {
         );
       }
 
-      // CREATE PLAN
       const [plan] = await db
         .insert(subscriptionPlans)
         .values({
@@ -214,7 +208,6 @@ const subscriptionPlanController = {
         })
         .returning();
 
-      // RESPONSE
       return res
         .status(201)
         .send(
@@ -227,7 +220,6 @@ const subscriptionPlanController = {
     }
   },
 
-  // UPDATE PLAN
   async updatePlan(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -326,7 +318,6 @@ const subscriptionPlanController = {
     }
   },
 
-  // DELETE PLAN
   async deletePlan(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;

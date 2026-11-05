@@ -16,10 +16,6 @@ interface VerifyPaymentParams {
 }
 
 const razorpayService = {
-  // =========================================================
-  // CREATE ORDER
-  // =========================================================
-
   async createOrder({
     amount,
     currency = "INR",
@@ -36,29 +32,17 @@ const razorpayService = {
     return order;
   },
 
-  // =========================================================
-  // GET ORDER
-  // =========================================================
-
   async getOrder(orderId: string) {
     const order = await razorpay.orders.fetch(orderId);
 
     return order;
   },
 
-  // =========================================================
-  // GET PAYMENT
-  // =========================================================
-
   async getPayment(paymentId: string) {
     const payment = await razorpay.payments.fetch(paymentId);
 
     return payment;
   },
-
-  // =========================================================
-  // VERIFY PAYMENT SIGNATURE
-  // =========================================================
 
   verifyPayment({
     razorpayOrderId,

@@ -167,7 +167,7 @@ const appointmentController = {
         .insert(appointments)
         .values({
           tenantId,
-          officeId: officeId || (req.user as any)?.officeId || null,
+          officeId: officeId || req.officeId || req.user?.officeId || null,
           clientId: clientId || null,
           caseId: caseId || null,
           assignedTo: assignedTo || req.user?.userId || null,
@@ -593,7 +593,6 @@ const appointmentController = {
         updateData.location = location?.trim() || null;
       }
 
-      // If this was a pending client request and the advocate modifies & saves it, confirm it as "scheduled"
       const wasPending = existingAppointment.status === "pending";
       if (status !== undefined) {
         updateData.status = status as AppointmentStatus;
@@ -632,7 +631,6 @@ const appointmentController = {
         columns: { name: true },
       });
 
-      // Notify client in portal & push
       if (clientData) {
         const formattedDate = new Date(finalDate).toLocaleDateString("en-IN", {
           day: "2-digit",

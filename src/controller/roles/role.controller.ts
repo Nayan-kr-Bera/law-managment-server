@@ -75,7 +75,6 @@ const roleController = {
         return next(CustomErrorHandler.badRequest("Role id is required"));
       }
 
-      // Get role
       const role = await db.query.roles.findFirst({
         where: eq(roles.id, id),
       });
@@ -84,12 +83,10 @@ const roleController = {
         return next(CustomErrorHandler.notFound("Role not found"));
       }
 
-      // Get all permissions
       const allPermissions = await db.query.permissions.findMany({
         orderBy: (permissions, { asc }) => [asc(permissions.code)],
       });
 
-      // Get assigned permissions
       const assignedPermissions = await db.query.rolePermissions.findMany({
         where: eq(rolePermissions.roleId, id),
         columns: {
@@ -146,7 +143,6 @@ const roleController = {
 
       const slug = name.trim().toLowerCase().replace(/\s+/g, "_");
 
-      // Check duplicate name
       const existingRole = await db.query.roles.findFirst({
         where: eq(roles.name, name),
       });
@@ -155,7 +151,6 @@ const roleController = {
         return next(CustomErrorHandler.badRequest("Role already exists"));
       }
 
-      // Check duplicate slug
       const existingSlug = await db.query.roles.findFirst({
         where: eq(roles.slug, slug),
       });
@@ -264,7 +259,6 @@ const roleController = {
           })
           .where(eq(roles.id, id));
 
-        // Remove existing permissions
         await tx.delete(rolePermissions).where(eq(rolePermissions.roleId, id));
 
         if (permissionCodes.length > 0) {
@@ -301,7 +295,6 @@ const roleController = {
         return next(CustomErrorHandler.badRequest("Role id is required"));
       }
 
-      // Check role exists
       const role = await db.query.roles.findFirst({
         where: eq(roles.id, id),
       });
@@ -310,14 +303,12 @@ const roleController = {
         return next(CustomErrorHandler.notFound("Role not found"));
       }
 
-      // Prevent deleting system roles
       if (role.isSystemRole) {
         return next(
           CustomErrorHandler.badRequest("System roles cannot be deleted"),
         );
       }
 
-      // Check whether role is assigned to users
       const assignedUsers = await db.query.userRoles.findFirst({
         where: eq(userRoles.roleId, id),
       });

@@ -14,10 +14,6 @@ import CustomErrorHandler from "../utils/customErrorHandler.js";
 const BYTES_PER_GB = 1024 * 1024 * 1024;
 
 const subscriptionLimitMiddleware = {
-  // ============================================================
-  // USER / ADVOCATE LIMIT
-  // ============================================================
-
   async checkUserLimit(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -79,10 +75,6 @@ const subscriptionLimitMiddleware = {
     }
   },
 
-  // ============================================================
-  // OFFICE LIMIT
-  // ============================================================
-
   async checkOfficeLimit(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -128,10 +120,6 @@ const subscriptionLimitMiddleware = {
     }
   },
 
-  // ============================================================
-  // STORAGE LIMIT
-  // ============================================================
-
   async checkStorageLimit(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -142,20 +130,16 @@ const subscriptionLimitMiddleware = {
         );
       }
 
-      // Subscription must already be attached
-      // by your subscription middleware
       if (!req.subscription) {
         return next(
           CustomErrorHandler.forbidden("Active subscription required"),
         );
       }
 
-      // Internal plan = unlimited
       if (req.subscription.planCode === "internal") {
         return next();
       }
 
-      // Multer must execute before this middleware
       if (!req.file) {
         return next(
           CustomErrorHandler.badRequest("File is required"),

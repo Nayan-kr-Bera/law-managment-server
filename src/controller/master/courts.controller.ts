@@ -5,6 +5,7 @@ import db from "../../db/index.js";
 import { cases, courts } from "../../db/schema/index.js";
 import ResponseHandler from "../../utils/responseHandler.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
+
 export const COURT_TYPES = [
   "supreme_court",
   "high_court",
@@ -23,6 +24,7 @@ export type CourtType = (typeof COURT_TYPES)[number];
 const isValidCourtType = (value: unknown): value is CourtType => {
   return typeof value === "string" && COURT_TYPES.includes(value as CourtType);
 };
+
 const courtsController = {
   async getcourts(req: Request, res: Response, next: NextFunction) {
     const id = req.user.tenantId;
@@ -67,7 +69,6 @@ const courtsController = {
         return next(CustomErrorHandler.badRequest("courts name is required"));
       }
 
-      // Check duplicate name
       const existingcourts = await db.query.courts.findFirst({
         where: and(eq(courts.slug, slug), eq(courts.tenantId, tenantId)),
       });
@@ -162,7 +163,6 @@ const courtsController = {
         return next(CustomErrorHandler.badRequest("court id is required"));
       }
 
-      // Check court type exists
       const courtdata = await db.query.courts.findFirst({
         where: and(eq(courts.id, id), eq(courts.tenantId, tenantId)),
       });
@@ -171,7 +171,6 @@ const courtsController = {
         return next(CustomErrorHandler.notFound("court not found"));
       }
 
-      // Check if any case is using this court
       const assignedCase = await db.query.cases.findFirst({
         where: and(eq(cases.courtId, id), eq(cases.tenantId, tenantId)),
       });
@@ -197,4 +196,5 @@ const courtsController = {
     }
   },
 };
+
 export default courtsController;

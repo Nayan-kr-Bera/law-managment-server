@@ -1149,13 +1149,17 @@ const clientController = {
         })
         : ledger;
 
-      // Running balance
+      // Running balance & summary
       let balance = 0;
+      let totalBilled = 0;
+      let totalPaid = 0;
 
       const ledgerWithBalance = filteredLedger.map((entry) => {
         const billed = entry.paymentId ? 0 : Number(entry.debit || 0);
         const paid = entry.paymentId ? Number(entry.credit || 0) : 0;
 
+        totalBilled += billed;
+        totalPaid += paid;
         balance += billed - paid;
 
         let displayDescription = entry.description;
@@ -1179,6 +1183,8 @@ const clientController = {
         };
       });
 
+      const totalBalance = totalBilled - totalPaid;
+
       // Pagination
       const total = ledgerWithBalance.length;
       const totalPages = Math.ceil(total / limit);
@@ -1188,6 +1194,11 @@ const clientController = {
         success: true,
         message: "Client fee ledger fetched successfully",
         data: ledgerWithBalance.slice(offset, offset + limit),
+        summary: {
+          totalBilled,
+          totalPaid,
+          totalBalance,
+        },
         pagination: {
           page,
           limit,

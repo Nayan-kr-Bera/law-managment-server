@@ -25,7 +25,7 @@ export interface GenerateDraftParams {
     oppositeParty?: string | null;
   } | null;
   documentType: string;
-  language: string; // "English" | "Hindi" | "Bengali"
+  language: string;
   facts: string;
   referenceDocumentsText?: string[];
   precedents?: CasePrecedentDraftContext[];
@@ -44,9 +44,6 @@ export class AiDrafterService {
     });
   }
 
-  /**
-   * Builds the system prompt for Indian legal drafting with formatting rules
-   */
   private buildSystemPrompt(language: string, documentType: string): string {
     const langInstructions: Record<string, string> = {
       English: "Draft the document in formal Indian Legal English (standard legal terminology, honorifics, and court conventions).",
@@ -87,9 +84,6 @@ CRITICAL DRAFTING REQUIREMENTS:
    - Do not include conversational filler like "Sure, here is your draft" before or after the text.`;
   }
 
-  /**
-   * Generates a draft using OpenAI, or falls back to a template if no key is configured
-   */
   async generateDraft(params: GenerateDraftParams): Promise<{
     content: string;
     modelUsed: string;
@@ -127,7 +121,6 @@ CRITICAL DRAFTING REQUIREMENTS:
     if (referenceDocumentsText && referenceDocumentsText.length > 0) {
       userPromptParts.push(`\nEXTRACTS FROM ATTACHED REFERENCE DOCUMENTS / OCR TEXT:`);
       referenceDocumentsText.forEach((docText, idx) => {
-        // Cap each doc text to ~3000 chars to avoid token overflow
         const truncated = docText.slice(0, 3000);
         userPromptParts.push(`--- Reference Document #${idx + 1} ---\n${truncated}\n`);
       });
@@ -182,7 +175,6 @@ CRITICAL DRAFTING REQUIREMENTS:
       };
     }
 
-    // Fallback template when OPENAI_API_KEY is not configured yet
     const fallbackDraft = this.buildFallbackTemplate(params);
     return {
       content: fallbackDraft,

@@ -26,6 +26,18 @@ router.get(
   judgmentAiController.lookupCitation,
 );
 
+router.get(
+  "/sessions",
+  auth,
+  judgmentAiController.getActiveSessions,
+);
+
+router.delete(
+  "/sessions/:judgmentKey",
+  auth,
+  judgmentAiController.deleteSession,
+);
+
 // 3. Stream Judgment Briefing or Q&A (Credit Guarded: 15 Credits per Report)
 router.post(
   "/chat",

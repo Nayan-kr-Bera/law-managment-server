@@ -32,7 +32,6 @@ const clientAuth = async (
       throw new AppError("Invalid client token payload", 401);
     }
 
-    // Reject pre-auth tokens on protected routes
     if (decoded.requiresProfileSelection) {
       throw new AppError(
         "Profile selection required. Please call /auth/select-profile first.",
@@ -40,7 +39,6 @@ const clientAuth = async (
       );
     }
 
-    // Verify the client record still exists
     const targetClientId = decoded.clientId || decoded.clientUserId;
     if (targetClientId) {
       const existingClient = await db.query.clients.findFirst({
@@ -52,7 +50,6 @@ const clientAuth = async (
       }
     }
 
-    // Verify the selected profile is still active
     if (decoded.profileId) {
       const profile = await db.query.clientProfiles.findFirst({
         where: eq(clientProfiles.id, decoded.profileId),
@@ -69,7 +66,6 @@ const clientAuth = async (
         );
       }
 
-      // Ensure profile belongs to the identity in the token
       if (profile.identityId !== decoded.clientId) {
         throw new AppError("Token profile mismatch", 401);
       }
@@ -77,7 +73,6 @@ const clientAuth = async (
 
     req.clientUser = decoded;
 
-    // Forward tenant/office from token or request headers (sent by client portal)
     const headerTenantId = req.headers["x-tenant-id"] as string | undefined;
     const headerOfficeId = req.headers["x-office-id"] as string | undefined;
 

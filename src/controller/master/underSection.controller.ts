@@ -5,6 +5,7 @@ import { cases, underSections } from "../../db/schema/index.js";
 import ResponseHandler from "../../utils/responseHandler.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import slugify from "slugify";
+
 const underSectionController = {
   async getunderSections(req: Request, res: Response, next: NextFunction) {
     const tenantId = req.user.tenantId;
@@ -49,7 +50,6 @@ const underSectionController = {
         );
       }
 
-      // Check duplicate name
       const existingunderSection = await db.query.underSections.findFirst({
         where: eq(underSections.slug, slug),
       });
@@ -146,7 +146,6 @@ const underSectionController = {
         return next(CustomErrorHandler.badRequest("Case Type id is required"));
       }
 
-      // Check case type exists
       const underSection = await db.query.underSections.findFirst({
         where: and(
           eq(underSections.id, id),
@@ -158,7 +157,6 @@ const underSectionController = {
         return next(CustomErrorHandler.notFound("Case Type not found"));
       }
 
-      // Check if any case is using this case type
       const assignedCase = await db.query.cases.findFirst({
         where: and(eq(cases.underSectionId, id), eq(cases.tenantId, tenantId)),
       });

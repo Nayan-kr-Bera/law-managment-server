@@ -23,7 +23,6 @@ import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import ResponseHandler from "../../utils/responseHandler.js";
 
 const supportTicketController = {
-  // GET TICKETS FOR CLIENT PORTAL
   async getClientTickets(req: Request, res: Response, next: NextFunction) {
     try {
       const clientUserId = req.clientUser?.clientUserId;
@@ -52,7 +51,6 @@ const supportTicketController = {
         orderBy: (t, { desc }) => [desc(t.updatedAt)],
       });
 
-      // Format response matching Client Portal interface
       const formattedTickets = ticketRecords.map((t) => ({
         id: t.id,
         ticketNumber: t.ticketNumber,
@@ -76,7 +74,6 @@ const supportTicketController = {
     }
   },
 
-  // GET TICKETS FOR ADVOCATE PORTAL
   async getAdvocateTickets(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantId = req.user?.tenantId;
@@ -103,14 +100,12 @@ const supportTicketController = {
         conditions.push(eq(supportTickets.caseId, caseId as string));
       }
       if (scope === "platform") {
-        // Tickets raised to MI Law Platform Super Admin (no legal case, no client)
         conditions.push(
           isNull(supportTickets.caseId),
           isNull(supportTickets.clientId),
           isNull(supportTickets.clientUserId)
         );
       } else if (scope === "clients") {
-        // Inquiries from chamber clients
         conditions.push(
           or(
             isNotNull(supportTickets.caseId),
@@ -153,7 +148,6 @@ const supportTicketController = {
         orderBy: (t, { desc }) => [desc(t.updatedAt)],
       });
 
-      // Auto-close inactive AI-handled tickets if user hasn't messaged within 7 minutes
       await autoCloseInactiveTicketsList(ticketRecords);
 
       const formattedTickets = ticketRecords.map((t) => ({
@@ -168,7 +162,9 @@ const supportTicketController = {
         caseTitle: t.case?.title || undefined,
         clientName: t.client
           ? `${t.client.firstName || ""} ${t.client.lastName || ""}`.trim() || t.client.companyName || "Client"
-          : "Client User",
+          : t.caseId || t.clientId || t.clientUserId
+          ? "Client User"
+          : undefined,
         clientEmail: t.client?.email || undefined,
         isAiHandled: t.isAiHandled ?? false,
         aiResolutionStatus: t.aiResolutionStatus ?? null,
@@ -187,7 +183,6 @@ const supportTicketController = {
     }
   },
 
-  // GET TICKET BY ID
   async getTicketById(req: Request, res: Response, next: NextFunction) {
     try {
       const { ticketId } = req.params;
@@ -219,6 +214,15 @@ const supportTicketController = {
       return res.status(200).json(
         ResponseHandler(200, "Support ticket fetched successfully", {
           ...ticketRecord,
+          caseNumber: ticketRecord.case?.caseNumber || undefined,
+          caseTitle: ticketRecord.case?.title || undefined,
+          clientName: ticketRecord.client
+            ? `${ticketRecord.client.firstName || ""} ${ticketRecord.client.lastName || ""}`.trim() ||
+              ticketRecord.client.companyName ||
+              "Client"
+            : ticketRecord.caseId || ticketRecord.clientId || ticketRecord.clientUserId
+            ? "Client User"
+            : undefined,
           messages: (ticketRecord.messages || []).map(formatTicketMessage),
         })
       );
@@ -228,7 +232,6 @@ const supportTicketController = {
     }
   },
 
-  // CREATE TICKET (Client or Advocate)
   async createTicket(req: Request, res: Response, next: NextFunction) {
     try {
       const { subject, category, priority, caseId, message } = req.body;
@@ -250,7 +253,6 @@ const supportTicketController = {
       let clientId = req.clientUser?.clientId || null;
       let clientUserId = req.clientUser?.clientUserId || null;
 
-      // If request is from client portal, get tenantId/officeId from their JWT profile
       if (!tenantId && req.clientUser?.tenantId) {
         tenantId = req.clientUser.tenantId;
         officeId = req.clientUser.officeId ?? null;
@@ -310,7 +312,6 @@ const supportTicketController = {
         },
       ];
 
-      // Auto-trigger Nyaya Sahayak AI Support Agent for Platform Tickets
       if (isPlatformTicket) {
         try {
           const aiResponse = await aiSupportService.processSupportChat([], message);
@@ -334,7 +335,6 @@ const supportTicketController = {
               createdAt: new Date().toISOString(),
             });
 
-            // If user immediately requested human escalation
             if (aiResponse.isEscalated) {
               const optimalAgent = await findOptimalOnlineSupportAgent();
               if (optimalAgent) {
@@ -430,7 +430,6 @@ const supportTicketController = {
     }
   },
 
-  // REPLY TO TICKET
   async replyTicket(req: Request, res: Response, next: NextFunction) {
     try {
       const { ticketId } = req.params;
@@ -477,10 +476,8 @@ const supportTicketController = {
         })
         .returning();
 
-      // Broadcast real-time message to socket room
       emitTicketMessage(ticketId, newMessage);
 
-      // Update ticket updatedAt and set status to in_progress if open
       let currentStatus = ticketRecord.status === "closed" || ticketRecord.status === "open" ? "in_progress" : ticketRecord.status;
       await db
         .update(supportTickets)
@@ -490,7 +487,6 @@ const supportTicketController = {
         })
         .where(eq(supportTickets.id, ticketId));
 
-      // Trigger push notification to client if advocate/staff replied
       const targetClientId = ticketRecord.clientId || ticketRecord.clientUserId;
       if (targetClientId && (senderType === "advocate" || req.user?.userId)) {
         const messagePreview =
@@ -521,7 +517,6 @@ const supportTicketController = {
         );
       }
 
-      // If this is a platform support ticket, Nyaya Sahayak AI answers advocate messages!
       const isPlatformTicket = !ticketRecord.caseId;
       if (isPlatformTicket && senderType === "advocate") {
         try {
@@ -537,11 +532,9 @@ const supportTicketController = {
 
           const aiResult = await aiSupportService.processSupportChat(chatHistory, message);
 
-          // Natural conversational pacing pause so typing state feels authentic
           await new Promise((resolve) => setTimeout(resolve, 1200));
 
           if (aiResult.isTicketClosed || isExplicitProblemSolved(message)) {
-            // Advocate confirmed problem is resolved
             currentStatus = "closed";
             await db
               .update(supportTickets)
@@ -567,7 +560,6 @@ const supportTicketController = {
             emitTicketClosed(ticketId);
             emitTicketUpdated(ticketId, { status: "closed" });
           } else if (aiResult.isEscalated) {
-            // Check Office Hours: 10:00 AM to 7:00 PM IST (10:00 - 19:00)
             if (!isSupportOfficeHours()) {
               await db
                 .update(supportTickets)
@@ -595,11 +587,9 @@ const supportTicketController = {
               emitTicketMessage(ticketId, outMsg);
               emitTicketUpdated(ticketId, { status: "in_progress" });
             } else {
-              // Within office hours: check for online, available agents
               const optimalAgent = await findOptimalOnlineSupportAgent();
 
               if (optimalAgent) {
-                // Agent is live and available
                 await db
                   .update(supportTickets)
                   .set({
@@ -631,7 +621,6 @@ const supportTicketController = {
                   status: "in_progress",
                 });
               } else {
-                // Check if any support agent is online but currently marked 'busy'
                 const isAnyAgentBusy = await isAnySupportAgentBusy();
 
                 await db
@@ -663,7 +652,6 @@ const supportTicketController = {
               }
             }
           } else {
-            // Standard step-by-step guidance without any markdown asterisks
             const plainMessage = aiResult.message.replace(/\*{1,3}/g, "");
             const [guidanceMsg] = await db
               .insert(supportTicketMessages)
@@ -711,7 +699,6 @@ const supportTicketController = {
     }
   },
 
-  // UPDATE TICKET STATUS (Advocate / Staff)
   async updateTicketStatus(req: Request, res: Response, next: NextFunction) {
     try {
       const { ticketId } = req.params;
@@ -793,7 +780,6 @@ const supportTicketController = {
     }
   },
 
-  // SUBMIT CUSTOMER SATISFACTION (CSAT) RATING & FEEDBACK
   async submitCsatRating(req: Request, res: Response, next: NextFunction) {
     try {
       const { ticketId } = req.params;
@@ -822,7 +808,6 @@ const supportTicketController = {
         .where(eq(supportTickets.id, ticketId))
         .returning();
 
-      // Append CSAT system entry in ticket messages
       const stars = "⭐".repeat(Number(rating));
       await db.insert(supportTicketMessages).values({
         ticketId,

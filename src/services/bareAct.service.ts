@@ -249,13 +249,6 @@ export const BASE_CRIMINAL_COMPARISONS = [
 ];
 
 export class BareActService {
-  /* =========================================================================
-     CLIENT / ADVOCATE FACING QUERIES
-     ========================================================================= */
-
-  /**
-   * List Bare Acts with high-performance search and filtering
-   */
   async listActs(query: {
     q?: string;
     category?: string;
@@ -276,7 +269,6 @@ export class BareActService {
 
     const conditions: SQL[] = [];
 
-    // Search query across title, short code, act number, description, keywords
     if (query.q && query.q.trim()) {
       const searchTerm = `%${query.q.trim()}%`;
       conditions.push(
@@ -329,7 +321,6 @@ export class BareActService {
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-    // Sorting
     let orderByClause;
     const isAsc = query.sortOrder === "asc";
     switch (query.sortBy) {
@@ -377,7 +368,6 @@ export class BareActService {
         if (searchRes.acts && searchRes.acts.length > 0) {
           await indiaCodeService.syncActsToDatabase(searchRes.acts);
 
-          // Re-query from DB
           const [syncedActs, [{ totalCount: newTotal }]] = await Promise.all([
             db
               .select()
@@ -415,7 +405,6 @@ export class BareActService {
       }
     }
 
-    // Deduplicate acts by id and slug to guarantee clean response
     const seenActKeys = new Set<string>();
     const deduplicatedActs = acts.filter((act) => {
       const key = act.id || act.slug;
@@ -435,19 +424,19 @@ export class BareActService {
     };
   }
 
-  /**
-   * Helper to normalize common act slugs and aliases (e.g. bns, constitution, ibc)
-   */
   public normalizeActSlug(rawSlug: string): string {
     const slug = rawSlug.toLowerCase().trim();
     const aliasMap: Record<string, string> = {
       "the-constitution-of-india": "constitution-of-india",
       "constitution": "constitution-of-india",
       "constitution-of-india-1950": "constitution-of-india",
+      "the-bharatiya-nyaya-sanhita-2023": "bns",
       "bharatiya-nyaya-sanhita-2023": "bns",
       "bharatiya-nyaya-sanhita": "bns",
+      "the-bharatiya-nagarik-suraksha-sanhita-2023": "bnss",
       "bharatiya-nagarik-suraksha-sanhita-2023": "bnss",
       "bharatiya-nagarik-suraksha-sanhita": "bnss",
+      "the-bharatiya-sakshya-adhiniyam-2023": "bsa",
       "bharatiya-sakshya-adhiniyam-2023": "bsa",
       "bharatiya-sakshya-adhiniyam": "bsa",
       "ibc": "insolvency-bankruptcy-code-2016",
@@ -463,13 +452,16 @@ export class BareActService {
       "arbitration-act-1996": "arbitration-act",
       "the-arbitration-and-conciliation-act-1996": "arbitration-act",
       "arbitration-and-conciliation-act": "arbitration-act",
+      "the-consumer-protection-act-2019": "consumer-protection-act",
+      "the-consumer-protection-act": "consumer-protection-act",
+      "consumer-protection-act-2019": "consumer-protection-act",
+      "indian-partnership-act": "the-indian-partnership-act-1932",
+      "ipa": "the-indian-partnership-act-1932",
+      "partnership-act": "the-indian-partnership-act-1932",
     };
     return aliasMap[slug] || slug;
   }
 
-  /**
-   * Get single Bare Act by slug or ID with Table of Contents (Chapters & Sections summary)
-   */
   async getActBySlugOrId(slugOrId: string) {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
       slugOrId
@@ -557,7 +549,11 @@ export class BareActService {
 
     if (!isUuid && Number(existingSectionsCount) === 0) {
       try {
-        await indiaCodeService.importActWithSections(act.slug, { maxSections: 20, batchSize: 5 });
+        await indiaCodeService.importActWithSections(act.slug, {
+          maxSections: 20,
+          batchSize: 5,
+          hintTitle: act.title,
+        });
         const reloaded = await db.query.bareActs.findFirst({
           where: eq(bareActs.slug, act.slug),
           with: {
@@ -595,7 +591,6 @@ export class BareActService {
       }
     }
 
-    // Also get sections that don't belong to any chapter
     const unchapteredSections = await db
       .select({
         id: bareActSections.id,
@@ -620,9 +615,6 @@ export class BareActService {
     };
   }
 
-  /**
-   * Get sections of an act with pagination and search
-   */
   async getActSections(
     actSlugOrId: string,
     query: {
@@ -652,6 +644,7 @@ export class BareActService {
           await indiaCodeService.importActWithSections(act.slug, {
             maxSections: 20,
             batchSize: 5,
+            hintTitle: act.title,
           });
         } catch (err) {
           console.warn(`Could not sync outline sections for ${act.slug}:`, err);
@@ -729,9 +722,6 @@ export class BareActService {
     };
   }
 
-  /**
-   * Get single section with full text, provisos, cross-references, explanations, landmark cases
-   */
   async getSectionDetail(actSlugOrId: string, sectionSlugOrNumberOrId: string) {
     const act = await this.resolveActId(actSlugOrId);
 
@@ -804,7 +794,6 @@ export class BareActService {
       }
     }
 
-    // Get previous and next sections for smooth reading navigation
     const [prevSection, nextSection] = await Promise.all([
       db
         .select({
@@ -860,11 +849,6 @@ export class BareActService {
     };
   }
 
-  /**
-   * Ultra-fast Advocate Instant Search / Quick Section Lookup
-   * Connects local DB and live eCourts IndiaCode full-text API
-   * e.g. "302", "cheating", "Article 21", "anticipatory bail", "Order 39", "138", "BNSS 482"
-   */
   async quickLookup(query: { q: string; limit?: number }) {
     if (!query.q || !query.q.trim()) {
       return { query: "", count: 0, data: [] };
@@ -875,7 +859,6 @@ export class BareActService {
     const limit = Math.min(50, Math.max(1, Number(query.limit) || 15));
     const lowerQ = searchTerm.toLowerCase();
 
-    // 1. Search local Postgres database
     const localResults = await db
       .select({
         sectionId: bareActSections.id,
@@ -935,8 +918,6 @@ export class BareActService {
       )
     );
 
-    // 2. Generic Dynamic Handler for Code of Civil Procedure (CPC) Orders & Rules
-    // Dynamically matches queries like "Order 39", "Order 21", "Order 7", "injunction", etc.
     const cpcOrderMatch = lowerQ.match(/\border\s+([0-9]+|[ivxlcdm]+)\b/i);
     const isGenericInjunction = lowerQ.includes("injunction") && !cpcOrderMatch;
 
@@ -978,8 +959,6 @@ export class BareActService {
       }
     }
 
-    // 3. Fallback / Live Enrichment via eCourts IndiaCode full-text statutory search API
-    // If local results are fewer than limit or search is a topical inquiry (e.g. "anticipatory bail", "cheating", etc.)
     if (mergedResults.length < limit || isNaN(Number(searchTerm))) {
       try {
         const liveHits = await indiaCodeService.searchProvisions(searchTerm, { limit });
@@ -1001,7 +980,6 @@ export class BareActService {
           let secSlug = rawProvision;
 
           if (isRule && hit.ref.includes("order")) {
-            // e.g. "cpc/order/xxxix/rule/1"
             const ruleMatch = hit.ref.match(/order\/([^\/]+)(?:\/rule\/([^\/]+))?/i);
             const ordNum = ruleMatch?.[1]?.toUpperCase() === "XXXIX" ? "39" : ruleMatch?.[1] || "";
             const rlNum = ruleMatch?.[2] || "1";
@@ -1013,13 +991,11 @@ export class BareActService {
             secNum = `Section ${rawProvision}`;
           }
 
-          // Special enrichments for landmark provisions & comparative bridges
           let crossReferences: ICrossReferenceInfo | Record<string, unknown> | undefined = undefined;
           let bailableStatus = "not_applicable";
           let cognizableStatus = "not_applicable";
           let punishment: string | null = null;
 
-          // Dynamically check against statutory comparison matrix if applicable
           const comp = BASE_CRIMINAL_COMPARISONS.find((c) => {
             const numClean = rawProvision.toLowerCase();
             const isNew =
@@ -1060,7 +1036,6 @@ export class BareActService {
           if (!seenKeys.has(dedupeKey)) {
             seenKeys.add(dedupeKey);
 
-            // Extract year if available in hit.act
             const yearMatch = (hit.act || "").match(/\b(18\d\d|19\d\d|20\d\d)\b/);
             const actYear = yearMatch ? Number(yearMatch[1]) : new Date().getFullYear();
 
@@ -1098,9 +1073,6 @@ export class BareActService {
     };
   }
 
-  /**
-   * Categories with Act counts & metadata
-   */
   async getCategories() {
     const counts = await db
       .select({
@@ -1205,9 +1177,6 @@ export class BareActService {
     }));
   }
 
-  /**
-   * Global Bare Acts Stats for Advocates & Dashboard
-   */
   async getStats() {
     const [
       [{ totalActs }],
@@ -1238,13 +1207,7 @@ export class BareActService {
     };
   }
 
-  /**
-   * Criminal Laws Quick Comparison (IPC vs BNS, CrPC vs BNSS, IEA vs BSA)
-   * Dynamically enriched with live sections, punishment, bailable/cognizable classification,
-   * and direct navigation slugs from the database.
-   */
   async getCriminalLawComparisons() {
-    // 0. Return in-memory cached result if fresh (prevents repeated DB queries & high CPU)
     if (
       cachedCriminalComparisons &&
       Date.now() - cachedCriminalComparisons.timestamp < CRIMINAL_COMPARISONS_TTL_MS
@@ -1252,11 +1215,9 @@ export class BareActService {
       return cachedCriminalComparisons.data;
     }
 
-    // Base curated statutory bridge between Colonial statutes and 2024 New Criminal Laws
     const baseComparisons = BASE_CRIMINAL_COMPARISONS;
 
     try {
-      // 1. Fetch live BNS, BNSS, and BSA acts from DB
       const targetActs = await db
         .select({
           id: bareActs.id,
@@ -1289,7 +1250,6 @@ export class BareActService {
         }));
       }
 
-      // Map act id to canonical slug
       const actIdToSlug = new Map<string, string>();
       for (const a of targetActs) {
         const canonical =
@@ -1301,7 +1261,6 @@ export class BareActService {
 
       const actIds = targetActs.map((a) => a.id);
 
-      // 2. Fetch live sections from bare_act_sections for these criminal acts
       const liveSections = await db
         .select({
           id: bareActSections.id,
@@ -1317,7 +1276,6 @@ export class BareActService {
         .from(bareActSections)
         .where(inArray(bareActSections.actId, actIds));
 
-      // Build quick lookup index by "actSlug:digits" e.g. "bns:103", "bns:69"
       const sectionIndex = new Map<string, (typeof liveSections)[0]>();
       for (const sec of liveSections) {
         const actSlug = actIdToSlug.get(sec.actId) || "bns";
@@ -1328,7 +1286,6 @@ export class BareActService {
         sectionIndex.set(`${actSlug}:${sec.slug}`, sec);
       }
 
-      // Format helpers
       const formatBail = (status: string | null | undefined, defaultVal: string) => {
         if (!status || status === "not_applicable") return defaultVal;
         if (status === "bailable") return "Bailable";
@@ -1343,7 +1300,6 @@ export class BareActService {
         return defaultVal;
       };
 
-      // 3. Dynamically enrich base comparisons
       const enrichedList = baseComparisons.map((c) => {
         const matched = sectionIndex.get(`${c.actSlug}:${c.newSectionLookup}`);
         if (matched) {
@@ -1372,7 +1328,6 @@ export class BareActService {
         };
       });
 
-      // 4. Dynamically append any other sections in DB that have explicit crossReferences.oldEquivalent
       for (const sec of liveSections) {
         const oldEq = sec.crossReferences?.oldEquivalent;
         if (oldEq && !enrichedList.some((e) => e.sectionSlug === sec.slug || e.oldLaw.includes(oldEq))) {
@@ -1391,7 +1346,6 @@ export class BareActService {
         }
       }
 
-      // Store in memory cache before returning
       cachedCriminalComparisons = {
         data: enrichedList,
         timestamp: Date.now(),
@@ -1414,19 +1368,11 @@ export class BareActService {
     }
   }
 
-  /* =========================================================================
-     ADMIN PORTAL MANAGEMENT APIS
-     ========================================================================= */
-
-  /**
-   * Admin Create Bare Act
-   */
   async createAct(data: CreateBareActInput, adminUserId: string) {
     const actSlug =
       data.slug ||
       slugify(data.title + "-" + data.actYear, { lower: true, strict: true });
 
-    // Check duplicate slug
     const existing = await db.query.bareActs.findFirst({
       where: eq(bareActs.slug, actSlug),
     });
@@ -1466,9 +1412,6 @@ export class BareActService {
     return newAct;
   }
 
-  /**
-   * Admin Update Bare Act
-   */
   async updateAct(actId: string, data: UpdateBareActInput) {
     const existing = await db.query.bareActs.findFirst({
       where: eq(bareActs.id, actId),
@@ -1490,9 +1433,6 @@ export class BareActService {
     return updated;
   }
 
-  /**
-   * Admin Delete Bare Act
-   */
   async deleteAct(actId: string) {
     const existing = await db.query.bareActs.findFirst({
       where: eq(bareActs.id, actId),
@@ -1506,9 +1446,6 @@ export class BareActService {
     return { success: true, message: "Bare Act deleted successfully" };
   }
 
-  /**
-   * Admin Create Chapter
-   */
   async createChapter(actId: string, data: CreateChapterInput) {
     const act = await db.query.bareActs.findFirst({
       where: eq(bareActs.id, actId),
@@ -1533,7 +1470,6 @@ export class BareActService {
       })
       .returning();
 
-    // If autoAssignByRange is requested and startSection & endSection are provided
     if (data.autoAssignByRange && data.startSection && data.endSection) {
       const startNum = this.parseNumeric(data.startSection);
       const endNum = this.parseNumeric(data.endSection);
@@ -1559,7 +1495,6 @@ export class BareActService {
         );
     }
 
-    // Increment act totalChapters count
     await db
       .update(bareActs)
       .set({
@@ -1570,9 +1505,6 @@ export class BareActService {
     return chapter;
   }
 
-  /**
-   * Helper to parse numeric values from section strings e.g. "14", "21A" -> 21.1
-   */
   private parseNumeric(numStr: string): number {
     const match = numStr.match(/^(\d+)([a-zA-Z])?/);
     if (!match) return 0;
@@ -1582,9 +1514,6 @@ export class BareActService {
     return base + letterCode * 0.1;
   }
 
-  /**
-   * Admin Assign Sections to Chapter
-   */
   async assignSectionsToChapter(
     chapterId: string,
     data: {
@@ -1632,7 +1561,6 @@ export class BareActService {
         .returning({ id: bareActSections.id });
       updatedCount = result.length;
 
-      // Update startSection and endSection on the chapter record
       await db
         .update(bareActChapters)
         .set({
@@ -1650,9 +1578,6 @@ export class BareActService {
     };
   }
 
-  /**
-   * Admin Unassign Sections from any Chapter
-   */
   async unassignSections(sectionIds: string[]) {
     if (!sectionIds || sectionIds.length === 0) return { success: true, message: "No sections to unassign", unassignedCount: 0 };
     const result = await db
@@ -1668,9 +1593,6 @@ export class BareActService {
     };
   }
 
-  /**
-   * Admin Update Chapter
-   */
   async updateChapter(chapterId: string, data: UpdateChapterInput) {
     const existing = await db.query.bareActChapters.findFirst({
       where: eq(bareActChapters.id, chapterId),
@@ -1692,9 +1614,6 @@ export class BareActService {
     return updated;
   }
 
-  /**
-   * Admin Delete Chapter
-   */
   async deleteChapter(chapterId: string) {
     const existing = await db.query.bareActChapters.findFirst({
       where: eq(bareActChapters.id, chapterId),
@@ -1716,9 +1635,6 @@ export class BareActService {
     return { success: true, message: "Chapter deleted successfully" };
   }
 
-  /**
-   * Admin Create Section
-   */
   async createSection(actId: string, data: CreateSectionInput) {
     const act = await db.query.bareActs.findFirst({
       where: eq(bareActs.id, actId),
@@ -1759,7 +1675,6 @@ export class BareActService {
       })
       .returning();
 
-    // Increment totalSections
     await db
       .update(bareActs)
       .set({
@@ -1770,9 +1685,6 @@ export class BareActService {
     return section;
   }
 
-  /**
-   * Admin Update Section
-   */
   async updateSection(sectionId: string, data: UpdateSectionInput) {
     const existing = await db.query.bareActSections.findFirst({
       where: eq(bareActSections.id, sectionId),
@@ -1794,9 +1706,6 @@ export class BareActService {
     return updated;
   }
 
-  /**
-   * Admin Delete Section
-   */
   async deleteSection(sectionId: string) {
     const existing = await db.query.bareActSections.findFirst({
       where: eq(bareActSections.id, sectionId),
@@ -1818,15 +1727,11 @@ export class BareActService {
     return { success: true, message: "Section deleted successfully" };
   }
 
-  /**
-   * Admin Bulk Import of entire Act, Chapters, and Sections
-   */
   async bulkImportAct(data: BulkImportBareActInput, adminUserId: string) {
     const actSlug =
       data.act.slug ||
       slugify(data.act.title + "-" + data.act.actYear, { lower: true, strict: true });
 
-    // 1. Create or update act
     let act = await db.query.bareActs.findFirst({
       where: eq(bareActs.slug, actSlug),
     });
@@ -1870,7 +1775,6 @@ export class BareActService {
     let insertedChapterCount = 0;
     let insertedSectionCount = 0;
 
-    // 2. Process Chapters & Nested Sections
     if (data.chapters && data.chapters.length > 0) {
       for (const chap of data.chapters) {
         const { sections, ...chapData } = chap;
@@ -1928,7 +1832,6 @@ export class BareActService {
       }
     }
 
-    // 3. Process direct root sections if any
     if (data.sections && data.sections.length > 0) {
       for (const sec of data.sections) {
         const secSlug =
@@ -1963,7 +1866,6 @@ export class BareActService {
       }
     }
 
-    // 4. Update Act summary counts
     await db
       .update(bareActs)
       .set({
@@ -1980,17 +1882,11 @@ export class BareActService {
     };
   }
 
-  /**
-   * Re-seed System Default Bare Acts Library
-   */
   async reseedLibrary() {
     await seedBareActs(true);
     return { success: true, message: "Indian Bare Acts library seeded successfully" };
   }
 
-  /**
-   * Get enriched judgments for a section (with CNR, court order URL, ratio decidendi)
-   */
   async getSectionJudgments(actSlugOrId: string, sectionSlugOrNumber: string) {
     const act = await this.resolveActId(actSlugOrId);
     const cleanNumber = sectionSlugOrNumber
@@ -1998,7 +1894,6 @@ export class BareActService {
       .replace(new RegExp(`^${act.slug}-section-`, "i"), "")
       .trim();
 
-    // 1. Fetch section from DB
     const section = await db.query.bareActSections.findFirst({
       where: and(
         eq(bareActSections.actId, act.id),
@@ -2017,13 +1912,11 @@ export class BareActService {
 
     const existingJudgments = (((section.crossReferences as Record<string, unknown> | null)?.landmarkJudgments || []) as Record<string, unknown>[]);
 
-    // If existing judgments in DB already have CNR or official URL, return them directly
     const hasDetailedJudgments = existingJudgments.some((j) => Boolean(j.cnr || j.url));
     if (hasDetailedJudgments) {
       return existingJudgments;
     }
 
-    // Otherwise, fetch on-demand from eCourts judgments endpoint
     try {
       const url = `https://indiacode.ecourtsindia.com/api/v1/judgments?act=${encodeURIComponent(
         act.slug
@@ -2051,7 +1944,6 @@ export class BareActService {
               "eCourts India. Reported judgments only; the holding is the ratio decidendi as extracted from the order, reproduced unaltered.",
           }));
 
-          // Cache back into PostgreSQL DB!
           await db
             .update(bareActSections)
             .set({
@@ -2071,10 +1963,6 @@ export class BareActService {
 
     return existingJudgments;
   }
-
-  /* =========================================================================
-     PRIVATE HELPERS
-     ========================================================================= */
 
   private async resolveActId(slugOrId: string) {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(

@@ -24,7 +24,6 @@ const tenantController = {
       let tenantIdToFetch = userTenantId;
 
       if (!tenantIdToFetch) {
-        // FIND DEFAULT USER SCOPE
         const scope =
           (await db.query.userScopes.findFirst({
             where: and(
@@ -44,7 +43,6 @@ const tenantController = {
         tenantIdToFetch = scope.tenantId;
       }
 
-      // FIND TENANT
       const tenant = await db.query.tenants.findFirst({
         where: eq(tenants.id, tenantIdToFetch),
       });
@@ -53,7 +51,6 @@ const tenantController = {
         return next(CustomErrorHandler.notFound("Tenant not found"));
       }
 
-      // RESPONSE
       return res
         .status(200)
         .send(
@@ -65,7 +62,6 @@ const tenantController = {
       return next(CustomErrorHandler.serverError());
     }
   },
-  // CREATE TENANT
   async createTenant(req: Request, res: Response, next: NextFunction) {
     try {
       const {
@@ -103,7 +99,6 @@ const tenantController = {
     }
   },
 
-  // GET ALL TENANTS
   async getTenants(req: Request, res: Response, next: NextFunction) {
     try {
       const tenantList = await db.select().from(tenants);
@@ -118,7 +113,6 @@ const tenantController = {
     }
   },
 
-  // GET TENANT BY ID
   async getTenantDetails(req: Request, res: Response, next: NextFunction) {
     try {
       const id = req.user.tenantId;
@@ -142,7 +136,6 @@ const tenantController = {
     }
   },
 
-  // UPDATE TENANT
   async updateTenant(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -172,9 +165,6 @@ const tenantController = {
 
       let logoUrl: string | undefined;
 
-      /**
-       * Resolve and ensure unique slug if name or slug is being updated
-       */
       let resolvedSlug: string | undefined = slug;
       if (name && (!resolvedSlug || resolvedSlug.trim() === "")) {
         resolvedSlug = slugify(name, { lower: true, strict: true });
@@ -196,20 +186,11 @@ const tenantController = {
         resolvedSlug = finalSlug;
       }
 
-      /**
-       * Upload new logo if provided
-       */
       if (req.file) {
-        /**
-         * Delete old logo if it exists
-         */
         if (existingTenant.logo) {
           await deleteFileFromCloudinary(existingTenant.logo, "image");
         }
 
-        /**
-         * Upload new logo to Cloudinary
-         */
         const uploadedFile = await uploadFileToCloudinary({
           buffer: req.file.buffer,
           originalName: req.file.originalname,
@@ -238,7 +219,6 @@ const tenantController = {
           }),
           ...(status !== undefined && { status }),
 
-          // Only update logo when a new file was uploaded
           ...(logoUrl !== undefined && {
             logo: logoUrl,
           }),
@@ -258,7 +238,6 @@ const tenantController = {
     }
   },
 
-  // DELETE TENANT
   async deleteTenant(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -272,12 +251,10 @@ const tenantController = {
         return next(CustomErrorHandler.notFound("Tenant not found"));
       }
 
-      // Delete tenant logo from Cloudinary
       if (existingTenant.logo) {
         await deleteFileFromCloudinary(existingTenant.logo, "image");
       }
 
-      // Delete tenant from database
       await db.delete(tenants).where(eq(tenants.id, id));
 
       return res.status(200).json({

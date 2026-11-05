@@ -11,9 +11,6 @@ import CustomErrorHandler from "../../../utils/customErrorHandler.js";
 import ResponseHandler from "../../../utils/responseHandler.js";
 
 const adminPlanController = {
-  // =========================================================================
-  // GET ALL SUBSCRIPTION PLANS
-  // =========================================================================
   async getSubscriptionPlans(req: Request, res: Response, next: NextFunction) {
     try {
       const plans = await db.query.subscriptionPlans.findMany({
@@ -72,9 +69,6 @@ const adminPlanController = {
     }
   },
 
-  // =========================================================================
-  // GET PLAN BY ID
-  // =========================================================================
   async getPlanById(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -136,9 +130,6 @@ const adminPlanController = {
     }
   },
 
-  // =========================================================================
-  // CREATE SUBSCRIPTION PLAN
-  // =========================================================================
   async createSubscriptionPlan(req: Request, res: Response, next: NextFunction) {
     try {
       const {
@@ -222,9 +213,6 @@ const adminPlanController = {
     }
   },
 
-  // =========================================================================
-  // UPDATE SUBSCRIPTION PLAN
-  // =========================================================================
   async updateSubscriptionPlan(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
@@ -286,7 +274,7 @@ const adminPlanController = {
             : {}),
           ...(monthlyOcrPages !== undefined || monthlyOcrCredits !== undefined
             ? {
-                monthlyOcrPages:
+                 monthlyOcrPages:
                   monthlyOcrPages !== undefined
                     ? Number(monthlyOcrPages)
                     : Math.floor(Number(monthlyOcrCredits) / 10),
@@ -318,9 +306,6 @@ const adminPlanController = {
     }
   },
 
-  // =========================================================================
-  // DELETE SUBSCRIPTION PLAN
-  // =========================================================================
   async deleteSubscriptionPlan(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;

@@ -1,9 +1,72 @@
 import { type Request, type Response, type NextFunction } from "express";
 import db from "../db/index.js";
-import { tenantSubscriptions } from "../db/schema/index.js";
-import { eq, sql } from "drizzle-orm";
+import {
+  tenantSubscriptions,
+  judgmentAiSessions,
+  type IJudgmentSessionMessage,
+} from "../db/schema/index.js";
+import { and, eq, gt, lte, sql } from "drizzle-orm";
 import CustomErrorHandler from "../utils/customErrorHandler.js";
-import { CREDITS_PER_JUDGMENT_REPORT, JUDGMENT_CREDIT_RATE_INR } from "../constants/judgmentCreditPacks.js";
+import {
+  CREDITS_PER_JUDGMENT_REPORT,
+  JUDGMENT_CREDIT_RATE_INR,
+} from "../constants/judgmentCreditPacks.js";
+
+export const MAX_FOLLOWUP_QUESTIONS_PER_SESSION = 15;
+export const MAX_FOLLOWUP_PROMPT_CHARS = 2500;
+export const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+
+let tableInitialized = false;
+
+export async function ensureJudgmentSessionsTable() {
+  if (tableInitialized) return;
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS judgment_ai_sessions (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id uuid NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        judgment_key varchar(255) NOT NULL,
+        title varchar(500) NOT NULL,
+        citation varchar(255),
+        court varchar(255),
+        messages jsonb NOT NULL DEFAULT '[]'::jsonb,
+        questions_used integer NOT NULL DEFAULT 0,
+        created_by uuid REFERENCES users(id) ON DELETE SET NULL,
+        saved_at timestamp NOT NULL DEFAULT now(),
+        expires_at timestamp NOT NULL,
+        updated_at timestamp NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS judgment_ai_sessions_tenant_key_idx
+        ON judgment_ai_sessions (tenant_id, judgment_key);
+      CREATE INDEX IF NOT EXISTS judgment_ai_sessions_expires_at_idx
+        ON judgment_ai_sessions (expires_at);
+    `);
+    tableInitialized = true;
+  } catch (err) {
+    console.warn("[ensureJudgmentSessionsTable] Notice:", err);
+  }
+}
+
+export function resolveJudgmentKey(input: {
+  judgmentId?: string;
+  caseId?: string;
+  metadata?: {
+    id?: string;
+    citation?: string;
+    neutralCitation?: string;
+    title?: string;
+  };
+}): string {
+  const raw =
+    input.judgmentId ||
+    input.caseId ||
+    input.metadata?.id ||
+    input.metadata?.neutralCitation ||
+    input.metadata?.citation ||
+    input.metadata?.title ||
+    "";
+  return raw.trim().toLowerCase().replace(/\s+/g, "-").slice(0, 250);
+}
 
 declare global {
   namespace Express {
@@ -15,15 +78,21 @@ declare global {
         isInternal: boolean;
         subscriptionId: string;
       };
+      activeJudgmentSession?: {
+        id: string;
+        judgmentKey: string;
+        title: string;
+        citation: string | null;
+        court: string | null;
+        messages: IJudgmentSessionMessage[];
+        questionsUsed: number;
+        savedAt: Date;
+        expiresAt: Date;
+      } | null;
     }
   }
 }
 
-/**
- * Middleware: Guards Judgment AI endpoints.
- * Checks tenant subscription, ensures sufficient credits (monthly or add-on),
- * and prepares quota for atomic deduction.
- */
 export const judgmentCreditGuard = async (
   req: Request,
   res: Response,
@@ -36,6 +105,33 @@ export const judgmentCreditGuard = async (
       return next(CustomErrorHandler.unAuthorized("Authentication required"));
     }
 
+    await ensureJudgmentSessionsTable();
+
+    db.delete(judgmentAiSessions)
+      .where(lte(judgmentAiSessions.expiresAt, new Date()))
+      .catch(() => {});
+
+    const judgmentKey = resolveJudgmentKey(req.body || {});
+    const forceRefresh = Boolean(req.body?.forceRefresh);
+
+    if (judgmentKey && !forceRefresh) {
+      const [existingSession] = await db
+        .select()
+        .from(judgmentAiSessions)
+        .where(
+          and(
+            eq(judgmentAiSessions.tenantId, tenantId),
+            eq(judgmentAiSessions.judgmentKey, judgmentKey),
+            gt(judgmentAiSessions.expiresAt, new Date()),
+          ),
+        )
+        .limit(1);
+
+      if (existingSession) {
+        req.activeJudgmentSession = existingSession;
+      }
+    }
+
     const subscription = await db.query.tenantSubscriptions.findFirst({
       where: eq(tenantSubscriptions.tenantId, tenantId),
       with: {
@@ -44,10 +140,17 @@ export const judgmentCreditGuard = async (
     });
 
     const isSubscriptionActiveOrTrial =
-      subscription && (subscription.status === "active" || subscription.status === "trial");
-    const hasAddonCredits = (subscription?.aiDraftAddonCredits ?? 0) >= CREDITS_PER_JUDGMENT_REPORT;
+      subscription &&
+      (subscription.status === "active" || subscription.status === "trial");
+    const hasAddonCredits =
+      (subscription?.aiDraftAddonCredits ?? 0) >= CREDITS_PER_JUDGMENT_REPORT;
 
-    if (!subscription || (!isSubscriptionActiveOrTrial && !hasAddonCredits)) {
+    if (
+      !subscription ||
+      (!isSubscriptionActiveOrTrial &&
+        !hasAddonCredits &&
+        !req.activeJudgmentSession)
+    ) {
       return next(
         CustomErrorHandler.forbidden(
           "An active subscription or free trial is required to use AI Judgment Co-Counsel.",
@@ -56,20 +159,23 @@ export const judgmentCreditGuard = async (
     }
 
     const isInternal = subscription?.plan?.code === "internal";
-    const isTrial = subscription?.status === "trial" || subscription?.plan?.code === "free_trial";
+    const isTrial =
+      subscription?.status === "trial" ||
+      subscription?.plan?.code === "free_trial";
 
-    // If trial plan has lower draft count (e.g. 4 drafts in old 1-credit system), scale to 15 credits/report
     const rawMonthlyLimit = subscription.plan?.monthlyAiDrafts ?? 0;
     const monthlyLimit = isInternal
       ? 999999
-      : (isTrial && rawMonthlyLimit < CREDITS_PER_JUDGMENT_REPORT)
-        ? Math.max(CREDITS_PER_JUDGMENT_REPORT, rawMonthlyLimit * CREDITS_PER_JUDGMENT_REPORT)
+      : isTrial && rawMonthlyLimit < CREDITS_PER_JUDGMENT_REPORT
+        ? Math.max(
+            CREDITS_PER_JUDGMENT_REPORT,
+            rawMonthlyLimit * CREDITS_PER_JUDGMENT_REPORT,
+          )
         : rawMonthlyLimit;
 
     let currentUsed = subscription.aiDraftsUsedThisMonth ?? 0;
     const addonCredits = subscription.aiDraftAddonCredits ?? 0;
 
-    // Check monthly billing cycle reset
     if (subscription.aiDraftCycleResetDate) {
       const resetDate = new Date(subscription.aiDraftCycleResetDate);
       const now = new Date();
@@ -91,12 +197,31 @@ export const judgmentCreditGuard = async (
     }
 
     const remainingMonthly = Math.max(0, monthlyLimit - currentUsed);
-    const totalRemaining = isInternal ? 999999 : remainingMonthly + addonCredits;
+    const totalRemaining = isInternal
+      ? 999999
+      : remainingMonthly + addonCredits;
 
-    if (!isInternal && totalRemaining < CREDITS_PER_JUDGMENT_REPORT) {
+    if (
+      !req.activeJudgmentSession &&
+      !isInternal &&
+      totalRemaining < CREDITS_PER_JUDGMENT_REPORT
+    ) {
       return next(
         CustomErrorHandler.forbidden(
           `Insufficient AI Credits. Generating a Judgment Briefing or Co-Counsel report requires ${CREDITS_PER_JUDGMENT_REPORT} credits (Your current balance is ${totalRemaining} credits). Please recharge credits to proceed (1 credit = ₹${JUDGMENT_CREDIT_RATE_INR}).`,
+        ),
+      );
+    }
+
+    if (
+      req.activeJudgmentSession &&
+      !isInternal &&
+      req.activeJudgmentSession.questionsUsed >=
+        MAX_FOLLOWUP_QUESTIONS_PER_SESSION
+    ) {
+      return next(
+        CustomErrorHandler.forbidden(
+          `You have reached the maximum of ${MAX_FOLLOWUP_QUESTIONS_PER_SESSION} follow-up questions included in this 24-hour Judgment Session. You may reset the session to start a new briefing (${CREDITS_PER_JUDGMENT_REPORT} credits).`,
         ),
       );
     }
@@ -112,13 +237,12 @@ export const judgmentCreditGuard = async (
     return next();
   } catch (err) {
     console.error("[judgmentCreditGuard] Error verifying AI credit quota:", err);
-    return next(CustomErrorHandler.serverError("Failed to verify AI credit quota"));
+    return next(
+      CustomErrorHandler.serverError("Failed to verify AI credit quota"),
+    );
   }
 };
 
-/**
- * Deducts credits (default 15 credits per report) from the tenant's subscription pool atomically.
- */
 export async function deductJudgmentCredit(
   subscriptionId: string,
   currentUsed: number,
@@ -126,7 +250,7 @@ export async function deductJudgmentCredit(
   isInternal: boolean,
   creditsToDeduct: number = CREDITS_PER_JUDGMENT_REPORT,
 ) {
-  if (isInternal) return; // Unlimited for internal admin accounts
+  if (isInternal) return;
 
   const remainingMonthly = Math.max(0, monthlyLimit - currentUsed);
   if (remainingMonthly >= creditsToDeduct) {

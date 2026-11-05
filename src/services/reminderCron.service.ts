@@ -80,7 +80,6 @@ export async function processDueReminders(): Promise<void> {
     console.log(`⏰ Found ${dueReminders.length} due reminder(s) to process.`);
 
     for (const r of dueReminders) {
-      // Build recipient email list
       const emailList: string[] = [];
 
       if (r.email) {
@@ -107,13 +106,11 @@ export async function processDueReminders(): Promise<void> {
           caseNo: r.caseNumber || null,
         };
 
-        // Publish to RabbitMQ
         await publishToQueue(REMINDER_EMAIL_QUEUE, emailJob);
       } else {
         console.warn(`⚠️ Reminder ${r.id} is due but has no recipient email.`);
       }
 
-      // Compute next run
       const currentNext = r.nextRunAt ? new Date(r.nextRunAt) : new Date();
       const { nextRun, isActive } = computeNextRunDate(
         r.frequency,
@@ -121,7 +118,6 @@ export async function processDueReminders(): Promise<void> {
         r.endDate
       );
 
-      // Update record
       await db
         .update(customReminders)
         .set({
@@ -137,7 +133,6 @@ export async function processDueReminders(): Promise<void> {
 }
 
 export function startReminderCron(): void {
-  // Run once daily at 8:00 AM IST ('0 8 * * *')
   cron.schedule("0 8 * * *", () => {
     void processDueReminders();
   });

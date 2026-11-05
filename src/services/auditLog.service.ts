@@ -23,9 +23,6 @@ export interface RequestAuditOptions {
   tenantId?: string | null;
 }
 
-/**
- * Extracts client IP address safely
- */
 export function extractClientIp(req: Request): string {
   const forwarded = req.headers["x-forwarded-for"];
   if (typeof forwarded === "string") {
@@ -34,9 +31,6 @@ export function extractClientIp(req: Request): string {
   return req.ip || req.socket.remoteAddress || "127.0.0.1";
 }
 
-/**
- * Resolves tenant ID from request context
- */
 export function resolveRequestTenantId(req: Request): string | null {
   return (
     req.user?.tenantId ||
@@ -46,9 +40,6 @@ export function resolveRequestTenantId(req: Request): string | null {
   );
 }
 
-/**
- * Resolves office ID from request context (officeGuard, header, body, or query)
- */
 export function resolveRequestOfficeId(req: Request): string | null {
   const headerOffice = req.headers["x-office-id"];
   return (
@@ -61,9 +52,6 @@ export function resolveRequestOfficeId(req: Request): string | null {
 }
 
 export const auditLogService = {
-  /**
-   * Safe audit log recorder that writes to DB without throwing uncaught errors to caller
-   */
   async record(params: CreateAuditLogParams) {
     try {
       const [entry] = await db
@@ -88,9 +76,6 @@ export const auditLogService = {
     }
   },
 
-  /**
-   * Records an audit event using Express Request context (resolves tenant, office, user, and IP)
-   */
   async logFromRequest(
     req: Request,
     action: "CREATE" | "UPDATE" | "DELETE" | "EXPORT" | "LOGIN" | string,
@@ -114,30 +99,18 @@ export const auditLogService = {
     });
   },
 
-  /**
-   * Convenience helper for CREATE events on tenant & office basis
-   */
   async logCreate(req: Request, options: RequestAuditOptions) {
     return auditLogService.logFromRequest(req, "CREATE", options);
   },
 
-  /**
-   * Convenience helper for UPDATE events on tenant & office basis
-   */
   async logUpdate(req: Request, options: RequestAuditOptions) {
     return auditLogService.logFromRequest(req, "UPDATE", options);
   },
 
-  /**
-   * Convenience helper for DELETE events on tenant & office basis
-   */
   async logDelete(req: Request, options: RequestAuditOptions) {
     return auditLogService.logFromRequest(req, "DELETE", options);
   },
 
-  /**
-   * Convenience helper for EXPORT events on tenant & office basis
-   */
   async logExport(req: Request, options: RequestAuditOptions) {
     return auditLogService.logFromRequest(req, "EXPORT", options);
   },
