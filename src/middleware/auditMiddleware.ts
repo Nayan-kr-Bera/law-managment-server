@@ -331,9 +331,10 @@ export const autoAuditMiddleware = (
   const isExport = lowerUrl.includes("export") || lowerUrl.includes("download");
 
   // Exclude all authentication, login, logout, password, OTP, and session endpoints.
+  // Also exclude personal user notification inbox actions (advocates reading/dismissing their personal alerts).
   // A law firm owner's audit log is strictly for operational business actions
   // (Cases, Hearings, Invoices, Payments, Clients, Documents, Chamber Roles).
-  // Routine logins and app opens are connection telemetry, NOT legal business events.
+  // Routine logins and self-notification dismissals are personal UI actions, NOT chamber business events.
   if (
     lowerUrl.includes("/auth") ||
     lowerUrl.includes("/mobile/auth") ||
@@ -342,7 +343,9 @@ export const autoAuditMiddleware = (
     lowerUrl.includes("/refresh") ||
     lowerUrl.includes("/otp") ||
     lowerUrl.includes("/password") ||
-    lowerUrl.includes("/token")
+    lowerUrl.includes("/token") ||
+    lowerUrl.includes("/notifications") ||
+    lowerUrl.includes("/notification")
   ) {
     return next();
   }

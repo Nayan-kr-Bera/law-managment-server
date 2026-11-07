@@ -173,8 +173,8 @@ const auditLogController = {
       if (module && module.trim() !== "" && module !== "all") {
         conditions.push(ilike(auditLogs.entity, module));
       } else {
-        // Exclude authentication/device login telemetry by default so the firm owner sees only operational business events
-        conditions.push(not(inArray(auditLogs.entity, ["Authentication", "Mobile", "Auth"])));
+        // Exclude authentication telemetry, device sessions, and personal notification inbox actions
+        conditions.push(not(inArray(auditLogs.entity, ["Authentication", "Mobile", "Auth", "Notifications", "Notification"])));
       }
 
       if (action && action.trim() !== "" && action !== "all") {
@@ -239,13 +239,12 @@ const auditLogController = {
           timestamp: log.timestamp
             ? new Date(log.timestamp).toISOString()
             : new Date().toISOString(),
-          user: log.userName
-            ? `${log.userName} (${log.userEmail})`
-            : "Chamber Administrator",
+          user: log.userName || log.userEmail || "Chamber Administrator",
+          userEmail: log.userEmail || "",
           userRole: log.userName ? "Advocate / Staff" : "Managing Partner",
           action: actionStr,
           module: moduleStr === "Mobile" ? "Authentication" : moduleStr,
-          ipAddress: log.ipAddress || "127.0.0.1",
+          ipAddress: (log.ipAddress || "127.0.0.1").replace(/^::ffff:/, ""),
           details: cleanedDetails,
           highlights: extractAuditHighlights(log.rawDetails),
           rawDetails: log.rawDetails,
@@ -297,8 +296,8 @@ const auditLogController = {
       if (module && module.trim() !== "" && module !== "all") {
         conditions.push(ilike(auditLogs.entity, module));
       } else {
-        // Exclude authentication/device login telemetry by default so the firm owner sees only operational business events
-        conditions.push(not(inArray(auditLogs.entity, ["Authentication", "Mobile", "Auth"])));
+        // Exclude authentication telemetry, device sessions, and personal notification inbox actions
+        conditions.push(not(inArray(auditLogs.entity, ["Authentication", "Mobile", "Auth", "Notifications", "Notification"])));
       }
       if (action && action.trim() !== "" && action !== "all") {
         conditions.push(eq(auditLogs.action, action.toUpperCase()));
@@ -354,7 +353,7 @@ const auditLogController = {
             : "Chamber Administrator",
           Action: actionStr,
           Module: moduleStr === "Mobile" ? "Authentication" : moduleStr,
-          IPAddress: log.ipAddress || "127.0.0.1",
+          IPAddress: (log.ipAddress || "127.0.0.1").replace(/^::ffff:/, ""),
           ActivityDescription: cleanedDetails,
         };
       });

@@ -25,10 +25,13 @@ export interface RequestAuditOptions {
 
 export function extractClientIp(req: Request): string {
   const forwarded = req.headers["x-forwarded-for"];
+  let ip = "";
   if (typeof forwarded === "string") {
-    return forwarded.split(",")[0].trim();
+    ip = forwarded.split(",")[0].trim();
+  } else {
+    ip = req.ip || req.socket.remoteAddress || "127.0.0.1";
   }
-  return req.ip || req.socket.remoteAddress || "127.0.0.1";
+  return ip.replace(/^::ffff:/, "");
 }
 
 export function resolveRequestTenantId(req: Request): string | null {
