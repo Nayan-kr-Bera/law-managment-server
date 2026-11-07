@@ -1,16 +1,156 @@
 import { Request, Response, NextFunction } from "express";
-import { and, eq, desc, ilike, or, count, type SQL } from "drizzle-orm";
+import { and, eq, desc, ilike, or, count, not, inArray, type SQL } from "drizzle-orm";
 import db from "../../db/index.js";
 import { auditLogs, user } from "../../db/schema/index.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import ResponseHandler from "../../utils/responseHandler.js";
 
+function cleanHumanDetails(
+  details: string,
+  rawDetails: unknown,
+  module: string,
+  action: string,
+): string {
+  if (
+    !details ||
+    details.startsWith("Created new record in") ||
+    details.startsWith("Updated") ||
+    details.startsWith("Deleted") ||
+    details.includes("in Mobile")
+  ) {
+    const raw =
+      rawDetails && typeof rawDetails === "object" && !Array.isArray(rawDetails)
+        ? (rawDetails as Record<string, unknown>)
+        : {};
+
+    if (
+      module.toLowerCase().includes("mobile") ||
+      details.includes("in Mobile") ||
+      raw.deviceId
+    ) {
+      return "Logged in via Mobile Chamber App";
+    }
+    if (
+      module.toLowerCase().includes("auth") ||
+      module.toLowerCase().includes("login")
+    ) {
+      return "User authentication activity";
+    }
+    if (raw.caseNumber || raw.title) {
+      const ref = raw.caseNumber ? `"${String(raw.caseNumber)}"` : `"${String(raw.title)}"`;
+      if (action === "CREATE") return `Created case ${ref}`;
+      if (action === "UPDATE") return `Updated case ${ref}`;
+      if (action === "DELETE") return `Deleted case ${ref}`;
+    }
+    if (raw.firstName || raw.companyName) {
+      const name =
+        `${String(raw.firstName || "")} ${String(raw.lastName || "")}`.trim() ||
+        String(raw.companyName || "");
+      if (action === "CREATE") return `Added client "${name}"`;
+      if (action === "UPDATE") return `Updated client "${name}"`;
+    }
+    if (raw.invoiceNumber) {
+      const amt =
+        raw.total || raw.amount ? ` (₹${String(raw.total || raw.amount)})` : "";
+      return `Generated invoice #${String(raw.invoiceNumber)}${amt}`;
+    }
+    if (raw.purpose) {
+      return `Scheduled appointment for "${String(raw.purpose)}"`;
+    }
+    if (raw.name && (module === "Security" || module === "Roles")) {
+      return `Configured role "${String(raw.name)}"`;
+    }
+    if (raw.name && module === "Offices") {
+      return `Chamber branch "${String(raw.name)}"`;
+    }
+  }
+  return details;
+}
+
+function extractAuditHighlights(rawDetails: unknown): Record<string, string> | null {
+  if (
+    !rawDetails ||
+    typeof rawDetails !== "object" ||
+    Array.isArray(rawDetails)
+  ) {
+    return null;
+  }
+
+  const raw = rawDetails as Record<string, unknown>;
+  const highlights: Record<string, string> = {};
+
+  if (raw.caseNumber) {
+    highlights["Case Number"] = String(raw.caseNumber);
+  }
+  if (raw.title) {
+    highlights["Title"] = String(raw.title);
+  }
+  if (raw.clientName) {
+    highlights["Client"] = String(raw.clientName);
+  } else if (raw.firstName || raw.companyName) {
+    highlights["Client"] =
+      `${String(raw.firstName || "")} ${String(raw.lastName || "")}`.trim() ||
+      String(raw.companyName);
+  }
+  if (raw.advocateName) {
+    highlights["Advocate"] = String(raw.advocateName);
+  }
+  if (raw.invoiceNumber) {
+    highlights["Invoice #"] = String(raw.invoiceNumber);
+  }
+  if (raw.total || raw.amount) {
+    highlights["Amount"] = `₹${Number(
+      raw.total || raw.amount,
+    ).toLocaleString("en-IN")}`;
+  }
+  if (raw.purpose) {
+    highlights["Purpose"] = String(raw.purpose);
+  }
+  if (raw.mode) {
+    highlights["Mode"] = String(raw.mode)
+      .replace(/_/g, " ")
+      .toUpperCase();
+  }
+  if (raw.status) {
+    highlights["Status"] = String(raw.status).toUpperCase();
+  }
+  if (raw.date || raw.hearingDate) {
+    const d = new Date(String(raw.date || raw.hearingDate));
+    if (!isNaN(d.getTime())) {
+      highlights["Date"] = d.toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      });
+    }
+  }
+  if (raw.court || raw.courtName) {
+    highlights["Court"] = String(raw.court || raw.courtName);
+  }
+  if (raw.name) {
+    highlights["Name"] = String(raw.name);
+  }
+  if (raw.deviceId) {
+    highlights["Device"] = `Mobile Device (${String(
+      raw.deviceId,
+    ).slice(0, 8)}...)`;
+  }
+
+  return Object.keys(highlights).length > 0 ? highlights : null;
+}
+
 const auditLogController = {
-  async getAuditLogs(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
+  async getAuditLogs(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<Response | void> {
     try {
       const tenantId = req.user?.tenantId;
       if (!tenantId) {
-        return next(CustomErrorHandler.unAuthorized("Tenant ID missing in request"));
+        return next(
+          CustomErrorHandler.unAuthorized("Tenant ID missing in request"),
+        );
       }
 
       const page = Math.max(1, Number(req.query.page) || 1);
@@ -32,6 +172,9 @@ const auditLogController = {
 
       if (module && module.trim() !== "" && module !== "all") {
         conditions.push(ilike(auditLogs.entity, module));
+      } else {
+        // Exclude authentication/device login telemetry by default so the firm owner sees only operational business events
+        conditions.push(not(inArray(auditLogs.entity, ["Authentication", "Mobile", "Auth"])));
       }
 
       if (action && action.trim() !== "" && action !== "all") {
@@ -81,17 +224,33 @@ const auditLogController = {
         .limit(limit)
         .offset(offset);
 
-      const formattedLogs = rawLogs.map((log) => ({
-        id: log.id,
-        timestamp: log.timestamp ? new Date(log.timestamp).toISOString() : new Date().toISOString(),
-        user: log.userName ? `${log.userName} (${log.userEmail})` : "System / Administrator",
-        userRole: log.userName ? "Advocate / Staff" : "System Administrator",
-        action: (log.action || "UPDATE").toUpperCase(),
-        module: log.module || "General",
-        ipAddress: log.ipAddress || "127.0.0.1",
-        details: log.details || "System operation performed.",
-        rawDetails: log.rawDetails,
-      }));
+      const formattedLogs = rawLogs.map((log) => {
+        const actionStr = (log.action || "UPDATE").toUpperCase();
+        const moduleStr = log.module || "General";
+        const cleanedDetails = cleanHumanDetails(
+          log.details || "System operation performed.",
+          log.rawDetails,
+          moduleStr,
+          actionStr,
+        );
+
+        return {
+          id: log.id,
+          timestamp: log.timestamp
+            ? new Date(log.timestamp).toISOString()
+            : new Date().toISOString(),
+          user: log.userName
+            ? `${log.userName} (${log.userEmail})`
+            : "Chamber Administrator",
+          userRole: log.userName ? "Advocate / Staff" : "Managing Partner",
+          action: actionStr,
+          module: moduleStr === "Mobile" ? "Authentication" : moduleStr,
+          ipAddress: log.ipAddress || "127.0.0.1",
+          details: cleanedDetails,
+          highlights: extractAuditHighlights(log.rawDetails),
+          rawDetails: log.rawDetails,
+        };
+      });
 
       return res.status(200).send(
         ResponseHandler(200, "Audit logs retrieved successfully", {
@@ -105,13 +264,18 @@ const auditLogController = {
         }),
       );
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to fetch audit logs";
+      const message =
+        err instanceof Error ? err.message : "Failed to fetch audit logs";
       console.error("[auditLogController.getAuditLogs] Error:", err);
       return next(CustomErrorHandler.serverError(message));
     }
   },
 
-  async exportAuditLogs(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
+  async exportAuditLogs(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<Response | void> {
     try {
       const tenantId = req.user?.tenantId;
       if (!tenantId) {
@@ -132,6 +296,9 @@ const auditLogController = {
       }
       if (module && module.trim() !== "" && module !== "all") {
         conditions.push(ilike(auditLogs.entity, module));
+      } else {
+        // Exclude authentication/device login telemetry by default so the firm owner sees only operational business events
+        conditions.push(not(inArray(auditLogs.entity, ["Authentication", "Mobile", "Auth"])));
       }
       if (action && action.trim() !== "" && action !== "all") {
         conditions.push(eq(auditLogs.action, action.toUpperCase()));
@@ -158,6 +325,7 @@ const auditLogController = {
           module: auditLogs.entity,
           ipAddress: auditLogs.ipAddress,
           description: auditLogs.description,
+          rawDetails: auditLogs.details,
           userName: user.name,
           userEmail: user.email,
         })
@@ -167,20 +335,36 @@ const auditLogController = {
         .orderBy(desc(auditLogs.createdAt))
         .limit(1000);
 
-      const rows = logs.map((log) => ({
-        Timestamp: log.createdAt ? new Date(log.createdAt).toLocaleString("en-IN") : "",
-        User: log.userName ? `${log.userName} (${log.userEmail})` : "System / Administrator",
-        Action: log.action,
-        Module: log.module,
-        IPAddress: log.ipAddress || "127.0.0.1",
-        EventDescription: log.description || "",
-      }));
+      const rows = logs.map((log) => {
+        const actionStr = (log.action || "UPDATE").toUpperCase();
+        const moduleStr = log.module || "General";
+        const cleanedDetails = cleanHumanDetails(
+          log.description || "",
+          log.rawDetails,
+          moduleStr,
+          actionStr,
+        );
+
+        return {
+          Timestamp: log.createdAt
+            ? new Date(log.createdAt).toLocaleString("en-IN")
+            : "",
+          User: log.userName
+            ? `${log.userName} (${log.userEmail})`
+            : "Chamber Administrator",
+          Action: actionStr,
+          Module: moduleStr === "Mobile" ? "Authentication" : moduleStr,
+          IPAddress: log.ipAddress || "127.0.0.1",
+          ActivityDescription: cleanedDetails,
+        };
+      });
 
       return res.status(200).send(
         ResponseHandler(200, "Audit logs exported successfully", rows),
       );
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to export audit logs";
+      const message =
+        err instanceof Error ? err.message : "Failed to export audit logs";
       console.error("[auditLogController.exportAuditLogs] Error:", err);
       return next(CustomErrorHandler.serverError(message));
     }

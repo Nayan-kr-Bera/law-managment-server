@@ -1,4 +1,4 @@
-import { count, eq, inArray } from "drizzle-orm";
+import { and, count, eq, inArray, or } from "drizzle-orm";
 import { NextFunction, Request, Response } from "express";
 
 import db from "../../db/index.js";
@@ -8,17 +8,29 @@ import {
   rolePermissions,
   roles,
   userRoles,
+  userScopes,
 } from "../../db/schema/index.js";
 
 import ResponseHandler from "../../utils/responseHandler.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 const roleController = {
   async getRoles(req: Request, res: Response, next: NextFunction) {
-    const { id: tenantId } = req.params;
     try {
+      const tenantId = req.params.id || req.user?.tenantId;
+
+      if (!tenantId) {
+        return next(CustomErrorHandler.badRequest("Tenant id is required"));
+      }
+
       const roledata = await db.query.roles.findMany({
-        where: eq(roles.tenantId, tenantId),
+        where: or(
+          eq(roles.tenantId, tenantId),
+          and(eq(roles.isSystemRole, true), eq(roles.slug, "tenant_admin")),
+        ),
         columns: {
           id: true,
           name: true,
@@ -29,12 +41,26 @@ const roleController = {
         },
       });
 
+      const roleIds = roledata.map((r) => r.id);
+      if (roleIds.length === 0) {
+        return res
+          .status(200)
+          .send(ResponseHandler(200, "Roles fetched successfully", []));
+      }
+
       const userCounts = await db
         .select({
           roleId: userRoles.roleId,
           count: count(),
         })
         .from(userRoles)
+        .innerJoin(userScopes, eq(userRoles.scopeId, userScopes.id))
+        .where(
+          and(
+            inArray(userRoles.roleId, roleIds),
+            eq(userScopes.tenantId, tenantId),
+          ),
+        )
         .groupBy(userRoles.roleId);
 
       const permissionCounts = await db
@@ -43,6 +69,7 @@ const roleController = {
           count: count(),
         })
         .from(rolePermissions)
+        .where(inArray(rolePermissions.roleId, roleIds))
         .groupBy(rolePermissions.roleId);
 
       const userMap = new Map(
@@ -63,16 +90,17 @@ const roleController = {
         .status(200)
         .send(ResponseHandler(200, "Roles fetched successfully", data));
     } catch (error) {
-      console.error(error);
+      console.error("Error in getRoles:", error);
       return next(CustomErrorHandler.serverError());
     }
   },
+
   async getRoleById(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
 
-      if (!id) {
-        return next(CustomErrorHandler.badRequest("Role id is required"));
+      if (!id || !UUID_REGEX.test(id)) {
+        return next(CustomErrorHandler.badRequest("Valid role id is required"));
       }
 
       const role = await db.query.roles.findFirst({
@@ -84,6 +112,7 @@ const roleController = {
       }
 
       const allPermissions = await db.query.permissions.findMany({
+        where: eq(permissions.isAdminPortal, false),
         orderBy: (permissions, { asc }) => [asc(permissions.code)],
       });
 
@@ -113,25 +142,31 @@ const roleController = {
           description: role.description,
           isSystemRole: role.isSystemRole,
           createdAt: role.createdAt,
-
           permissions: permissionsData,
         }),
       );
     } catch (error) {
-      console.log(error);
+      console.error("Error in getRoleById:", error);
       return next(CustomErrorHandler.serverError());
     }
   },
+
   async createRole(req: Request, res: Response, next: NextFunction) {
     try {
       const {
         name,
         description,
         permissions: permissionCodes,
-        tenantId,
+        tenantId: bodyTenantId,
       } = req.body;
-      const userId = req.user.userId;
-      if (!name) {
+      const tenantId = bodyTenantId || req.user?.tenantId;
+      const userId = req.user?.userId;
+
+      if (!tenantId) {
+        return next(CustomErrorHandler.badRequest("Tenant id is required"));
+      }
+
+      if (!name || !name.trim()) {
         return next(CustomErrorHandler.badRequest("Role name is required"));
       }
 
@@ -141,36 +176,46 @@ const roleController = {
         );
       }
 
-      const slug = name.trim().toLowerCase().replace(/\s+/g, "_");
+      const trimmedName = name.trim();
+      const slug = trimmedName.toLowerCase().replace(/\s+/g, "_");
 
       const existingRole = await db.query.roles.findFirst({
-        where: eq(roles.name, name),
+        where: and(
+          eq(roles.name, trimmedName),
+          or(eq(roles.tenantId, tenantId), eq(roles.isSystemRole, true)),
+        ),
       });
 
       if (existingRole) {
-        return next(CustomErrorHandler.badRequest("Role already exists"));
+        return next(CustomErrorHandler.badRequest("Role name already exists in this chamber"));
       }
 
       const existingSlug = await db.query.roles.findFirst({
-        where: eq(roles.slug, slug),
+        where: and(
+          eq(roles.slug, slug),
+          or(eq(roles.tenantId, tenantId), eq(roles.isSystemRole, true)),
+        ),
       });
 
       if (existingSlug) {
-        return next(CustomErrorHandler.badRequest("Role slug already exists"));
+        return next(CustomErrorHandler.badRequest("Role slug already exists in this chamber"));
       }
 
+      let createdRole;
       await db.transaction(async (tx) => {
         const [role] = await tx
           .insert(roles)
           .values({
-            name,
+            name: trimmedName,
             slug,
             tenantId,
-            description,
+            description: description?.trim() || null,
             isSystemRole: false,
-            createdBy: userId,
+            createdBy: userId || null,
           })
           .returning();
+
+        createdRole = role;
 
         if (permissionCodes.length > 0) {
           const permissionRows = await tx
@@ -181,33 +226,37 @@ const roleController = {
             .from(permissions)
             .where(inArray(permissions.code, permissionCodes));
 
-          await tx.insert(rolePermissions).values(
-            permissionRows.map((permission) => ({
-              roleId: role.id,
-              permissionId: permission.id,
-            })),
-          );
+          if (permissionRows.length > 0) {
+            await tx.insert(rolePermissions).values(
+              permissionRows.map((permission) => ({
+                roleId: role.id,
+                permissionId: permission.id,
+              })),
+            );
+          }
         }
       });
 
       return res
         .status(201)
-        .send(ResponseHandler(201, "Role created successfully"));
+        .send(ResponseHandler(201, "Role created successfully", createdRole));
     } catch (error) {
-      console.log(error);
+      console.error("Error in createRole:", error);
       return next(CustomErrorHandler.serverError());
     }
   },
+
   async updateRole(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
       const { name, description, permissions: permissionCodes } = req.body;
+      const tenantId = req.user?.tenantId;
 
-      if (!id) {
-        return next(CustomErrorHandler.badRequest("Role id is required"));
+      if (!id || !UUID_REGEX.test(id)) {
+        return next(CustomErrorHandler.badRequest("Valid role id is required"));
       }
 
-      if (!name) {
+      if (!name || !name.trim()) {
         return next(CustomErrorHandler.badRequest("Role name is required"));
       }
 
@@ -231,10 +280,22 @@ const roleController = {
         );
       }
 
-      const slug = name.trim().toLowerCase().replace(/\s+/g, "_");
+      if (tenantId && role.tenantId && role.tenantId !== tenantId) {
+        return next(
+          CustomErrorHandler.unAuthorized("Not authorized to modify this role"),
+        );
+      }
+
+      const trimmedName = name.trim();
+      const slug = trimmedName.toLowerCase().replace(/\s+/g, "_");
 
       const duplicateName = await db.query.roles.findFirst({
-        where: eq(roles.name, name),
+        where: and(
+          eq(roles.name, trimmedName),
+          tenantId
+            ? or(eq(roles.tenantId, tenantId), eq(roles.isSystemRole, true))
+            : undefined,
+        ),
       });
 
       if (duplicateName && duplicateName.id !== id) {
@@ -242,7 +303,12 @@ const roleController = {
       }
 
       const duplicateSlug = await db.query.roles.findFirst({
-        where: eq(roles.slug, slug),
+        where: and(
+          eq(roles.slug, slug),
+          tenantId
+            ? or(eq(roles.tenantId, tenantId), eq(roles.isSystemRole, true))
+            : undefined,
+        ),
       });
 
       if (duplicateSlug && duplicateSlug.id !== id) {
@@ -253,9 +319,9 @@ const roleController = {
         await tx
           .update(roles)
           .set({
-            name,
+            name: trimmedName,
             slug,
-            description,
+            description: description?.trim() || null,
           })
           .where(eq(roles.id, id));
 
@@ -270,12 +336,14 @@ const roleController = {
             .from(permissions)
             .where(inArray(permissions.code, permissionCodes));
 
-          await tx.insert(rolePermissions).values(
-            permissionRows.map((permission) => ({
-              roleId: id,
-              permissionId: permission.id,
-            })),
-          );
+          if (permissionRows.length > 0) {
+            await tx.insert(rolePermissions).values(
+              permissionRows.map((permission) => ({
+                roleId: id,
+                permissionId: permission.id,
+              })),
+            );
+          }
         }
       });
 
@@ -283,16 +351,18 @@ const roleController = {
         .status(200)
         .send(ResponseHandler(200, "Role updated successfully"));
     } catch (error) {
-      console.error(error);
+      console.error("Error in updateRole:", error);
       return next(CustomErrorHandler.serverError());
     }
   },
+
   async deleteRole(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
+      const tenantId = req.user?.tenantId;
 
-      if (!id) {
-        return next(CustomErrorHandler.badRequest("Role id is required"));
+      if (!id || !UUID_REGEX.test(id)) {
+        return next(CustomErrorHandler.badRequest("Valid role id is required"));
       }
 
       const role = await db.query.roles.findFirst({
@@ -306,6 +376,12 @@ const roleController = {
       if (role.isSystemRole) {
         return next(
           CustomErrorHandler.badRequest("System roles cannot be deleted"),
+        );
+      }
+
+      if (tenantId && role.tenantId && role.tenantId !== tenantId) {
+        return next(
+          CustomErrorHandler.unAuthorized("Not authorized to delete this role"),
         );
       }
 
@@ -323,7 +399,6 @@ const roleController = {
 
       await db.transaction(async (tx) => {
         await tx.delete(rolePermissions).where(eq(rolePermissions.roleId, id));
-
         await tx.delete(roles).where(eq(roles.id, id));
       });
 
@@ -331,7 +406,7 @@ const roleController = {
         .status(200)
         .send(ResponseHandler(200, "Role deleted successfully"));
     } catch (error) {
-      console.log(error);
+      console.error("Error in deleteRole:", error);
       return next(CustomErrorHandler.serverError());
     }
   },

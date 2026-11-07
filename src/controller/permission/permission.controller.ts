@@ -8,20 +8,29 @@ import CustomErrorHandler from "../../utils/customErrorHandler.js";
 const permissionController = {
   async getPermission(req: Request, res: Response, next: NextFunction) {
     try {
-      const isAdminPortalQuery = req.query.isAdminPortal === "true" || req.query.portal === "admin";
+      const isAdminPortalQuery =
+        req.query.isAdminPortal === "true" || req.query.portal === "admin";
 
       const permissionList = await db.query.permissions.findMany({
         where: eq(permissions.isAdminPortal, isAdminPortalQuery),
         columns: {
+          id: true,
           code: true,
           description: true,
           isAdminPortal: true,
         },
+        orderBy: (permissions, { asc }) => [asc(permissions.code)],
       });
 
       return res
         .status(200)
-        .send(ResponseHandler(200, "Permissions fetched successfully", permissionList));
+        .send(
+          ResponseHandler(
+            200,
+            "Permissions fetched successfully",
+            permissionList,
+          ),
+        );
     } catch (error) {
       console.log(error);
       return next(CustomErrorHandler.serverError());
