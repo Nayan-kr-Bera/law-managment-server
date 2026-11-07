@@ -20,7 +20,7 @@ const UUID_REGEX =
 const roleController = {
   async getRoles(req: Request, res: Response, next: NextFunction) {
     try {
-      const tenantId = req.params.id || req.user?.tenantId;
+      const tenantId = req.user?.tenantId;
 
       if (!tenantId) {
         return next(CustomErrorHandler.badRequest("Tenant id is required"));
@@ -157,9 +157,8 @@ const roleController = {
         name,
         description,
         permissions: permissionCodes,
-        tenantId: bodyTenantId,
       } = req.body;
-      const tenantId = bodyTenantId || req.user?.tenantId;
+      const tenantId = req.user?.tenantId;
       const userId = req.user?.userId;
 
       if (!tenantId) {

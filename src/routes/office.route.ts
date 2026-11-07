@@ -7,7 +7,7 @@ import subscriptionLimitMiddleware from "../middleware/subscriptionLimitMiddlewa
 
 const router = Router();
 
-router.get("/", auth, officeController.getOffices);
+router.get("/", auth, permissionGuard("office.read"), officeController.getOffices);
 router.post(
   "/self-office",
   auth,
@@ -17,10 +17,10 @@ router.post(
   officeController.createOfficeForUserSelf,
 );
 //only name id
-router.get("/names", auth, officeController.getOfficesNames);
-router.get("/:id", auth, officeController.getOffice);
-router.post("/", auth, officeController.createOffice);
-router.put("/:id", auth, officeController.updateOffice);
-router.delete("/:id", auth, officeController.deleteOffice);
+router.get("/names", auth, permissionGuard("office.read"), officeController.getOfficesNames);
+router.get("/:id", auth, permissionGuard("office.read"), officeController.getOffice);
+router.post("/", auth, permissionGuard("office.create"), officeController.createOffice);
+router.put("/:id", auth, permissionGuard("office.update"), officeController.updateOffice);
+router.delete("/:id", auth, permissionGuard("office.delete"), officeController.deleteOffice);
 
 export default router;

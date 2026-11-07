@@ -7,7 +7,7 @@ import subscriptionLimitMiddleware from "../middleware/subscriptionLimitMiddlewa
 
 const router = Router();
 
-router.get("/", auth, advocatesController.getadvocates);
+router.get("/", auth, permissionGuard("advocate.read"), advocatesController.getadvocates);
 router.post(
   "/",
   auth,
@@ -16,12 +16,12 @@ router.post(
   subscriptionLimitMiddleware.checkUserLimit,
   advocatesController.createAdvocate,
 );
-router.put("/reassign-cases", auth, advocatesController.reassignCases);
-router.get("/:id/permissions", auth, advocatesController.getAdvocatePermissions);
-router.put("/:id/permissions", auth, advocatesController.updateAdvocatePermissions);
-router.put("/:id", auth, advocatesController.updateAdvocate);
-router.delete("/:id", auth, advocatesController.deleteAdvocate);
-router.put("/:advocateId/cases", auth, advocatesController.assignCases);
-router.get("/advocate/:advocateId", auth, advocatesController.getAdvocateCases);
-router.get("/for-from", auth, advocatesController.getAdvocatesForFrom);
+router.put("/reassign-cases", auth, permissionGuard("case.assign"), advocatesController.reassignCases);
+router.get("/:id/permissions", auth, permissionGuard("user_permission.manage"), advocatesController.getAdvocatePermissions);
+router.put("/:id/permissions", auth, permissionGuard("user_permission.manage"), advocatesController.updateAdvocatePermissions);
+router.put("/:id", auth, permissionGuard("advocate.update"), advocatesController.updateAdvocate);
+router.delete("/:id", auth, permissionGuard("advocate.delete"), advocatesController.deleteAdvocate);
+router.put("/:advocateId/cases", auth, permissionGuard("case.assign"), advocatesController.assignCases);
+router.get("/advocate/:advocateId", auth, permissionGuard("advocate.read"), advocatesController.getAdvocateCases);
+router.get("/for-from", auth, permissionGuard("advocate.read"), advocatesController.getAdvocatesForFrom);
 export default router;
