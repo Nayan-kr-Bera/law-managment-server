@@ -42,7 +42,6 @@ export async function verifySMTP() {
     return false;
   }
 }
-verifySMTP();
 
 export interface EmailOtpParams {
   id: string;

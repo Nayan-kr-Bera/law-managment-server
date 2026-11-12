@@ -4,6 +4,7 @@ import { config } from "./config/index.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { notFound } from "./middleware/notFound.js";
 import autoAuditMiddleware from "./middleware/auditMiddleware.js";
+import { getRabbitMQHealth } from "./lib/rabbitmq.js";
 import {
   advocateRoutes,
   appointmentRoutes,
@@ -93,75 +94,82 @@ app.use(
 );
 
 /* ---------- Health Check ---------- */
-app.get("/", (req: Request, res: Response) => {
-  res.json({
-    status: "ok",
-    message: "Server is running",
+  app.get(["/", "/api/health"], (_req: Request, res: Response) => {
+    const rabbitMQ = getRabbitMQHealth();
+    res.json({
+      status: "ok",
+      message: "MI Law Management API Server is running",
+      timestamp: new Date().toISOString(),
+      services: {
+        apiServer: "healthy",
+        database: "connected",
+        rabbitmq: rabbitMQ,
+      },
+    });
   });
-});
 
-/* ---------- Global Audit Middleware ---------- */
-app.use("/api", autoAuditMiddleware);
+  /* ---------- Global Audit Middleware ---------- */
+  app.use("/api", autoAuditMiddleware);
 
-/* ---------- Routes ---------- */
+  /* ---------- Routes ---------- */
 
-app.use("/api/auth", authRoutes);
-app.use("/api/mobile/auth", mobileAuthRoutes);
-app.use("/api/password", passwordRoutes);
-app.use("/api/otp", otpRoutes);
-app.use("/api/role", roleRoutes);
-app.use("/api/permission", permissionRoutes);
-app.use("/api/casetypes", caseTypesRoutes);
-app.use("/api/case-types", caseTypesRoutes);
-app.use("/api/companies", companiesRoutes);
-app.use("/api/courts", courtsRoute);
-app.use("/api/custom-fields", custmFieldsRoutes);
-app.use("/api/empanelments", empanelmentsRoutes);
-app.use("/api/police-stations", policementStationRoutes);
-app.use("/api/tags", tagRoutes);
-app.use("/api/under-sections", undersectionRoutes);
-app.use("/api/offices", officeRoutes);
-app.use("/api/clients", clientRoutes);
-app.use("/api/advocates", advocateRoutes);
-app.use("/api/cases", caseRoutes);
-app.use("/api/hearings", hearingRoutes);
-app.use("/api/tenant", tenantRoutes);
-app.use("/api/user", userRoutes);
-app.use("/api/task", taskRoutes);
-app.use("/api/task-comments", taskCommentRoutes);
-app.use("/api/appointments", appointmentRoutes);
-app.use("/api/case-actions", caseActionRoutes);
-app.use("/api/system", systemAlartsRoutes);
-app.use("/api/subscriptionPayment", subscriptionPaymentRoutes);
-app.use("/api/subscription-payments", subscriptionPaymentRoutes);
-app.use("/api/subscriptions", subscriptionPlanRoutes);
-app.use("/api/tenantsubscription", tenantsubscriptionRoutes);
-app.use("/api/tenant-subscription", tenantsubscriptionRoutes);
-app.use("/api/document", documentsRoutes);
-app.use("/api/documentFolder", documentsFolderRoutes);
-app.use("/api/document-folder", documentsFolderRoutes);
-app.use("/api/document-folders", documentsFolderRoutes);
-app.use("/api/reminders", reminderRoutes);
-app.use("/api/client-portal", clientPortalRoutes);
-app.use("/api/support-tickets", supportTicketRoutes);
-app.use("/api/invoices", invoicesRoutes);
-app.use("/api/contact-us", contactUsRoutes);
-app.use("/api/ai", aiDraftRoutes);
-app.use("/api/audit-logs", auditLogRoutes);
-app.use("/api/notifications", notificationRoutes);
-app.use("/api/bare-acts", bareActRoutes);
-app.use("/api/judgment-ai", judgmentAiRoutes);
-app.use("/api/case-precedents", casePrecedentRoutes);
+  app.use("/api/auth", authRoutes);
+  app.use("/api/mobile/auth", mobileAuthRoutes);
+  app.use("/api/password", passwordRoutes);
+  app.use("/api/otp", otpRoutes);
+  app.use("/api/role", roleRoutes);
+  app.use("/api/permission", permissionRoutes);
+  app.use("/api/casetypes", caseTypesRoutes);
+  app.use("/api/case-types", caseTypesRoutes);
+  app.use("/api/companies", companiesRoutes);
+  app.use("/api/courts", courtsRoute);
+  app.use("/api/custom-fields", custmFieldsRoutes);
+  app.use("/api/empanelments", empanelmentsRoutes);
+  app.use("/api/police-stations", policementStationRoutes);
+  app.use("/api/tags", tagRoutes);
+  app.use("/api/under-sections", undersectionRoutes);
+  app.use("/api/offices", officeRoutes);
+  app.use("/api/clients", clientRoutes);
+  app.use("/api/advocates", advocateRoutes);
+  app.use("/api/cases", caseRoutes);
+  app.use("/api/hearings", hearingRoutes);
+  app.use("/api/tenant", tenantRoutes);
+  app.use("/api/user", userRoutes);
+  app.use("/api/task", taskRoutes);
+  app.use("/api/task-comments", taskCommentRoutes);
+  app.use("/api/appointments", appointmentRoutes);
+  app.use("/api/case-actions", caseActionRoutes);
+  app.use("/api/system", systemAlartsRoutes);
+  app.use("/api/subscriptionPayment", subscriptionPaymentRoutes);
+  app.use("/api/subscription-payments", subscriptionPaymentRoutes);
+  app.use("/api/subscriptions", subscriptionPlanRoutes);
+  app.use("/api/tenantsubscription", tenantsubscriptionRoutes);
+  app.use("/api/tenant-subscription", tenantsubscriptionRoutes);
+  app.use("/api/document", documentsRoutes);
+  app.use("/api/documentFolder", documentsFolderRoutes);
+  app.use("/api/document-folder", documentsFolderRoutes);
+  app.use("/api/document-folders", documentsFolderRoutes);
+  app.use("/api/reminders", reminderRoutes);
+  app.use("/api/client-portal", clientPortalRoutes);
+  app.use("/api/support-tickets", supportTicketRoutes);
+  app.use("/api/invoices", invoicesRoutes);
+  app.use("/api/contact-us", contactUsRoutes);
+  app.use("/api/ai", aiDraftRoutes);
+  app.use("/api/audit-logs", auditLogRoutes);
+  app.use("/api/notifications", notificationRoutes);
+  app.use("/api/bare-acts", bareActRoutes);
+  app.use("/api/judgment-ai", judgmentAiRoutes);
+  app.use("/api/case-precedents", casePrecedentRoutes);
 
-/* ---------- Admin Portal Routes ---------- */
+  /* ---------- Admin Portal Routes ---------- */
 
-app.use("/api/admin", adminRoutes);
-app.use("/api/system-stats", adminRoutes);
+  app.use("/api/admin", adminRoutes);
+  app.use("/api/system-stats", adminRoutes);
 
-/* ---------- 404 ---------- */
-app.use(notFound);
+  /* ---------- 404 ---------- */
+  app.use(notFound);
 
-/* ---------- Error Handler ---------- */
-app.use(errorHandler);
+  /* ---------- Error Handler ---------- */
+  app.use(errorHandler);
 
-export default app;
+  export default app;

@@ -3,7 +3,7 @@ import { and, eq, lte } from "drizzle-orm";
 import db from "../db/index.js";
 import { customReminders, clients, cases, user } from "../db/schema/index.js";
 import { publishToQueue, REMINDER_EMAIL_QUEUE } from "../lib/rabbitmq.js";
-import { ReminderEmailJob } from "./reminderEmailWorker.service.js";
+import { ReminderEmailJob, sendReminderEmail } from "./reminderEmailWorker.service.js";
 import { createNotification, createClientNotification } from "./notification.service.js";
 
 function computeNextRunDate(
@@ -154,7 +154,11 @@ export async function processDueReminders(): Promise<void> {
           caseNo: r.caseNumber || null,
         };
 
-        await publishToQueue(REMINDER_EMAIL_QUEUE, emailJob);
+        const queued = await publishToQueue(REMINDER_EMAIL_QUEUE, emailJob);
+        if (!queued) {
+          console.warn(`⚠️ [Reminder Cron] RabbitMQ offline. Dispatching email directly via fallback...`);
+          await sendReminderEmail(emailJob);
+        }
       } else {
         console.warn(`⚠️ Reminder ${r.id} is due but has no recipient email.`);
       }

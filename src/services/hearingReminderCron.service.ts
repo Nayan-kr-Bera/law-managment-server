@@ -11,6 +11,7 @@ import {
   user,
 } from "../db/schema/index.js";
 import { publishToQueue, REMINDER_EMAIL_QUEUE } from "../lib/rabbitmq.js";
+import { sendReminderEmail } from "./reminderEmailWorker.service.js";
 import { generateGoogleCalendarUrl } from "../utils/calendarUtils.js";
 
 export interface HearingReminderEmailJob {
@@ -126,9 +127,8 @@ export async function processUpcomingHearingReminders(): Promise<void> {
 
       const caseTitle = h.caseNumber ? `Case #${h.caseNumber}` : h.title || "Upcoming Case";
       const hearingTitle = `Hearing: ${caseTitle}${h.stage ? ` (${h.stage})` : ""}`;
-      const description = `Case: ${caseTitle}\nStage: ${h.stage || "Scheduled Hearing"}\nCourt/Room: ${
-        h.courtNo || "N/A"
-      }\nDate: ${h.hearingDate}\nRemarks: ${h.remarks || "None"}`;
+      const description = `Case: ${caseTitle}\nStage: ${h.stage || "Scheduled Hearing"}\nCourt/Room: ${h.courtNo || "N/A"
+        }\nDate: ${h.hearingDate}\nRemarks: ${h.remarks || "None"}`;
 
       const googleCalendarUrl = generateGoogleCalendarUrl({
         title: hearingTitle,
@@ -138,9 +138,8 @@ export async function processUpcomingHearingReminders(): Promise<void> {
         guestEmails: recipients,
       });
 
-      const reminderText = `Hearing scheduled on ${h.hearingDate} (${
-        daysRemaining === 0 ? "TODAY" : daysRemaining === 1 ? "Tomorrow" : `In ${daysRemaining} days`
-      }) for ${caseTitle}. Stage: ${h.stage || "Hearing"}. Court: ${h.courtNo || "N/A"}`;
+      const reminderText = `Hearing scheduled on ${h.hearingDate} (${daysRemaining === 0 ? "TODAY" : daysRemaining === 1 ? "Tomorrow" : `In ${daysRemaining} days`
+        }) for ${caseTitle}. Stage: ${h.stage || "Hearing"}. Court: ${h.courtNo || "N/A"}`;
 
       const emailJob: HearingReminderEmailJob = {
         reminderId: h.hearingId,
@@ -159,8 +158,12 @@ export async function processUpcomingHearingReminders(): Promise<void> {
         isHearingReminder: true,
       };
 
-      await publishToQueue(REMINDER_EMAIL_QUEUE, emailJob);
-      console.log(`✉️ Queued 5-day advance hearing reminder for ${recipients.length} recipient(s) [Case #${h.caseNumber}]`);
+      const queued = await publishToQueue(REMINDER_EMAIL_QUEUE, emailJob);
+      if (!queued) {
+        console.warn(`⚠️ [Hearing Reminder Cron] RabbitMQ offline. Dispatching email directly via fallback...`);
+        await sendReminderEmail(emailJob);
+      }
+      console.log(`✉️ Processed 5-day advance hearing reminder for ${recipients.length} recipient(s) [Case #${h.caseNumber}]`);
     }
   } catch (error) {
     console.error("Error processing upcoming hearing reminders in cron:", error);
