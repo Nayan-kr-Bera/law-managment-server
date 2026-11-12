@@ -1225,6 +1225,8 @@ const clientController = {
           id: clients.id,
           firstName: clients.firstName,
           lastName: clients.lastName,
+          email: clients.email,
+          phone: clients.phone,
           companyName: sql<string>`COALESCE(NULLIF(NULLIF(TRIM(${clientProfiles.companyName}), 'N/A'), ''), ${clients.companyName})`,
         })
         .from(clientProfiles)
@@ -1251,6 +1253,9 @@ const clientController = {
           `${client.firstName ?? ""} ${client.lastName ?? ""}`.trim() ||
           client.companyName ||
           "",
+        email: client.email || "",
+        phone: client.phone || "",
+        companyName: client.companyName || "",
       }));
 
       return res.status(200).json({

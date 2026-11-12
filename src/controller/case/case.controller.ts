@@ -831,9 +831,12 @@ const caseController = {
               with: {
                 client: {
                   columns: {
+                    id: true,
                     firstName: true,
                     lastName: true,
                     companyName: true,
+                    email: true,
+                    phone: true,
                   },
                 },
               },
@@ -944,6 +947,22 @@ const caseController = {
             id: true,
             caseNumber: true,
             title: true,
+          },
+          with: {
+            clients: {
+              with: {
+                client: {
+                  columns: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                    companyName: true,
+                    email: true,
+                    phone: true,
+                  },
+                },
+              },
+            },
           },
           limit,
           offset,

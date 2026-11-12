@@ -10,52 +10,134 @@ import {
 } from "../../db/schema/index.js";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 
+function parseTimeString(timeStr?: string | null): { hours: number; minutes: number } {
+  if (!timeStr || typeof timeStr !== "string") {
+    return { hours: 8, minutes: 0 };
+  }
+
+  const str = timeStr.trim();
+  const match = str.match(/^(\d{1,2})(?::(\d{1,2}))?(?::\d{1,2})?\s*(am|pm)?$/i);
+  if (match) {
+    let hours = parseInt(match[1], 10);
+    const minutes = match[2] ? parseInt(match[2], 10) : 0;
+    const meridiem = match[3]?.toUpperCase();
+
+    if (meridiem === "PM" && hours < 12) {
+      hours += 12;
+    } else if (meridiem === "AM" && hours === 12) {
+      hours = 0;
+    }
+
+    const safeHours = Number.isFinite(hours) ? Math.min(Math.max(hours, 0), 23) : 8;
+    const safeMinutes = Number.isFinite(minutes) ? Math.min(Math.max(minutes, 0), 59) : 0;
+    return { hours: safeHours, minutes: safeMinutes };
+  }
+
+  const parts = str.replace(/[^\d:]/g, "").split(":");
+  let hours = parseInt(parts[0], 10);
+  let minutes = parseInt(parts[1], 10);
+  if (isNaN(hours)) hours = 8;
+  if (isNaN(minutes)) minutes = 0;
+  if (/pm/i.test(str) && hours < 12) hours += 12;
+  if (/am/i.test(str) && hours === 12) hours = 0;
+
+  return {
+    hours: Math.min(Math.max(hours, 0), 23),
+    minutes: Math.min(Math.max(minutes, 0), 59),
+  };
+}
+
+function parseDateString(dateStr: string, hours = 0, minutes = 0): Date {
+  if (!dateStr || typeof dateStr !== "string") {
+    const d = new Date();
+    d.setHours(hours, minutes, 0, 0);
+    return d;
+  }
+
+  const ymdMatch = dateStr.trim().match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (ymdMatch) {
+    const year = parseInt(ymdMatch[1], 10);
+    const month = parseInt(ymdMatch[2], 10) - 1;
+    const day = parseInt(ymdMatch[3], 10);
+    const d = new Date(year, month, day, hours, minutes, 0, 0);
+    if (!isNaN(d.getTime())) return d;
+  }
+
+  const d = new Date(dateStr);
+  if (!isNaN(d.getTime())) {
+    d.setHours(hours, minutes, 0, 0);
+    return d;
+  }
+
+  const fallback = new Date();
+  fallback.setHours(hours, minutes, 0, 0);
+  return fallback;
+}
+
 function computeNextRunAt(
   frequency: string,
   startDate: string,
   time?: string | null,
   endDate?: string | null,
 ): Date | null {
-  const timePart = time || "08:00";
-  const [hours, minutes] = timePart.split(":").map(Number);
-
-  const start = new Date(startDate);
-  start.setHours(hours, minutes, 0, 0);
+  const { hours, minutes } = parseTimeString(time);
+  const start = parseDateString(startDate, hours, minutes);
 
   const now = new Date();
-
   let next: Date;
 
-  if (frequency === "Once") {
+  const freq = (frequency || "").toLowerCase();
+
+  if (freq === "once") {
     next = start;
-  } else if (frequency === "Daily") {
-    next = start > now ? start : new Date(now);
-    next.setHours(hours, minutes, 0, 0);
-    if (next <= now) {
-      next.setDate(next.getDate() + 1);
+  } else if (freq === "daily") {
+    if (start > now) {
+      next = start;
+    } else {
+      next = new Date(now);
+      next.setHours(hours, minutes, 0, 0);
+      if (next <= now) {
+        next.setDate(next.getDate() + 1);
+      }
     }
-  } else if (frequency === "Weekly") {
-    next = start > now ? start : new Date(now);
-    next.setHours(hours, minutes, 0, 0);
-    if (next <= now) {
-      next.setDate(next.getDate() + 7);
+  } else if (freq === "weekly") {
+    if (start > now) {
+      next = start;
+    } else {
+      const diffMs = now.getTime() - start.getTime();
+      const diffDays = Math.max(0, Math.floor(diffMs / (24 * 60 * 60 * 1000)));
+      const weeksToAdd = Math.floor(diffDays / 7);
+      next = new Date(start.getTime() + weeksToAdd * 7 * 24 * 60 * 60 * 1000);
+      while (next <= now) {
+        next.setDate(next.getDate() + 7);
+      }
     }
-  } else if (frequency === "Fortnightly") {
-    next = start > now ? start : new Date(now);
-    next.setHours(hours, minutes, 0, 0);
-    if (next <= now) {
-      next.setDate(next.getDate() + 14);
+  } else if (freq === "fortnightly" || freq === "14 days") {
+    if (start > now) {
+      next = start;
+    } else {
+      const diffMs = now.getTime() - start.getTime();
+      const diffDays = Math.max(0, Math.floor(diffMs / (24 * 60 * 60 * 1000)));
+      const fortnightsToAdd = Math.floor(diffDays / 14);
+      next = new Date(start.getTime() + fortnightsToAdd * 14 * 24 * 60 * 60 * 1000);
+      while (next <= now) {
+        next.setDate(next.getDate() + 14);
+      }
     }
   } else {
     return null;
   }
 
   if (endDate) {
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
+    const end = parseDateString(endDate, 23, 59);
+    end.setSeconds(59, 999);
     if (next > end) {
       return null;
     }
+  }
+
+  if (isNaN(next.getTime())) {
+    return null;
   }
 
   return next;
@@ -160,6 +242,7 @@ const reminderController = {
       console.log("✉️ [createReminder] Resolved Client ID:", finalClientId, "Resolved Email:", resolvedEmail);
 
       const nextRunAt = computeNextRunAt(frequency, startDate, time, endDate);
+      const safeTime = time ? String(time).trim().slice(0, 10) : null;
 
       const [created] = await db
         .insert(customReminders)
@@ -171,7 +254,7 @@ const reminderController = {
           frequency,
           startDate,
           endDate: endDate || null,
-          time: time || null,
+          time: safeTime,
           dayOfWeek: dayOfWeek || null,
           email: resolvedEmail,
           contact: contact || null,
@@ -275,28 +358,32 @@ const reminderController = {
         .limit(pageLimit)
         .offset(offset);
 
-      const data = reminderList.map((r) => ({
-        id: r.id,
-        reminder: r.reminder,
-        frequency: r.frequency,
-        startDate: r.startDate,
-        endDate: r.endDate,
-        time: r.time,
-        dayOfWeek: r.dayOfWeek,
-        email: r.email,
-        contact: r.contact,
-        clientId: r.clientId,
-        caseId: r.caseId,
-        isActive: r.isActive,
-        nextRunAt: r.nextRunAt,
-        lastSentAt: r.lastSentAt,
-        createdAt: r.createdAt,
-        client:
-          (r.clientCompanyName ??
-            [r.clientFirstName, r.clientLastName].filter(Boolean).join(" ")) ||
-          null,
-        caseNo: r.caseNumber ?? null,
-      }));
+      const data = reminderList.map((r) => {
+        const personName = [r.clientFirstName, r.clientLastName].filter(Boolean).join(" ").trim();
+        const clientDisplayName = personName || r.clientCompanyName || null;
+
+        return {
+          id: r.id,
+          reminder: r.reminder,
+          frequency: r.frequency,
+          startDate: r.startDate,
+          endDate: r.endDate,
+          time: r.time,
+          dayOfWeek: r.dayOfWeek,
+          email: r.email,
+          contact: r.contact,
+          clientId: r.clientId,
+          caseId: r.caseId,
+          isActive: r.isActive,
+          nextRunAt: r.nextRunAt,
+          lastSentAt: r.lastSentAt,
+          createdAt: r.createdAt,
+          client: clientDisplayName,
+          clientName: personName || null,
+          companyName: r.clientCompanyName || null,
+          caseNo: r.caseNumber ?? null,
+        };
+      });
 
       return res.status(200).json({
         success: true,
@@ -371,7 +458,7 @@ const reminderController = {
       }
 
       let nextRunAt: Date | null | undefined = undefined;
-      if (frequency !== undefined || startDate !== undefined) {
+      if (frequency !== undefined || startDate !== undefined || time !== undefined || endDate !== undefined) {
         const finalFrequency = frequency ?? (await db
           .select({ frequency: customReminders.frequency })
           .from(customReminders)
@@ -386,13 +473,29 @@ const reminderController = {
           .limit(1)
           .then((r) => r[0]?.startDate ?? ""));
 
+        const finalTime = time !== undefined ? time : (await db
+          .select({ time: customReminders.time })
+          .from(customReminders)
+          .where(eq(customReminders.id, id))
+          .limit(1)
+          .then((r) => r[0]?.time ?? null));
+
+        const finalEndDate = endDate !== undefined ? endDate : (await db
+          .select({ endDate: customReminders.endDate })
+          .from(customReminders)
+          .where(eq(customReminders.id, id))
+          .limit(1)
+          .then((r) => r[0]?.endDate ?? null));
+
         nextRunAt = computeNextRunAt(
           finalFrequency,
           finalStartDate,
-          time,
-          endDate,
+          finalTime,
+          finalEndDate,
         );
       }
+
+      const safeTime = time !== undefined ? (time ? String(time).trim().slice(0, 10) : null) : undefined;
 
       const [updated] = await db
         .update(customReminders)
@@ -401,7 +504,7 @@ const reminderController = {
           ...(frequency !== undefined && { frequency }),
           ...(startDate !== undefined && { startDate }),
           ...(endDate !== undefined && { endDate: endDate || null }),
-          ...(time !== undefined && { time: time || null }),
+          ...(safeTime !== undefined && { time: safeTime }),
           ...(dayOfWeek !== undefined && { dayOfWeek: dayOfWeek || null }),
           ...(resolvedEmail !== undefined && { email: resolvedEmail || null }),
           ...(contact !== undefined && { contact: contact || null }),

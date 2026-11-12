@@ -1,26 +1,31 @@
 import cron from "node-cron";
 import { and, eq, lte } from "drizzle-orm";
 import db from "../db/index.js";
-import { customReminders, clients, cases } from "../db/schema/index.js";
+import { customReminders, clients, cases, user } from "../db/schema/index.js";
 import { publishToQueue, REMINDER_EMAIL_QUEUE } from "../lib/rabbitmq.js";
 import { ReminderEmailJob } from "./reminderEmailWorker.service.js";
+import { createNotification, createClientNotification } from "./notification.service.js";
 
 function computeNextRunDate(
   frequency: string,
   currentNextRun: Date,
   endDateStr?: string | null
 ): { nextRun: Date | null; isActive: boolean } {
-  if (frequency === "Once") {
+  const freq = (frequency || "").toLowerCase();
+  if (freq === "once") {
     return { nextRun: null, isActive: false };
   }
 
   const next = new Date(currentNextRun);
+  if (isNaN(next.getTime())) {
+    return { nextRun: null, isActive: false };
+  }
 
-  if (frequency === "Daily") {
+  if (freq === "daily") {
     next.setDate(next.getDate() + 1);
-  } else if (frequency === "Weekly") {
+  } else if (freq === "weekly") {
     next.setDate(next.getDate() + 7);
-  } else if (frequency === "Fortnightly") {
+  } else if (freq === "fortnightly" || freq === "14 days") {
     next.setDate(next.getDate() + 14);
   } else {
     return { nextRun: null, isActive: false };
@@ -29,7 +34,7 @@ function computeNextRunDate(
   if (endDateStr) {
     const end = new Date(endDateStr);
     end.setHours(23, 59, 59, 999);
-    if (next > end) {
+    if (!isNaN(end.getTime()) && next > end) {
       return { nextRun: null, isActive: false };
     }
   }
@@ -48,6 +53,7 @@ export async function processDueReminders(): Promise<void> {
         id: customReminders.id,
         tenantId: customReminders.tenantId,
         officeId: customReminders.officeId,
+        createdBy: customReminders.createdBy,
         reminder: customReminders.reminder,
         frequency: customReminders.frequency,
         startDate: customReminders.startDate,
@@ -61,8 +67,11 @@ export async function processDueReminders(): Promise<void> {
         clientCompanyName: clients.companyName,
         clientEmail: clients.email,
         caseNumber: cases.caseNumber,
+        creatorName: user.name,
+        creatorEmail: user.email,
       })
       .from(customReminders)
+      .leftJoin(user, eq(customReminders.createdBy, user.id))
       .leftJoin(clients, eq(customReminders.clientId, clients.id))
       .leftJoin(cases, eq(customReminders.caseId, cases.id))
       .where(
@@ -82,6 +91,7 @@ export async function processDueReminders(): Promise<void> {
     for (const r of dueReminders) {
       const emailList: string[] = [];
 
+      // 1. Client & custom emails
       if (r.email) {
         const split = r.email.split(",").map((e) => e.trim()).filter(Boolean);
         emailList.push(...split);
@@ -89,10 +99,48 @@ export async function processDueReminders(): Promise<void> {
         emailList.push(r.clientEmail.trim());
       }
 
-      const clientName =
-        r.clientCompanyName ||
-        [r.clientFirstName, r.clientLastName].filter(Boolean).join(" ") ||
-        null;
+      // 2. Two-way dispatch: Creator (Lawyer / Chamber staff) also receives reminder email
+      if (r.creatorEmail) {
+        const cleanCreator = r.creatorEmail.trim().toLowerCase();
+        if (!emailList.some((e) => e.toLowerCase() === cleanCreator)) {
+          emailList.push(r.creatorEmail.trim());
+        }
+      }
+
+      const personName = [r.clientFirstName, r.clientLastName].filter(Boolean).join(" ").trim();
+      const clientName = personName || r.clientCompanyName || null;
+
+      // 3. In-App Notification for Creator (Lawyer / Advocate)
+      if (r.tenantId && r.createdBy) {
+        try {
+          await createNotification({
+            tenantId: r.tenantId,
+            officeId: r.officeId,
+            userId: r.createdBy,
+            title: `Reminder Alert: ${r.reminder.slice(0, 50)}`,
+            body: r.caseNumber ? `[Case ${r.caseNumber}] ${r.reminder}` : r.reminder,
+            type: "reminder",
+          });
+        } catch (err) {
+          console.error(`Failed to send in-app notification to creator ${r.createdBy}:`, err);
+        }
+      }
+
+      // 4. In-App / Portal Notification for Linked Client
+      if (r.clientId) {
+        try {
+          await createClientNotification({
+            tenantId: r.tenantId,
+            officeId: r.officeId,
+            caseId: r.caseId,
+            clientId: r.clientId,
+            title: `Chamber Reminder`,
+            message: r.reminder,
+          });
+        } catch (err) {
+          console.error(`Failed to send client notification to ${r.clientId}:`, err);
+        }
+      }
 
       if (emailList.length > 0) {
         const emailJob: ReminderEmailJob = {
