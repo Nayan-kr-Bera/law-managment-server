@@ -57,6 +57,8 @@ router.post("/support/tickets/:ticketId/csat", clientAuth, clientPortalControlle
 
 router.get("/profile", clientAuth, clientPortalController.getProfile);
 router.put("/profile", clientAuth, clientPortalController.updateProfile);
+router.post("/profile/avatar", clientAuth, upload.single("avatar"), clientPortalController.uploadAvatar);
+router.delete("/profile/avatar", clientAuth, clientPortalController.removeAvatar);
 router.post("/change-password", clientAuth, clientPortalController.changePassword);
 
 router.get("/appointments", clientAuth, clientPortalController.getAppointments);

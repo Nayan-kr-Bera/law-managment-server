@@ -85,6 +85,7 @@ const clientAuthController = {
         lastName: identity.lastName ?? "",
         companyName: identity.companyName ?? "",
         phone: identity.phone ?? "",
+        avatar: identity.avatar ?? null,
       };
 
       if (profiles.length === 0) {
@@ -223,6 +224,7 @@ const clientAuthController = {
           lastName: identity?.lastName ?? "",
           companyName: profile.companyName ?? identity?.companyName ?? "",
           phone: identity?.phone ?? "",
+          avatar: identity?.avatar ?? null,
           profileId: profile.id,
           tenantId: profile.tenantId,
           officeId: profile.officeId,
@@ -353,6 +355,7 @@ const clientAuthController = {
           lastName: identity?.lastName ?? "",
           companyName: profile.companyName ?? identity?.companyName ?? "",
           phone: identity?.phone ?? "",
+          avatar: identity?.avatar ?? null,
           profileId: profile.id,
           tenantId: profile.tenantId,
           officeId: profile.officeId,

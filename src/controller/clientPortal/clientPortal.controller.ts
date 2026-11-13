@@ -27,6 +27,10 @@ import { IClientJwtPayload } from "../../@types/payload.types.js";
 import { notificationEvents, createNotification, createClientNotification } from "../../services/notification.service.js";
 import bcrypt from "bcrypt";
 import { formatCaseRemarks } from "../../services/caseRemarks.service.js";
+import {
+  uploadFileToCloudinary,
+  deleteFileFromCloudinary,
+} from "../../services/cloudinary.service.js";
 
 const clientPortalController = {
   // CLIENT REFRESH TOKEN — verifies client JWT payload and issues scoped token via clientProfiles
@@ -1549,24 +1553,30 @@ const clientPortalController = {
         return next(CustomErrorHandler.unAuthorized("Client identity not found"));
       }
 
-      const { firstName, lastName, phone, companyName, address, city, state, country } = req.body;
+      const { firstName, lastName, phone, companyName, address, city, state, country, avatar } = req.body;
 
       if (!firstName || !firstName.trim()) {
         return next(CustomErrorHandler.badRequest("First name is required"));
       }
 
+      const updateData: Record<string, any> = {
+        firstName: firstName.trim(),
+        lastName: lastName ? lastName.trim() : null,
+        phone: phone ? phone.trim() : null,
+        companyName: companyName ? companyName.trim() : null,
+        address: address ? address.trim() : null,
+        city: city ? city.trim() : null,
+        state: state ? state.trim() : null,
+        country: country ? country.trim() : null,
+      };
+
+      if (avatar !== undefined) {
+        updateData.avatar = avatar ? String(avatar).trim() : null;
+      }
+
       const updated = await db
         .update(clients)
-        .set({
-          firstName: firstName.trim(),
-          lastName: lastName ? lastName.trim() : null,
-          phone: phone ? phone.trim() : null,
-          companyName: companyName ? companyName.trim() : null,
-          address: address ? address.trim() : null,
-          city: city ? city.trim() : null,
-          state: state ? state.trim() : null,
-          country: country ? country.trim() : null,
-        })
+        .set(updateData)
         .where(eq(clients.id, clientId))
         .returning();
 
@@ -1581,6 +1591,105 @@ const clientPortalController = {
       );
     } catch (error) {
       console.error("Update client profile error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  async uploadAvatar(req: Request, res: Response, next: NextFunction) {
+    try {
+      const clientId = req.clientUser?.clientId || req.clientUser?.clientUserId;
+      if (!clientId) {
+        return next(CustomErrorHandler.unAuthorized("Client identity not found"));
+      }
+
+      if (!req.file) {
+        return next(CustomErrorHandler.badRequest("Please select an image file to upload"));
+      }
+
+      const existingClient = await db.query.clients.findFirst({
+        where: eq(clients.id, clientId),
+      });
+
+      if (!existingClient) {
+        return next(CustomErrorHandler.notFound("Client profile not found"));
+      }
+
+      if (existingClient.avatar && existingClient.avatar.includes("cloudinary.com")) {
+        try {
+          await deleteFileFromCloudinary(existingClient.avatar, "image");
+        } catch (delErr) {
+          console.warn("Failed to delete previous client avatar from Cloudinary:", delErr);
+        }
+      }
+
+      const uploaded = await uploadFileToCloudinary({
+        buffer: req.file.buffer,
+        originalName: req.file.originalname,
+        mimetype: req.file.mimetype,
+        folder: "client_avatars",
+      });
+
+      const avatarUrl = uploaded.secureUrl;
+
+      const [updated] = await db
+        .update(clients)
+        .set({ avatar: avatarUrl })
+        .where(eq(clients.id, clientId))
+        .returning();
+
+      const { passwordHash, ...sanitizedClient } = updated;
+
+      return res.status(200).json(
+        ResponseHandler(200, "Profile photo updated successfully", {
+          avatar: avatarUrl,
+          client: sanitizedClient,
+        })
+      );
+    } catch (error) {
+      console.error("Upload client avatar error:", error);
+      return next(CustomErrorHandler.serverError());
+    }
+  },
+
+  async removeAvatar(req: Request, res: Response, next: NextFunction) {
+    try {
+      const clientId = req.clientUser?.clientId || req.clientUser?.clientUserId;
+      if (!clientId) {
+        return next(CustomErrorHandler.unAuthorized("Client identity not found"));
+      }
+
+      const existingClient = await db.query.clients.findFirst({
+        where: eq(clients.id, clientId),
+      });
+
+      if (!existingClient) {
+        return next(CustomErrorHandler.notFound("Client not found"));
+      }
+
+      if (existingClient.avatar && existingClient.avatar.includes("cloudinary.com")) {
+        try {
+          await deleteFileFromCloudinary(existingClient.avatar, "image");
+        } catch (delErr) {
+          console.warn("Failed to delete client avatar from Cloudinary:", delErr);
+        }
+      }
+
+      const [updated] = await db
+        .update(clients)
+        .set({ avatar: null })
+        .where(eq(clients.id, clientId))
+        .returning();
+
+      const { passwordHash, ...sanitizedClient } = updated;
+
+      return res.status(200).json(
+        ResponseHandler(200, "Profile photo removed successfully", {
+          avatar: null,
+          client: sanitizedClient,
+        })
+      );
+    } catch (error) {
+      console.error("Remove client avatar error:", error);
       return next(CustomErrorHandler.serverError());
     }
   },

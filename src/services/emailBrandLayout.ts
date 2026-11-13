@@ -1,6 +1,7 @@
 export const MI_LAW_LOGO_CID = "milawlogo@milaw.in";
 export const MI_LAW_LOGO_URL =
-  "https://res.cloudinary.com/dprkgukne/image/upload/v1793364463/mi-law-brand/mi-law-email-icon-v2.png";
+  "https://res.cloudinary.com/dprkgukne/image/upload/v1794486999/mi-law-brand/mi-law-chamber-email-icon-v3.png";
+// export const MI_LAW_LOGO_URL_OLD = "https://res.cloudinary.com/dprkgukne/image/upload/v1793364463/mi-law-brand/mi-law-email-icon-v2.png";
 
 /**
  * Returns the Nodemailer inline attachment array.
@@ -47,9 +48,9 @@ export function buildMiLawEmailHtml(options: MiLawEmailLayoutOptions): string {
   const year = new Date().getFullYear();
   const resolvedBrandSubtitle = escapeHtml(
     brandSubtitle ||
-      (firmName
-        ? `${firmName} • Legal Workspace`
-        : "Legal Practice Management Suite"),
+    (firmName
+      ? `${firmName} • Legal Workspace`
+      : "Legal Practice Management Suite"),
   );
   const coBrandText = firmName
     ? `${escapeHtml(firmName)} • Powered by MI Law (By Maity Innovations)`
@@ -94,11 +95,10 @@ export function buildMiLawEmailHtml(options: MiLawEmailLayoutOptions): string {
               <h1 style="margin:0 0 6px;color:#0f172a;font-size:22px;font-weight:700;letter-spacing:-0.3px;line-height:1.3;">
                 ${heading}
               </h1>
-              ${
-                subheading
-                  ? `<p style="margin:0;color:#64748b;font-size:14px;line-height:1.5;">${subheading}</p>`
-                  : ""
-              }
+              ${subheading
+      ? `<p style="margin:0;color:#64748b;font-size:14px;line-height:1.5;">${subheading}</p>`
+      : ""
+    }
             </td>
           </tr>
 

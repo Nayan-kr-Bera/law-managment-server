@@ -105,6 +105,7 @@ const clientController = {
           country: clients.country,
           notes: sql<string>`COALESCE(${clientProfiles.notes}, ${clients.notes})`,
           profileStatus: clientProfiles.status,
+          avatar: clients.avatar,
           createdBy: clients.createdBy,
           createdAt: clients.createdAt,
           caseCount: sql<number>`count(distinct ${caseClients.caseId})`,
@@ -161,6 +162,7 @@ const clientController = {
           country: clients.country,
           notes: sql<string>`COALESCE(${clientProfiles.notes}, ${clients.notes})`,
           profileStatus: clientProfiles.status,
+          avatar: clients.avatar,
           createdBy: clients.createdBy,
           createdAt: clients.createdAt,
         })
@@ -623,6 +625,7 @@ const clientController = {
         state,
         country,
         notes,
+        avatar,
       } = req.body;
 
       const { tenantId } = req.user!;
@@ -653,6 +656,7 @@ const clientController = {
           city,
           state,
           country,
+          ...(avatar !== undefined && { avatar: avatar ? String(avatar).trim() : null }),
           // Do NOT update email here — email is the unique identity key
           // Do NOT update companyName/notes on identity — use profile overrides below
         })

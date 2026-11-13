@@ -9,14 +9,6 @@ import { clientUserStatusEnum } from "../enum.js";
 
 /**
  * clients — the GLOBAL identity record for a client.
- *
- * This table stores WHO the person is (name, email, phone).
- * It is NOT scoped to a tenant or office.
- *
- * For per-tenant-office membership, see: client_profiles table.
- *
- * One client identity can exist across multiple law firms (tenants)
- * and offices. When a second law firm adds the same email, only a
  * new client_profiles row is created — this row is reused.
  */
 const clients = pgTable("clients", {
@@ -54,6 +46,8 @@ const clients = pgTable("clients", {
   lastLoginAt: timestamp("last_login_at"),
 
   createdBy: uuid("created_by"),
+
+  avatar: text("avatar"),
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
