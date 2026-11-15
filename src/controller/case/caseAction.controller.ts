@@ -1143,6 +1143,14 @@ const caseActionController = {
 
         companyId,
         empanelmentId,
+        caseTypeId,
+        policeStationId,
+        underSectionId,
+        year,
+        filingDate,
+        registrationDate,
+        caseValue,
+        description,
 
         nextHearingDate,
         stage,
@@ -1218,6 +1226,14 @@ const caseActionController = {
 
           companyId,
           empanelmentId,
+          ...(caseTypeId !== undefined ? { caseTypeId } : {}),
+          ...(policeStationId !== undefined ? { policeStationId } : {}),
+          ...(underSectionId !== undefined ? { underSectionId } : {}),
+          ...(year !== undefined ? { year: year ? Number(year) : null } : {}),
+          ...(filingDate !== undefined ? { filingDate } : {}),
+          ...(registrationDate !== undefined ? { registrationDate } : {}),
+          ...(caseValue !== undefined ? { caseValue: caseValue ? String(caseValue) : null } : {}),
+          ...(description !== undefined ? { description } : {}),
 
           nextHearingDate,
           stage,

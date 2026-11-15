@@ -1016,6 +1016,9 @@ const caseController = {
 
         with: {
           court: true,
+          caseType: true,
+          policeStation: true,
+          underSection: true,
           company: true,
           empanelment: true,
 
@@ -1062,6 +1065,18 @@ const caseController = {
 
         courtId: caseRecord.courtId,
         court: caseRecord.court,
+        caseTypeId: caseRecord.caseTypeId,
+        caseType: caseRecord.caseType,
+        policeStationId: caseRecord.policeStationId,
+        policeStation: caseRecord.policeStation,
+        underSectionId: caseRecord.underSectionId,
+        underSection: caseRecord.underSection,
+        firNumber: caseRecord.firNumber,
+        year: caseRecord.year,
+        filingDate: caseRecord.filingDate,
+        registrationDate: caseRecord.registrationDate,
+        caseValue: caseRecord.caseValue,
+        description: caseRecord.description,
 
         courtNumber: caseRecord.courtNumber,
         judgeName: caseRecord.judgeName,

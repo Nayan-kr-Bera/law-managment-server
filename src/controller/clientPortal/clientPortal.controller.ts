@@ -617,10 +617,10 @@ const clientPortalController = {
           totalPaid >= totalAmount - 0.01 && totalAmount > 0
             ? "paid"
             : totalPaid > 0
-            ? "partially_paid"
-            : inv.status === "paid"
-            ? "paid"
-            : "unpaid";
+              ? "partially_paid"
+              : inv.status === "paid"
+                ? "paid"
+                : "unpaid";
 
         const lineItems = (inv.items || []).map((it) => {
           const isNonGst =
@@ -876,9 +876,8 @@ const clientPortalController = {
           debit: "0",
           credit: String(payAmount),
           description: isPartPayment
-            ? `Part Payment via ${verifiedPaymentMethod} for ${invoiceRecord.invoiceNo}${
-                hearingNotes ? ` (${hearingNotes})` : ""
-              }`
+            ? `Part Payment via ${verifiedPaymentMethod} for ${invoiceRecord.invoiceNo}${hearingNotes ? ` (${hearingNotes})` : ""
+            }`
             : `Settlement Payment via ${verifiedPaymentMethod} for ${invoiceRecord.invoiceNo}`,
           transactionDate: new Date(),
         });
@@ -938,8 +937,8 @@ const clientPortalController = {
       const effectiveTenantId = tenantId || req.clientUser?.tenantId;
       const tenantRecord = effectiveTenantId
         ? await db.query.tenants.findFirst({
-            where: eq(tenants.id, effectiveTenantId),
-          })
+          where: eq(tenants.id, effectiveTenantId),
+        })
         : null;
 
       const ledgerRecords = await db.query.clientLedger.findMany({
@@ -1559,202 +1558,202 @@ const clientPortalController = {
         return next(CustomErrorHandler.badRequest("First name is required"));
       }
 
-      const updateData: Record<string, any> = {
-        firstName: firstName.trim(),
-        lastName: lastName ? lastName.trim() : null,
-        phone: phone ? phone.trim() : null,
-        companyName: companyName ? companyName.trim() : null,
-        address: address ? address.trim() : null,
-        city: city ? city.trim() : null,
-        state: state ? state.trim() : null,
-        country: country ? country.trim() : null,
-      };
+        const updateData: Partial<typeof clients.$inferInsert > = {
+          firstName: firstName.trim(),
+  lastName: lastName ? lastName.trim() : null,
+  phone: phone ? phone.trim() : null,
+  companyName: companyName ? companyName.trim() : null,
+  address: address ? address.trim() : null,
+  city: city ? city.trim() : null,
+  state: state ? state.trim() : null,
+  country: country ? country.trim() : null,
+};
 
-      if (avatar !== undefined) {
-        updateData.avatar = avatar ? String(avatar).trim() : null;
-      }
+if (avatar !== undefined) {
+  updateData.avatar = avatar ? String(avatar).trim() : null;
+}
 
-      const updated = await db
-        .update(clients)
-        .set(updateData)
-        .where(eq(clients.id, clientId))
-        .returning();
+const updated = await db
+  .update(clients)
+  .set(updateData)
+  .where(eq(clients.id, clientId))
+  .returning();
 
-      if (!updated.length) {
-        return next(CustomErrorHandler.notFound("Client not found"));
-      }
+if (!updated.length) {
+  return next(CustomErrorHandler.notFound("Client not found"));
+}
 
-      const { passwordHash, ...sanitizedClient } = updated[0];
+const { passwordHash, ...sanitizedClient } = updated[0];
 
-      return res.status(200).json(
-        ResponseHandler(200, "Profile updated successfully", sanitizedClient)
-      );
+return res.status(200).json(
+  ResponseHandler(200, "Profile updated successfully", sanitizedClient)
+);
     } catch (error) {
-      console.error("Update client profile error:", error);
-      return next(CustomErrorHandler.serverError());
-    }
+  console.error("Update client profile error:", error);
+  return next(CustomErrorHandler.serverError());
+}
   },
 
   async uploadAvatar(req: Request, res: Response, next: NextFunction) {
-    try {
-      const clientId = req.clientUser?.clientId || req.clientUser?.clientUserId;
-      if (!clientId) {
-        return next(CustomErrorHandler.unAuthorized("Client identity not found"));
-      }
-
-      if (!req.file) {
-        return next(CustomErrorHandler.badRequest("Please select an image file to upload"));
-      }
-
-      const existingClient = await db.query.clients.findFirst({
-        where: eq(clients.id, clientId),
-      });
-
-      if (!existingClient) {
-        return next(CustomErrorHandler.notFound("Client profile not found"));
-      }
-
-      if (existingClient.avatar && existingClient.avatar.includes("cloudinary.com")) {
-        try {
-          await deleteFileFromCloudinary(existingClient.avatar, "image");
-        } catch (delErr) {
-          console.warn("Failed to delete previous client avatar from Cloudinary:", delErr);
-        }
-      }
-
-      const uploaded = await uploadFileToCloudinary({
-        buffer: req.file.buffer,
-        originalName: req.file.originalname,
-        mimetype: req.file.mimetype,
-        folder: "client_avatars",
-      });
-
-      const avatarUrl = uploaded.secureUrl;
-
-      const [updated] = await db
-        .update(clients)
-        .set({ avatar: avatarUrl })
-        .where(eq(clients.id, clientId))
-        .returning();
-
-      const { passwordHash, ...sanitizedClient } = updated;
-
-      return res.status(200).json(
-        ResponseHandler(200, "Profile photo updated successfully", {
-          avatar: avatarUrl,
-          client: sanitizedClient,
-        })
-      );
-    } catch (error) {
-      console.error("Upload client avatar error:", error);
-      return next(CustomErrorHandler.serverError());
+  try {
+    const clientId = req.clientUser?.clientId || req.clientUser?.clientUserId;
+    if (!clientId) {
+      return next(CustomErrorHandler.unAuthorized("Client identity not found"));
     }
-  },
+
+    if (!req.file) {
+      return next(CustomErrorHandler.badRequest("Please select an image file to upload"));
+    }
+
+    const existingClient = await db.query.clients.findFirst({
+      where: eq(clients.id, clientId),
+    });
+
+    if (!existingClient) {
+      return next(CustomErrorHandler.notFound("Client profile not found"));
+    }
+
+    if (existingClient.avatar && existingClient.avatar.includes("cloudinary.com")) {
+      try {
+        await deleteFileFromCloudinary(existingClient.avatar, "image");
+      } catch (delErr) {
+        console.warn("Failed to delete previous client avatar from Cloudinary:", delErr);
+      }
+    }
+
+    const uploaded = await uploadFileToCloudinary({
+      buffer: req.file.buffer,
+      originalName: req.file.originalname,
+      mimetype: req.file.mimetype,
+      folder: "client_avatars",
+    });
+
+    const avatarUrl = uploaded.secureUrl;
+
+    const [updated] = await db
+      .update(clients)
+      .set({ avatar: avatarUrl })
+      .where(eq(clients.id, clientId))
+      .returning();
+
+    const { passwordHash, ...sanitizedClient } = updated;
+
+    return res.status(200).json(
+      ResponseHandler(200, "Profile photo updated successfully", {
+        avatar: avatarUrl,
+        client: sanitizedClient,
+      })
+    );
+  } catch (error) {
+    console.error("Upload client avatar error:", error);
+    return next(CustomErrorHandler.serverError());
+  }
+},
 
   async removeAvatar(req: Request, res: Response, next: NextFunction) {
-    try {
-      const clientId = req.clientUser?.clientId || req.clientUser?.clientUserId;
-      if (!clientId) {
-        return next(CustomErrorHandler.unAuthorized("Client identity not found"));
-      }
-
-      const existingClient = await db.query.clients.findFirst({
-        where: eq(clients.id, clientId),
-      });
-
-      if (!existingClient) {
-        return next(CustomErrorHandler.notFound("Client not found"));
-      }
-
-      if (existingClient.avatar && existingClient.avatar.includes("cloudinary.com")) {
-        try {
-          await deleteFileFromCloudinary(existingClient.avatar, "image");
-        } catch (delErr) {
-          console.warn("Failed to delete client avatar from Cloudinary:", delErr);
-        }
-      }
-
-      const [updated] = await db
-        .update(clients)
-        .set({ avatar: null })
-        .where(eq(clients.id, clientId))
-        .returning();
-
-      const { passwordHash, ...sanitizedClient } = updated;
-
-      return res.status(200).json(
-        ResponseHandler(200, "Profile photo removed successfully", {
-          avatar: null,
-          client: sanitizedClient,
-        })
-      );
-    } catch (error) {
-      console.error("Remove client avatar error:", error);
-      return next(CustomErrorHandler.serverError());
+  try {
+    const clientId = req.clientUser?.clientId || req.clientUser?.clientUserId;
+    if (!clientId) {
+      return next(CustomErrorHandler.unAuthorized("Client identity not found"));
     }
-  },
+
+    const existingClient = await db.query.clients.findFirst({
+      where: eq(clients.id, clientId),
+    });
+
+    if (!existingClient) {
+      return next(CustomErrorHandler.notFound("Client not found"));
+    }
+
+    if (existingClient.avatar && existingClient.avatar.includes("cloudinary.com")) {
+      try {
+        await deleteFileFromCloudinary(existingClient.avatar, "image");
+      } catch (delErr) {
+        console.warn("Failed to delete client avatar from Cloudinary:", delErr);
+      }
+    }
+
+    const [updated] = await db
+      .update(clients)
+      .set({ avatar: null })
+      .where(eq(clients.id, clientId))
+      .returning();
+
+    const { passwordHash, ...sanitizedClient } = updated;
+
+    return res.status(200).json(
+      ResponseHandler(200, "Profile photo removed successfully", {
+        avatar: null,
+        client: sanitizedClient,
+      })
+    );
+  } catch (error) {
+    console.error("Remove client avatar error:", error);
+    return next(CustomErrorHandler.serverError());
+  }
+},
 
   async changePassword(req: Request, res: Response, next: NextFunction) {
-    try {
-      const clientId = req.clientUser?.clientId || req.clientUser?.clientUserId;
-      if (!clientId) {
-        return next(CustomErrorHandler.unAuthorized("Client identity not found"));
-      }
-
-      const { currentPassword, newPassword } = req.body;
-
-      if (!currentPassword || !newPassword) {
-        return next(CustomErrorHandler.badRequest("Current password and new password are required"));
-      }
-
-      if (newPassword.length < 6) {
-        return next(CustomErrorHandler.badRequest("New password must be at least 6 characters long"));
-      }
-
-      const client = await db.query.clients.findFirst({
-        where: eq(clients.id, clientId),
-      });
-
-      if (!client || !client.passwordHash) {
-        return next(CustomErrorHandler.unAuthorized("Client account not found"));
-      }
-
-      const isValid = await bcrypt.compare(currentPassword, client.passwordHash);
-      if (!isValid) {
-        return next(CustomErrorHandler.badRequest("Current password does not match"));
-      }
-
-      const newHash = await bcrypt.hash(newPassword, 10);
-
-      await db
-        .update(clients)
-        .set({ passwordHash: newHash })
-        .where(eq(clients.id, clientId));
-
-      return res.status(200).json(
-        ResponseHandler(200, "Password changed successfully")
-      );
-    } catch (error) {
-      console.error("Change client password error:", error);
-      return next(CustomErrorHandler.serverError());
+  try {
+    const clientId = req.clientUser?.clientId || req.clientUser?.clientUserId;
+    if (!clientId) {
+      return next(CustomErrorHandler.unAuthorized("Client identity not found"));
     }
-  },
+
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return next(CustomErrorHandler.badRequest("Current password and new password are required"));
+    }
+
+    if (newPassword.length < 6) {
+      return next(CustomErrorHandler.badRequest("New password must be at least 6 characters long"));
+    }
+
+    const client = await db.query.clients.findFirst({
+      where: eq(clients.id, clientId),
+    });
+
+    if (!client || !client.passwordHash) {
+      return next(CustomErrorHandler.unAuthorized("Client account not found"));
+    }
+
+    const isValid = await bcrypt.compare(currentPassword, client.passwordHash);
+    if (!isValid) {
+      return next(CustomErrorHandler.badRequest("Current password does not match"));
+    }
+
+    const newHash = await bcrypt.hash(newPassword, 10);
+
+    await db
+      .update(clients)
+      .set({ passwordHash: newHash })
+      .where(eq(clients.id, clientId));
+
+    return res.status(200).json(
+      ResponseHandler(200, "Password changed successfully")
+    );
+  } catch (error) {
+    console.error("Change client password error:", error);
+    return next(CustomErrorHandler.serverError());
+  }
+},
 
   async registerPushToken(req: Request, res: Response, next: NextFunction) {
-    try {
-      const clientId = req.clientUser?.clientId;
-      const { pushToken, deviceType } = req.body;
+  try {
+    const clientId = req.clientUser?.clientId;
+    const { pushToken, deviceType } = req.body;
 
-      if (!clientId) {
-        return next(CustomErrorHandler.unAuthorized("Client ID not found"));
-      }
+    if (!clientId) {
+      return next(CustomErrorHandler.unAuthorized("Client ID not found"));
+    }
 
-      if (!pushToken || typeof pushToken !== "string") {
-        return next(CustomErrorHandler.badRequest("Valid pushToken is required"));
-      }
+    if (!pushToken || typeof pushToken !== "string") {
+      return next(CustomErrorHandler.badRequest("Valid pushToken is required"));
+    }
 
-      // Ensure push token table exists
-      await db.execute(sql`
+    // Ensure push token table exists
+    await db.execute(sql`
         CREATE TABLE IF NOT EXISTS client_push_tokens (
           id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
           client_id uuid NOT NULL,
@@ -1765,307 +1764,307 @@ const clientPortalController = {
         );
       `);
 
-      // Upsert push token for this client
-      await db
-        .insert(clientPushTokens)
-        .values({
+    // Upsert push token for this client
+    await db
+      .insert(clientPushTokens)
+      .values({
+        clientId,
+        pushToken,
+        deviceType: deviceType || "android",
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: clientPushTokens.pushToken,
+        set: {
           clientId,
-          pushToken,
           deviceType: deviceType || "android",
           updatedAt: new Date(),
-        })
-        .onConflictDoUpdate({
-          target: clientPushTokens.pushToken,
-          set: {
-            clientId,
-            deviceType: deviceType || "android",
-            updatedAt: new Date(),
-          },
-        });
+        },
+      });
 
-      return res.status(200).json(
-        ResponseHandler(200, "Expo push token registered successfully")
-      );
-    } catch (error) {
-      console.error("Register push token error:", error);
-      return next(CustomErrorHandler.serverError());
-    }
-  },
+    return res.status(200).json(
+      ResponseHandler(200, "Expo push token registered successfully")
+    );
+  } catch (error) {
+    console.error("Register push token error:", error);
+    return next(CustomErrorHandler.serverError());
+  }
+},
 
   // ─── Client Appointments (Book, View, Cancel) ───────────────────────────────
   async getAppointments(req: Request, res: Response, next: NextFunction) {
-    try {
-      const clientId = req.clientUser?.clientId;
-      if (!clientId) {
-        return next(CustomErrorHandler.unAuthorized("Client ID not found"));
-      }
-
-      const tenantId =
-        (req.query.tenantId as string) ||
-        (req.headers["x-tenant-id"] as string) ||
-        req.clientUser?.tenantId ||
-        undefined;
-
-      const conditions = [eq(appointments.clientId, clientId)];
-      if (tenantId) {
-        conditions.push(eq(appointments.tenantId, tenantId));
-      }
-
-      const items = await db.query.appointments.findMany({
-        where: and(...conditions),
-        with: {
-          case: true,
-          office: true,
-          tenant: true,
-          assignee: true,
-        },
-        orderBy: [desc(appointments.date)],
-      });
-
-      const statusCounts = {
-        pending: 0,
-        scheduled: 0,
-        completed: 0,
-        cancelled: 0,
-      };
-
-      const formatted = items.map((item) => {
-        if (
-          item.status === "pending" ||
-          item.status === "scheduled" ||
-          item.status === "completed" ||
-          item.status === "cancelled"
-        ) {
-          statusCounts[item.status] += 1;
-        }
-        return {
-          id: item.id,
-          tenantId: item.tenantId,
-          officeId: item.officeId,
-          clientId: item.clientId,
-          caseId: item.caseId,
-          assignedTo: item.assignedTo,
-          date: item.date,
-          mode: item.mode,
-          purpose: item.purpose,
-          location: item.location,
-          status: item.status,
-          createdAt: item.createdAt,
-          updatedAt: item.updatedAt,
-          caseNumber: item.case?.caseNumber ?? null,
-          caseTitle: item.case?.title ?? null,
-          officeName: item.office?.name ?? null,
-          firmName: item.tenant?.name ?? null,
-          advocateName: item.assignee?.name ?? null,
-          case: item.case
-            ? {
-                id: item.case.id,
-                caseNumber: item.case.caseNumber,
-                title: item.case.title,
-              }
-            : null,
-          office: item.office
-            ? {
-                id: item.office.id,
-                name: item.office.name,
-              }
-            : null,
-          tenant: item.tenant
-            ? {
-                id: item.tenant.id,
-                name: item.tenant.name,
-              }
-            : null,
-          assignee: item.assignee
-            ? {
-                id: item.assignee.id,
-                name: item.assignee.name,
-              }
-            : null,
-        };
-      });
-
-      return res.status(200).json(
-        ResponseHandler(200, "Client appointments fetched successfully", {
-          appointments: formatted,
-          statusCounts,
-        })
-      );
-    } catch (error) {
-      console.error("Get client appointments error:", error);
-      return next(CustomErrorHandler.serverError());
+  try {
+    const clientId = req.clientUser?.clientId;
+    if (!clientId) {
+      return next(CustomErrorHandler.unAuthorized("Client ID not found"));
     }
-  },
+
+    const tenantId =
+      (req.query.tenantId as string) ||
+      (req.headers["x-tenant-id"] as string) ||
+      req.clientUser?.tenantId ||
+      undefined;
+
+    const conditions = [eq(appointments.clientId, clientId)];
+    if (tenantId) {
+      conditions.push(eq(appointments.tenantId, tenantId));
+    }
+
+    const items = await db.query.appointments.findMany({
+      where: and(...conditions),
+      with: {
+        case: true,
+        office: true,
+        tenant: true,
+        assignee: true,
+      },
+      orderBy: [desc(appointments.date)],
+    });
+
+    const statusCounts = {
+      pending: 0,
+      scheduled: 0,
+      completed: 0,
+      cancelled: 0,
+    };
+
+    const formatted = items.map((item) => {
+      if (
+        item.status === "pending" ||
+        item.status === "scheduled" ||
+        item.status === "completed" ||
+        item.status === "cancelled"
+      ) {
+        statusCounts[item.status] += 1;
+      }
+      return {
+        id: item.id,
+        tenantId: item.tenantId,
+        officeId: item.officeId,
+        clientId: item.clientId,
+        caseId: item.caseId,
+        assignedTo: item.assignedTo,
+        date: item.date,
+        mode: item.mode,
+        purpose: item.purpose,
+        location: item.location,
+        status: item.status,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+        caseNumber: item.case?.caseNumber ?? null,
+        caseTitle: item.case?.title ?? null,
+        officeName: item.office?.name ?? null,
+        firmName: item.tenant?.name ?? null,
+        advocateName: item.assignee?.name ?? null,
+        case: item.case
+          ? {
+            id: item.case.id,
+            caseNumber: item.case.caseNumber,
+            title: item.case.title,
+          }
+          : null,
+        office: item.office
+          ? {
+            id: item.office.id,
+            name: item.office.name,
+          }
+          : null,
+        tenant: item.tenant
+          ? {
+            id: item.tenant.id,
+            name: item.tenant.name,
+          }
+          : null,
+        assignee: item.assignee
+          ? {
+            id: item.assignee.id,
+            name: item.assignee.name,
+          }
+          : null,
+      };
+    });
+
+    return res.status(200).json(
+      ResponseHandler(200, "Client appointments fetched successfully", {
+        appointments: formatted,
+        statusCounts,
+      })
+    );
+  } catch (error) {
+    console.error("Get client appointments error:", error);
+    return next(CustomErrorHandler.serverError());
+  }
+},
 
   async createAppointment(req: Request, res: Response, next: NextFunction) {
-    try {
-      const clientId = req.clientUser?.clientId;
-      if (!clientId) {
-        return next(CustomErrorHandler.unAuthorized("Client ID not found"));
-      }
-
-      const { caseId, date, mode, purpose, location } = req.body;
-
-      if (!date) {
-        return next(CustomErrorHandler.badRequest("Appointment date and time are required"));
-      }
-
-      const parsedDate = new Date(date);
-      if (Number.isNaN(parsedDate.getTime())) {
-        return next(CustomErrorHandler.badRequest("Invalid appointment date or time"));
-      }
-
-      const validModes = ["in_person", "online", "phone"] as const;
-      if (!mode || !validModes.includes(mode)) {
-        return next(CustomErrorHandler.badRequest("Valid consultation mode is required"));
-      }
-
-      if (!purpose || !String(purpose).trim()) {
-        return next(CustomErrorHandler.badRequest("Purpose / Agenda is required"));
-      }
-
-      let resolvedTenantId: string | null | undefined =
-        (req.headers["x-tenant-id"] as string) ||
-        req.clientUser?.tenantId ||
-        undefined;
-      let resolvedOfficeId: string | null | undefined =
-        (req.headers["x-office-id"] as string) ||
-        req.clientUser?.officeId ||
-        null;
-
-      if (caseId) {
-        const caseRecord = await db.query.cases.findFirst({
-          where: eq(cases.id, caseId),
-        });
-        if (caseRecord) {
-          resolvedTenantId = caseRecord.tenantId;
-          resolvedOfficeId = caseRecord.officeId ?? resolvedOfficeId;
-        }
-      }
-
-      if (!resolvedTenantId) {
-        const activeProfile = await db.query.clientProfiles.findFirst({
-          where: eq(clientProfiles.identityId, clientId),
-        });
-        if (activeProfile) {
-          resolvedTenantId = activeProfile.tenantId;
-          resolvedOfficeId = activeProfile.officeId ?? resolvedOfficeId;
-        }
-      }
-
-      if (!resolvedTenantId) {
-        return next(CustomErrorHandler.badRequest("Active law firm profile not found for this booking"));
-      }
-
-      const [created] = await db
-        .insert(appointments)
-        .values({
-          tenantId: resolvedTenantId,
-          officeId: resolvedOfficeId || null,
-          clientId,
-          caseId: caseId || null,
-          assignedTo: null,
-          date: parsedDate,
-          mode,
-          purpose: String(purpose).trim(),
-          location: location ? String(location).trim() : null,
-          status: "pending",
-          sendEmail: true,
-          sendWhatsApp: false,
-        })
-        .returning();
-
-      // Notify law firm users / advocates about the new appointment request
-      try {
-        const [clientRow, scopes] = await Promise.all([
-          db.query.clients.findFirst({
-            where: eq(clients.id, clientId),
-            columns: { firstName: true, lastName: true },
-          }),
-          db.query.userScopes.findMany({
-            where: eq(userScopes.tenantId, resolvedTenantId),
-            columns: { userId: true },
-          }),
-        ]);
-
-        const clientName =
-          `${clientRow?.firstName ?? ""} ${clientRow?.lastName ?? ""}`.trim() ||
-          "A client";
-        const formattedDate = parsedDate.toLocaleDateString("en-IN", {
-          day: "2-digit",
-          month: "short",
-          year: "numeric",
-        });
-        const formattedTime = parsedDate.toLocaleTimeString("en-IN", {
-          hour: "2-digit",
-          minute: "2-digit",
-        });
-
-        const uniqueUserIds = Array.from(new Set(scopes.map((s) => s.userId)));
-        for (const uid of uniqueUserIds) {
-          await createNotification({
-            tenantId: resolvedTenantId,
-            officeId: resolvedOfficeId || null,
-            userId: uid,
-            title: `New Appointment Request from ${clientName}`,
-            body: `${clientName} requested a ${mode === "online" ? "Video" : mode === "phone" ? "Phone" : "In-Person"} consultation on ${formattedDate} at ${formattedTime} for "${String(purpose).trim()}".`,
-            type: "appointment",
-          });
-        }
-      } catch (notifErr) {
-        console.error("Failed to notify firm of client appointment request:", notifErr);
-      }
-
-      return res.status(201).json(
-        ResponseHandler(
-          201,
-          "Appointment request submitted! Your legal counsel will review and confirm the schedule.",
-          created
-        )
-      );
-    } catch (error) {
-      console.error("Create client appointment error:", error);
-      return next(CustomErrorHandler.serverError());
+  try {
+    const clientId = req.clientUser?.clientId;
+    if (!clientId) {
+      return next(CustomErrorHandler.unAuthorized("Client ID not found"));
     }
-  },
 
-  async cancelAppointment(req: Request, res: Response, next: NextFunction) {
-    try {
-      const clientId = req.clientUser?.clientId;
-      const { id } = req.params;
+    const { caseId, date, mode, purpose, location } = req.body;
 
-      if (!clientId) {
-        return next(CustomErrorHandler.unAuthorized("Client ID not found"));
+    if (!date) {
+      return next(CustomErrorHandler.badRequest("Appointment date and time are required"));
+    }
+
+    const parsedDate = new Date(date);
+    if (Number.isNaN(parsedDate.getTime())) {
+      return next(CustomErrorHandler.badRequest("Invalid appointment date or time"));
+    }
+
+    const validModes = ["in_person", "online", "phone"] as const;
+    if (!mode || !validModes.includes(mode)) {
+      return next(CustomErrorHandler.badRequest("Valid consultation mode is required"));
+    }
+
+    if (!purpose || !String(purpose).trim()) {
+      return next(CustomErrorHandler.badRequest("Purpose / Agenda is required"));
+    }
+
+    let resolvedTenantId: string | null | undefined =
+      (req.headers["x-tenant-id"] as string) ||
+      req.clientUser?.tenantId ||
+      undefined;
+    let resolvedOfficeId: string | null | undefined =
+      (req.headers["x-office-id"] as string) ||
+      req.clientUser?.officeId ||
+      null;
+
+    if (caseId) {
+      const caseRecord = await db.query.cases.findFirst({
+        where: eq(cases.id, caseId),
+      });
+      if (caseRecord) {
+        resolvedTenantId = caseRecord.tenantId;
+        resolvedOfficeId = caseRecord.officeId ?? resolvedOfficeId;
       }
+    }
 
-      const existing = await db.query.appointments.findFirst({
-        where: and(
-          eq(appointments.id, id),
-          eq(appointments.clientId, clientId)
-        ),
+    if (!resolvedTenantId) {
+      const activeProfile = await db.query.clientProfiles.findFirst({
+        where: eq(clientProfiles.identityId, clientId),
+      });
+      if (activeProfile) {
+        resolvedTenantId = activeProfile.tenantId;
+        resolvedOfficeId = activeProfile.officeId ?? resolvedOfficeId;
+      }
+    }
+
+    if (!resolvedTenantId) {
+      return next(CustomErrorHandler.badRequest("Active law firm profile not found for this booking"));
+    }
+
+    const [created] = await db
+      .insert(appointments)
+      .values({
+        tenantId: resolvedTenantId,
+        officeId: resolvedOfficeId || null,
+        clientId,
+        caseId: caseId || null,
+        assignedTo: null,
+        date: parsedDate,
+        mode,
+        purpose: String(purpose).trim(),
+        location: location ? String(location).trim() : null,
+        status: "pending",
+        sendEmail: true,
+        sendWhatsApp: false,
+      })
+      .returning();
+
+    // Notify law firm users / advocates about the new appointment request
+    try {
+      const [clientRow, scopes] = await Promise.all([
+        db.query.clients.findFirst({
+          where: eq(clients.id, clientId),
+          columns: { firstName: true, lastName: true },
+        }),
+        db.query.userScopes.findMany({
+          where: eq(userScopes.tenantId, resolvedTenantId),
+          columns: { userId: true },
+        }),
+      ]);
+
+      const clientName =
+        `${clientRow?.firstName ?? ""} ${clientRow?.lastName ?? ""}`.trim() ||
+        "A client";
+      const formattedDate = parsedDate.toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      });
+      const formattedTime = parsedDate.toLocaleTimeString("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
       });
 
-      if (!existing) {
-        return next(CustomErrorHandler.notFound("Appointment not found"));
+      const uniqueUserIds = Array.from(new Set(scopes.map((s) => s.userId)));
+      for (const uid of uniqueUserIds) {
+        await createNotification({
+          tenantId: resolvedTenantId,
+          officeId: resolvedOfficeId || null,
+          userId: uid,
+          title: `New Appointment Request from ${clientName}`,
+          body: `${clientName} requested a ${mode === "online" ? "Video" : mode === "phone" ? "Phone" : "In-Person"} consultation on ${formattedDate} at ${formattedTime} for "${String(purpose).trim()}".`,
+          type: "appointment",
+        });
       }
-
-      const [updated] = await db
-        .update(appointments)
-        .set({
-          status: "cancelled",
-          updatedAt: new Date(),
-        })
-        .where(eq(appointments.id, id))
-        .returning();
-
-      return res.status(200).json(
-        ResponseHandler(200, "Appointment cancelled successfully", updated)
-      );
-    } catch (error) {
-      console.error("Cancel client appointment error:", error);
-      return next(CustomErrorHandler.serverError());
+    } catch (notifErr) {
+      console.error("Failed to notify firm of client appointment request:", notifErr);
     }
-  },
+
+    return res.status(201).json(
+      ResponseHandler(
+        201,
+        "Appointment request submitted! Your legal counsel will review and confirm the schedule.",
+        created
+      )
+    );
+  } catch (error) {
+    console.error("Create client appointment error:", error);
+    return next(CustomErrorHandler.serverError());
+  }
+},
+
+  async cancelAppointment(req: Request, res: Response, next: NextFunction) {
+  try {
+    const clientId = req.clientUser?.clientId;
+    const { id } = req.params;
+
+    if (!clientId) {
+      return next(CustomErrorHandler.unAuthorized("Client ID not found"));
+    }
+
+    const existing = await db.query.appointments.findFirst({
+      where: and(
+        eq(appointments.id, id),
+        eq(appointments.clientId, clientId)
+      ),
+    });
+
+    if (!existing) {
+      return next(CustomErrorHandler.notFound("Appointment not found"));
+    }
+
+    const [updated] = await db
+      .update(appointments)
+      .set({
+        status: "cancelled",
+        updatedAt: new Date(),
+      })
+      .where(eq(appointments.id, id))
+      .returning();
+
+    return res.status(200).json(
+      ResponseHandler(200, "Appointment cancelled successfully", updated)
+    );
+  } catch (error) {
+    console.error("Cancel client appointment error:", error);
+    return next(CustomErrorHandler.serverError());
+  }
+},
 };
 
 export default clientPortalController;
