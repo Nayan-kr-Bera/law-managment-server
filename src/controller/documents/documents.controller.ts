@@ -29,6 +29,15 @@ import {
 import ocrQueueService from "../../services/ocrQueue.service.js";
 import razorpayService from "../../services/razorpay.service.js";
 
+function sanitizeCloudinaryFolderSegment(raw: string): string {
+  return raw
+    .trim()
+    .replace(/[\\/]+/g, "-")
+    .replace(/[^a-zA-Z0-9._-]+/g, "_")
+    .replace(/[-_]{2,}/g, "-")
+    .replace(/^[-_]+|[-_]+$/g, "");
+}
+
 const caseDocumentController = {
   async uploadDocument(req: Request, res: Response, next: NextFunction) {
     let uploadedFile: {
@@ -58,15 +67,29 @@ const caseDocumentController = {
         }
       }
 
+      let caseFolderSegment: string | null = null;
       if (caseId) {
         const caseRecord = await db.query.cases.findFirst({
           where: eq(cases.id, caseId),
-          columns: { tenantId: true, officeId: true },
+          columns: {
+            tenantId: true,
+            officeId: true,
+            caseNumber: true,
+            fileNumber: true,
+          },
         });
-        if (caseRecord) {
-          tenantId = caseRecord.tenantId;
-          officeId = caseRecord.officeId;
+        if (!caseRecord) {
+          return next(CustomErrorHandler.notFound("Case not found"));
         }
+        tenantId = caseRecord.tenantId;
+        officeId = caseRecord.officeId;
+
+        const rawCaseIdentifier =
+          caseRecord.caseNumber?.trim() ||
+          caseRecord.fileNumber?.trim() ||
+          `case-${caseId}`;
+        caseFolderSegment =
+          sanitizeCloudinaryFolderSegment(rawCaseIdentifier) || `case-${caseId}`;
       }
 
       if (!tenantId && req.clientUser?.tenantId) {
@@ -92,9 +115,14 @@ const caseDocumentController = {
         return next(CustomErrorHandler.badRequest("File is required"));
       }
 
+      let subFolderSegment: string | null = null;
       if (folderId) {
         const [folder] = await db
-          .select({ id: documentFolders.id, caseId: documentFolders.caseId })
+          .select({
+            id: documentFolders.id,
+            caseId: documentFolders.caseId,
+            name: documentFolders.name,
+          })
           .from(documentFolders)
           .where(
             and(
@@ -114,13 +142,26 @@ const caseDocumentController = {
             ),
           );
         }
+
+        if (folder.name?.trim()) {
+          subFolderSegment =
+            sanitizeCloudinaryFolderSegment(folder.name) || null;
+        }
       }
+
+      const baseCloudinaryFolder = caseFolderSegment
+        ? `tenants/${tenantId}/cases/${caseFolderSegment}`
+        : `tenants/${tenantId}/general`;
+
+      const cloudinaryFolder = subFolderSegment
+        ? `${baseCloudinaryFolder}/${subFolderSegment}`
+        : baseCloudinaryFolder;
 
       const cloudinaryResult = await uploadFileToCloudinary({
         buffer: file.buffer,
         originalName: file.originalname,
         mimetype: file.mimetype,
-        folder: `tenants/${tenantId}/${caseId ? `cases/${caseId}` : "general"}`,
+        folder: cloudinaryFolder,
       });
 
       uploadedFile = {

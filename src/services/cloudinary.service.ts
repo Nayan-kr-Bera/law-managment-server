@@ -24,9 +24,16 @@ export const uploadFileToCloudinary = async ({
 }: UploadFileParams): Promise<CloudinaryUploadResult> => {
   const resourceType: "image" = "image";
 
-  const publicId = originalName
-    .replace(/\.[^/.]+$/, "")
-    .replace(/[^a-zA-Z0-9-_]/g, "-");
+  const cleanBaseName =
+    originalName
+      .replace(/\.[^/.]+$/, "")
+      .replace(/[^a-zA-Z0-9-_]/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 80) || "document";
+
+  const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const publicId = `${cleanBaseName}-${uniqueSuffix}`;
 
   cloudinary.config();
 
@@ -36,6 +43,7 @@ export const uploadFileToCloudinary = async ({
         asset_folder: folder,
         resource_type: resourceType,
         public_id: publicId,
+        overwrite: false,
       },
       (error, result) => {
         if (error) {

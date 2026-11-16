@@ -1,4 +1,4 @@
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { NextFunction, Request, Response } from "express";
 import db from "../../db/index.js";
 import {
@@ -1171,6 +1171,29 @@ const caseActionController = {
         return next(CustomErrorHandler.notFound("Case not found"));
       }
 
+      const normalizedCaseNumber =
+        typeof caseNumber === "string" ? caseNumber.trim() || null : caseNumber;
+
+      if (normalizedCaseNumber) {
+        const duplicateCase = await db.query.cases.findFirst({
+          where: and(
+            eq(cases.tenantId, tenantId),
+            ne(cases.id, id),
+            isNull(cases.deletedAt),
+            sql`LOWER(TRIM(${cases.caseNumber})) = LOWER(${normalizedCaseNumber})`,
+          ),
+          columns: { id: true, caseNumber: true },
+        });
+
+        if (duplicateCase) {
+          return next(
+            CustomErrorHandler.conflict(
+              `Case number "${normalizedCaseNumber}" already exists in your chamber`,
+            ),
+          );
+        }
+      }
+
       let newStatus = existingCase.status;
       let finalIsDecided = isDecided !== undefined ? isDecided : existingCase.isDecided;
       let finalIsAbandoned = isAbandoned !== undefined ? isAbandoned : existingCase.isAbandoned;
@@ -1212,7 +1235,7 @@ const caseActionController = {
         .update(cases)
         .set({
           title,
-          caseNumber,
+          caseNumber: normalizedCaseNumber,
           cnrNumber,
           referenceNumber,
           fileNumber,

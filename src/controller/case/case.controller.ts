@@ -93,6 +93,26 @@ const caseController = {
       const officeId = req.officeId;
       const userId = req.user.userId;
 
+      const normalizedCaseNumber = caseNumber?.trim() || undefined;
+      if (normalizedCaseNumber) {
+        const duplicateCase = await db.query.cases.findFirst({
+          where: and(
+            eq(cases.tenantId, tenantId),
+            isNull(cases.deletedAt),
+            sql`LOWER(TRIM(${cases.caseNumber})) = LOWER(${normalizedCaseNumber})`,
+          ),
+          columns: { id: true, caseNumber: true },
+        });
+
+        if (duplicateCase) {
+          return next(
+            CustomErrorHandler.conflict(
+              `Case number "${normalizedCaseNumber}" already exists in your chamber`,
+            ),
+          );
+        }
+      }
+
       const createdCase = await db.transaction(async (tx) => {
         // Create Case
         const [newCase] = await tx
@@ -108,7 +128,7 @@ const caseController = {
             empanelmentId,
             title,
             description,
-            caseNumber,
+            caseNumber: normalizedCaseNumber,
             cnrNumber,
             referenceNumber,
             fileNumber,
