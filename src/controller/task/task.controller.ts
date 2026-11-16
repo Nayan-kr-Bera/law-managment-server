@@ -7,6 +7,7 @@ import {
   caseClients,
   cases,
   courts,
+  hearings,
   notifications,
   taskComments,
   taskTimelines,
@@ -1125,12 +1126,41 @@ const taskController = {
           : null,
       }));
 
+      // Also query court hearings scheduled for this date
+      const hearingRows = await db
+        .select({
+          id: hearings.id,
+          caseId: hearings.caseId,
+          hearingDate: hearings.hearingDate,
+          stage: hearings.stage,
+          courtNo: hearings.courtNo,
+          remarks: hearings.remarks,
+          title: cases.title,
+          caseNumber: cases.caseNumber,
+          judgeName: cases.judgeName,
+          courtName: courts.name,
+          courtType: courts.courtType,
+        })
+        .from(hearings)
+        .innerJoin(cases, eq(hearings.caseId, cases.id))
+        .leftJoin(courts, eq(cases.courtId, courts.id))
+        .where(
+          and(
+            eq(cases.tenantId, tenantId),
+            eq(cases.officeId, officeId),
+            isNull(cases.deletedAt),
+            sql`${hearings.hearingDate} = ${date}`
+          )
+        )
+        .orderBy(asc(hearings.courtNo), asc(cases.caseNumber));
+
       return res.status(200).json({
         success: true,
         data: {
           date,
           tasks: calendarTasks,
-          total: calendarTasks.length,
+          hearings: hearingRows,
+          total: calendarTasks.length + hearingRows.length,
         },
       });
     } catch (error) {

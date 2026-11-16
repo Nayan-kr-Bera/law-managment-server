@@ -189,6 +189,13 @@ const advocatesController = {
         throw new Error("Invalid role");
       }
 
+      if (role.isSystemRole || role.slug === "tenant_admin" || role.tenantId !== tenantId) {
+        return res.status(400).json({
+          success: false,
+          message: "System Administrator role cannot be assigned to an advocate",
+        });
+      }
+
       const hashedPassword = await bcrypt.hash(password, 10);
 
       const result = await db.transaction(async (tx) => {
@@ -324,6 +331,31 @@ const advocatesController = {
             success: false,
             message: "Phone already exists",
           });
+        }
+      }
+
+      if (roleId) {
+        const currentScope = advocate.user.scopes.find(
+          (s: (typeof advocate.user.scopes)[number]) => s.isDefault,
+        );
+        const currentRoleId = currentScope?.roles?.[0]?.roleId;
+
+        if (roleId !== currentRoleId) {
+          const targetRole = await db.query.roles.findFirst({
+            where: eq(roles.id, roleId),
+          });
+
+          if (
+            !targetRole ||
+            targetRole.isSystemRole ||
+            targetRole.slug === "tenant_admin" ||
+            targetRole.tenantId !== req.user.tenantId
+          ) {
+            return res.status(400).json({
+              success: false,
+              message: "System Administrator role cannot be assigned to an advocate",
+            });
+          }
         }
       }
 

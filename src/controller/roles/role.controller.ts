@@ -26,11 +26,15 @@ const roleController = {
         return next(CustomErrorHandler.badRequest("Tenant id is required"));
       }
 
+      const excludeSystem = req.query.excludeSystem === "true";
+
       const roledata = await db.query.roles.findMany({
-        where: or(
-          eq(roles.tenantId, tenantId),
-          and(eq(roles.isSystemRole, true), eq(roles.slug, "tenant_admin")),
-        ),
+        where: excludeSystem
+          ? and(eq(roles.tenantId, tenantId), eq(roles.isSystemRole, false))
+          : or(
+              eq(roles.tenantId, tenantId),
+              and(eq(roles.isSystemRole, true), eq(roles.slug, "tenant_admin")),
+            ),
         columns: {
           id: true,
           name: true,
