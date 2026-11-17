@@ -1,5 +1,5 @@
 import bcrypt from "bcrypt";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { NextFunction, Request, Response } from "express";
 
 import db from "../../db/index.js";
@@ -37,13 +37,23 @@ const loginController = {
         );
       }
 
+      const normalizedEmail = String(email).trim().toLowerCase();
+
       const clientUser = await db.query.user.findFirst({
-        where: eq(user.email, email),
+        where: sql`LOWER(${user.email}) = ${normalizedEmail}`,
       });
 
       if (!clientUser) {
         return next(
           CustomErrorHandler.wrongCredentials("Email or password is incorrect")
+        );
+      }
+
+      if (!clientUser.password) {
+        return next(
+          CustomErrorHandler.wrongCredentials(
+            "This account uses Google Sign-In. Please continue with Google or use 'Forgot Password' to set a password."
+          )
         );
       }
 
@@ -177,6 +187,7 @@ const loginController = {
         email: clientUser.email,
         roleIds,
         permissions: permissionCodes,
+        isTenantAdmin,
         portal: "tenant",
       };
 
@@ -224,6 +235,8 @@ const loginController = {
             phone_verified: clientUser.isPhoneVerified,
             avatar: clientUser.avatar || null,
             isTenantAdmin,
+            hasPassword: Boolean(clientUser.password),
+            authProvider: clientUser.authProvider,
           },
           roles: roleData,
           permissions: permissionCodes,

@@ -37,7 +37,7 @@ const adminAuthController = {
         where: eq(user.email, email.trim().toLowerCase()),
       });
 
-      if (!adminUser) {
+      if (!adminUser || !adminUser.password) {
         return next(
           CustomErrorHandler.wrongCredentials("Invalid admin credentials")
         );

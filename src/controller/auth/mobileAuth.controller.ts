@@ -1,6 +1,6 @@
 import bcrypt from "bcrypt";
 import crypto from "crypto";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { NextFunction, Request, Response } from "express";
 import { z } from "zod";
 
@@ -11,6 +11,7 @@ import {
   permissions,
   rolePermissions,
   roles,
+  tenants,
   user,
   userPermissions,
   userRoles,
@@ -139,6 +140,7 @@ function signAccessToken(args: {
   email: string;
   roleIds: string[];
   permissions: string[];
+  isTenantAdmin: boolean;
   sid: string;
 }) {
   const payload: IUserJwtPayload = {
@@ -148,6 +150,7 @@ function signAccessToken(args: {
     email: args.email,
     roleIds: args.roleIds,
     permissions: args.permissions,
+    isTenantAdmin: args.isTenantAdmin,
     portal: "tenant",
     sid: args.sid,
   };
@@ -166,12 +169,21 @@ const mobileAuthController = {
         );
       }
       const { email, password, deviceId, deviceName, platform } = parsed.data;
+      const normalizedEmail = email.trim().toLowerCase();
 
       const clientUser = await db.query.user.findFirst({
-        where: eq(user.email, email),
+        where: sql`LOWER(${user.email}) = ${normalizedEmail}`,
       });
       if (!clientUser) {
         return next(CustomErrorHandler.wrongCredentials("Email or password is incorrect"));
+      }
+
+      if (!clientUser.password) {
+        return next(
+          CustomErrorHandler.wrongCredentials(
+            "This account uses Google Sign-In. Please continue with Google or use 'Forgot Password' to set a password.",
+          ),
+        );
       }
 
       const isMatch = await bcrypt.compare(password, clientUser.password);
@@ -201,6 +213,19 @@ const mobileAuthController = {
         return next(
           CustomErrorHandler.notFound("No active law firm workspace found for this account"),
         );
+      }
+
+      if (scope.tenantId) {
+        const tenant = await db.query.tenants.findFirst({
+          where: eq(tenants.id, scope.tenantId),
+        });
+        if (tenant?.slug === "system") {
+          return next(
+            CustomErrorHandler.unAuthorized(
+              "Platform Administrator accounts must log in via the Admin Console.",
+            ),
+          );
+        }
       }
 
       const access = await resolveScopeAccess(scope.id);
@@ -268,6 +293,7 @@ const mobileAuthController = {
         email: clientUser.email,
         roleIds: access.roleIds,
         permissions: access.permissionCodes,
+        isTenantAdmin: access.isTenantAdmin,
         sid: sessionId,
       });
 
@@ -282,6 +308,8 @@ const mobileAuthController = {
             phone_verified: clientUser.isPhoneVerified,
             avatar: clientUser.avatar || null,
             isTenantAdmin: access.isTenantAdmin,
+            hasPassword: Boolean(clientUser.password),
+            authProvider: clientUser.authProvider,
           },
           roles: access.roleData,
           permissions: access.permissionCodes,
@@ -388,6 +416,7 @@ const mobileAuthController = {
         email: clientUser.email,
         roleIds: access.roleIds,
         permissions: access.permissionCodes,
+        isTenantAdmin: access.isTenantAdmin,
         sid: session.id,
       });
 

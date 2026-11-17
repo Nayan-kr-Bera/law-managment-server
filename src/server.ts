@@ -8,11 +8,13 @@ import { startTaskReminderCron } from "./services/taskReminderCron.service.js";
 import { startReminderWorker } from "./services/reminderEmailWorker.service.js";
 import { verifySMTP } from "./services/emailOtp.service.js";
 import { closeRabbitMQ } from "./lib/rabbitmq.js";
+import { ensureAuthSchema } from "./db/ensureAuthSchema.js";
 
 const PORT = config.PORT;
 
 const startServer = async () => {
 	try {
+		await ensureAuthSchema();
 		const httpServer = createServer(app);
 		initSocketServer(httpServer);
 

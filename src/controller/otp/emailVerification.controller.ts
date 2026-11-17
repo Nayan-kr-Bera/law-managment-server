@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Request, NextFunction, Response } from "express";
 import CustomErrorHandler from "../../utils/customErrorHandler.js";
 import emailOtp from "../../db/schema/emailOtp.js";
@@ -18,8 +18,9 @@ const emailVerificationController = {
         );
       }
 
+      const normalizedEmail = String(email).trim().toLowerCase();
       const user = await db.query.user.findFirst({
-        where: eq(users.email, email),
+        where: sql`LOWER(${users.email}) = ${normalizedEmail}`,
       });
 
       if (!user) {
@@ -75,8 +76,9 @@ const emailVerificationController = {
       if (!email) {
         return next(CustomErrorHandler.notFound("Email not found"));
       }
+      const normalizedResetEmail = String(email).trim().toLowerCase();
       const userRes = await db.query.user.findFirst({
-        where: eq(users.email, email),
+        where: sql`LOWER(${users.email}) = ${normalizedResetEmail}`,
       });
       if (!userRes) {
         return next(CustomErrorHandler.notFound("User not found"));

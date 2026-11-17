@@ -70,6 +70,8 @@ const userController = {
           email: true,
           phone: true,
           avatar: true,
+          password: true,
+          authProvider: true,
           isEmailVerified: true,
           isPhoneVerified: true,
           status: true,
@@ -83,10 +85,15 @@ const userController = {
         return next(CustomErrorHandler.notFound("User not found"));
       }
 
+      const { password: rawPassword, ...safeUser } = user;
+
       return res.status(200).json({
         success: true,
         message: "User fetched successfully",
-        data: user,
+        data: {
+          ...safeUser,
+          hasPassword: Boolean(rawPassword),
+        },
       });
     } catch (error) {
       next(error);

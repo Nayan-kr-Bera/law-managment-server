@@ -1,6 +1,6 @@
 import bcrypt from "bcrypt";
 import { NextFunction, Request, Response } from "express";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import users from "../../db/schema/users.js";
 import {
   changePasswordSchema,
@@ -20,10 +20,11 @@ const forgotPasswordController = {
     }
 
     const { email, otp, password } = parsed.data;
+    const normalizedEmail = email.trim().toLowerCase();
 
     try {
       const userRes = await db.query.user.findFirst({
-        where: eq(users.email, email),
+        where: sql`LOWER(${users.email}) = ${normalizedEmail}`,
       });
       if (!userRes) {
         return res.status(404).send(ResponseHandler(404, "User not found"));
@@ -45,11 +46,17 @@ const forgotPasswordController = {
       }
 
       const hashedPassword = await bcrypt.hash(password, Number(config.SALT));
+      const nextAuthProvider = userRes.googleId ? "both" : "local";
 
       await db.transaction(async (tx) => {
         await tx
           .update(users)
-          .set({ password: hashedPassword })
+          .set({
+            password: hashedPassword,
+            authProvider: nextAuthProvider,
+            isEmailVerified: true,
+            updatedAt: new Date(),
+          })
           .where(eq(users.id, userRes.id));
 
         await tx.delete(emailOtp).where(eq(emailOtp.userId, userRes.id));
@@ -81,9 +88,20 @@ const forgotPasswordController = {
         return res.status(404).send(ResponseHandler(404, "User not found"));
       }
 
+      if (!userRes.password) {
+        return res
+          .status(400)
+          .send(
+            ResponseHandler(
+              400,
+              "No password is set on this Google account yet. Please verify with OTP first to set your password.",
+            ),
+          );
+      }
+
       const isMatch = await bcrypt.compare(
         current_password,
-        userRes?.password!,
+        userRes.password,
       );
       if (!isMatch) {
         return res

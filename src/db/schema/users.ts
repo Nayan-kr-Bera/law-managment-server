@@ -22,7 +22,11 @@ const users = pgTable("users", {
 
   phone: varchar("phone", { length: 35 }).unique(),
 
-  password: varchar("password", { length: 255 }).notNull(),
+  password: varchar("password", { length: 255 }),
+
+  googleId: varchar("google_id", { length: 255 }).unique(),
+
+  authProvider: varchar("auth_provider", { length: 30 }).notNull().default("local"),
 
   avatar: varchar("avatar", { length: 255 }),
 
